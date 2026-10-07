@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.20.0
+// @version      1.20.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -292,7 +292,7 @@
       'body.slide-panel-right-open #bsDock{display:flex}',
       '#bsEmoSearch{flex:1;min-width:0;height:24px;padding:0 8px;border:1px solid var(--bs-border,#D9E0E7)!important;border-radius:7px;background:var(--bs-hover,#f3f4f6)!important;color:var(--bs-text,#222)!important;font-size:12px;outline:none}',
       '#bsEmoSearch:focus{border-color:var(--bs-accent,#3b82f6)!important}',
-      '#bsEmoLabel{display:none;flex:1;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
+      '#bsEmoLabel{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
       'body.bs-emo-closed #bsEmoSearch{display:none}',
       'body.bs-emo-closed #bsEmoLabel{display:block}',
       '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:34px;justify-content:flex-end;padding:6px 12px 0 0;outline:none!important;box-shadow:none!important;border:0!important;box-sizing:border-box;border-radius:11px 11px 0 0;background:none!important}',
@@ -805,7 +805,7 @@
     const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
     if (!dock || document.getElementById('bsBotBtn')) return;
     const b = btn('bsBotBtn', '');
-    b.innerHTML = '<span class="bs-bot-ic">🤖</span><b></b>';
+    b.innerHTML = svg('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4.5"/><circle cx="12" cy="3.5" r="1"/><path d="M9 13v1.5M15 13v1.5M2 13v3M22 13v3"/>') + '<b></b>';
     b.addEventListener('click', () => { flip('bsOnlyBot'); paintBotBtn(); });
     dock.insertBefore(b, before);
     paintBotBtn();
@@ -852,8 +852,7 @@
       '#bsMenu .bs-note input:focus{border-color:var(--bs-accent,#3b82f6)}' +
       '#bsRemBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
       '#bsRemBtn b:empty{display:none}' +
-      '#bsBotBtn{position:relative}#bsBotBtn .bs-bot-ic{font-size:14px;line-height:1;filter:grayscale(1);opacity:.7}' +
-      '#bsBotBtn.bs-on{background:var(--bs-accent-soft,rgba(59,130,246,.14))!important}#bsBotBtn.bs-on .bs-bot-ic{filter:none;opacity:1}' +
+      '#bsBotBtn.bs-on{background:var(--bs-accent-soft,rgba(59,130,246,.14))!important;color:var(--bs-accent,#3b82f6)!important}' +
       '#bsBotBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:#d48806;color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
       '#bsBotBtn b:empty{display:none}' +
       'body.bs-only-bot .dialogs_list_item:not(.bs-botchat){display:none!important}' +
@@ -919,14 +918,20 @@
       const n = unans[a.dataset.channelId];
       let b = a.querySelector('.bs-unans');
       if (!n) { if (b) b.remove(); return; }
-      if (!b) { b = document.createElement('span'); b.className = 'bs-unans'; a.appendChild(b); }
+      if (!b) {
+        b = document.createElement('span'); b.className = 'badge bs-unans';
+        const site = a.querySelector('.badge:not(.bs-unans)');
+        if (site) site.after(b); else a.appendChild(b);
+      }
       const txt = n >= 500 ? '500+' : String(n);
       if (b.textContent !== txt) { b.textContent = txt; b.title = 'Неотвеченных: ' + txt; }
     });
   }
   document.addEventListener('DOMContentLoaded', () => {
     const st = document.createElement('style');
-    st.textContent = '.bs-unans{display:inline-block;margin-left:3px;padding:1px 5px;border-radius:9px;font-size:10px;line-height:13px;font-weight:700;background:#f59e0b;color:#fff;vertical-align:1px}';
+    st.textContent = '.channel-tab .badge.bs-unans{background:#f59e0b!important;color:#fff!important}' +
+      '.channel-tab .badge:not(.bs-unans)+.bs-unans{margin-left:-2px}' +
+      'html body .tabs>ul.nav-tabs>li.nav-item:has(.bs-unans){flex:1 0 auto!important}';
     document.head.appendChild(st);
     setTimeout(loadUnans, 2000);
     setInterval(loadUnans, 60000);
