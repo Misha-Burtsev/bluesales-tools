@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.22.1
+// @version      1.22.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1171,10 +1171,10 @@
     st.textContent =
       '#bsLinks{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;align-items:center;gap:6px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
       'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '#bsLinks span{flex:1}#bsLinks b{min-width:18px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
+      '#bsLinks span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#bsLinks{gap:2px!important}#bsLinks b{min-width:18px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
       '#bsLinks i{font-style:normal;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:15px}' +
       '#bsLinks i:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
-      '#bsLinks i[data-a]{font-size:13px;color:var(--bs-muted,#888)}' +
+      '#bsLinks i[data-a]{width:20px;font-size:13px;color:var(--bs-muted,#888)}' +
       '#bsLinks i.bs-plus{background:var(--bs-accent,#3b82f6);color:#fff;font-size:17px}#bsLinks i.bs-plus:hover{filter:brightness(1.1)}';
     document.head.appendChild(st);
     paintLinks(); placeLinks();
@@ -1207,19 +1207,19 @@
     const b = document.createElement('div');
     b.id = 'bsSold';
     b.innerHTML = '<span>Продано</span><b></b>' +
-      [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [1, '1']].map(([v, t]) => '<i data-v="' + v + '" title="+' + String(v).replace('.', ',') + ' курса">+' + t + '</i>').join('') +
-      '<i data-v="0" class="bs-undo" title="Отменить последнее">↶</i>';
-    b.addEventListener('click', ev => { const v = ev.target.dataset.v; if (v != null) soldAdd(+v); });
+      [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [1, '1']].map(([v, t]) => '<i data-v="' + v + '" title="+' + String(v).replace('.', ',') + ' курса">' + t + '</i>').join('') +
+      '<i data-v="0" class="bs-undo" title="Отменить последнее"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></i>';
+    b.addEventListener('click', ev => { const i = ev.target.closest('i'), v = i && i.dataset.v; if (v != null) soldAdd(+v); });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
       '#bsSold{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;display:none;align-items:center;gap:3px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
       'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '#bsSold span{flex:1}#bsSold b{min-width:30px;margin-right:2px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
-      '#bsSold i{font-style:normal;min-width:26px;height:24px;padding:0 2px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:12.5px;' +
+      '#bsSold span{flex:1;white-space:nowrap}#bsSold b{min-width:28px;margin-right:4px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
+      '#bsSold i{font-style:normal;width:24px;height:24px;flex:none;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:13px;' +
       'background:var(--bs-accent-soft,rgba(59,130,246,.12));color:var(--bs-accent,#3b82f6);font-weight:600}' +
       '#bsSold i:hover{background:var(--bs-accent,#3b82f6);color:#fff}' +
-      '#bsSold i.bs-undo{background:none;color:var(--bs-muted,#888);font-weight:400;font-size:14px}#bsSold i.bs-undo:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}';
+      '#bsSold i.bs-undo{width:22px;background:none;color:var(--bs-muted,#888)}#bsSold i.bs-undo:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}';
     document.head.appendChild(st);
     paintSold();
   }
