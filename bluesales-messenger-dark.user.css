@@ -1,12 +1,12 @@
 /* ==UserStyle==
 @name           BlueSales – тёмная тема
 @namespace      bluesales-messenger-dark
-@version        1.6.1
+@version        1.6.2
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger-dark.user.css
 @description    Тёмная тема для мессенджера BlueSales. Работает поверх стиля «BlueSales – новый мессенджер», включается и выключается отдельно. Кнопкой в помощнике (класс bs-light на html) временно выключается.
 ==/UserStyle== */
 
-@-moz-document url-prefix("https://bluesales.ru/app/Messenger") {
+@-moz-document regexp("https://bluesales\\.ru/app/[Mm]essenger.*") {
 
 /* ---------- Цвета: переопределяем переменные основного стиля ---------- */
 html:root:not(.bs-light) {
