@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.14.0
+// @version      1.15.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -328,7 +328,9 @@
 
   // ---------- Таймер «клиент ждёт» в списке чатов ----------
   // Данные берём из ответа dialogs.get, который сайт и так запрашивает: кто написал последним и когда.
-  const dlg = {};   // id диалога → { at: время последнего сообщения клиента (мс) или 0, если ждать некого }
+  const dlg = {};   // id диалога → { at: время последнего сообщения клиента (мс) или 0, если ждать некого; bot: за нас ответил бот }
+  // автоответы бота – сайт считает чат отвеченным, а клиент на самом деле ждёт куратора
+  const BOT_RE = /^\s*Отлично! Куратор скоро подключится/i;
   let tzOffset = '+03:00';
   function onDialogs(json) {
     if (!json || !Array.isArray(json.response)) return;
@@ -336,8 +338,9 @@
     if (m) tzOffset = m[1];
     for (const d of json.response) {
       if (!d || !d.id) continue;
-      const waiting = d.latestMessageUserId === d.customerUserId && !d.isAnswered && d.latestMessageDate;
-      dlg[d.id] = { at: waiting ? Date.parse(d.latestMessageDate + tzOffset) : 0 };
+      const bot = d.latestMessageUserId !== d.customerUserId && BOT_RE.test(d.latestMessage || '');
+      const waiting = (bot || (d.latestMessageUserId === d.customerUserId && !d.isAnswered)) && d.latestMessageDate;
+      dlg[d.id] = { at: waiting ? Date.parse(d.latestMessageDate + tzOffset) : 0, bot };
     }
     paintWait();
   }
@@ -356,10 +359,10 @@
       if (!info || !info.at) { if (b) b.remove(); return; }
       const min = Math.max(0, Math.floor((now - info.at) / 60000));
       if (!b) { b = document.createElement('span'); b.className = 'bs-wait'; time.prepend(b); }
-      const txt = waitText(min), lvl = min >= 1440 ? 'old' : min >= 60 ? 'red' : min >= 10 ? 'amber' : 'new';
+      const txt = (info.bot ? '🤖 ' : '') + waitText(min), lvl = min >= 1440 ? 'old' : min >= 60 ? 'red' : min >= 10 ? 'amber' : 'new';
       if (b.textContent !== txt) b.textContent = txt;
       if (b.dataset.lvl !== lvl) b.dataset.lvl = lvl;
-      b.title = 'Клиент ждёт ответа';
+      b.title = info.bot ? 'Ответил только бот – клиент ждёт куратора' : 'Клиент ждёт ответа';
     });
   }
   function waitInit() {
@@ -495,7 +498,7 @@
       if (r && r.note) html = html.replace(/title="[^"]*"(?=>⏰)/, 'title="' + r.note.replace(/[&"<>]/g, c => '&#' + c.charCodeAt(0) + ';') + '"');
       if (!html) { if (box) box.remove(); return; }
       if (!box) { box = document.createElement('span'); box.className = 'bs-marks'; row.appendChild(box); }
-      if (box.innerHTML !== html) box.innerHTML = html;
+      if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
     });
     paintRemBtn(rem, now);
     // порядок трогаем, только если он неправильный – иначе зациклится с наблюдателем
@@ -1120,10 +1123,16 @@
     document.head.appendChild(st);
   }
   // панель фраз сайт может перерисовать – тогда ставим поле заново и повторяем фильтр
+  let faqT = 0;
   const faqObs = new MutationObserver(() => {
-    if (!document.getElementById('faqContent')) return;
-    if (!document.getElementById('bsFaqSearch')) faqInit();
-    if (document.getElementById('bsFaqSearch').value) faqFilter();
+    if (faqT) return;
+    faqT = setTimeout(() => {
+      faqT = 0;
+      if (!document.getElementById('faqContent')) return;
+      if (!document.getElementById('bsFaqSearch')) faqInit();
+      const inp = document.getElementById('bsFaqSearch');
+      if (inp && inp.value) faqFilter();
+    }, 200);
   });
   document.addEventListener('DOMContentLoaded', () => {
     faqInit();
