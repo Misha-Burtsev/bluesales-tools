@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.12.4
+// @version      1.12.5
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -292,8 +292,9 @@
       '#bsEmoLabel{display:none;flex:1;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
       'body.bs-emo-closed #bsEmoSearch{display:none}',
       'body.bs-emo-closed #bsEmoLabel{display:block}',
-      '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:40px;justify-content:flex-end;padding-right:12px;box-sizing:border-box;border-radius:11px 11px 0 0;background:none!important}',
+      '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:34px;justify-content:flex-end;padding:6px 12px 0 0;outline:none!important;box-shadow:none!important;border:0!important;box-sizing:border-box;border-radius:11px 11px 0 0;background:none!important}',
       '#bsEmoToggle:hover{color:var(--bs-text,#222)}',
+      '#bsEmoToggle:focus,#bsEmoToggle:focus-visible,#bsEmoToggle:active{outline:none!important;box-shadow:none!important}',
       '#bsEmoLabel::after{content:" ▴"}',
       '.bs-dock-btn{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:7px;background:none;color:var(--bs-muted,#888);cursor:pointer;position:relative}',
       '.bs-dock-btn:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}',
