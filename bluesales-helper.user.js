@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.19.0
+// @version      1.20.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -418,7 +418,7 @@
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
-      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); paintSeries(); }, 150);
+      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); paintSeries(); paintUnans(); }, 150);
     })
       .observe(document.body, { childList: true, subtree: true });
     setInterval(paintWait, 30000);
@@ -536,7 +536,7 @@
     setInterval(draftTick, 250);
   }
   // сообщение ушло – черновик этого чата больше не нужен
-  function onSent(id) { if (id) saveDraft(id, ''); markAnswered(id); }
+  function onSent(id) { if (id) saveDraft(id, ''); markAnswered(id); setTimeout(loadUnans, 2500); }
 
   document.addEventListener('DOMContentLoaded', () => { waitInit(); draftInit(); });
 
@@ -898,6 +898,40 @@
     setInterval(checkReminders, 15000);
   }
   document.addEventListener('DOMContentLoaded', marksInit);
+
+  // ---------- Неотвеченные на капсуле канала (оранжевый счётчик рядом с непрочитанными) ----------
+  // Тот же запрос, что у вкладки «Неотвеченные» (readState: 2), только по каждому каналу. Это чтение, чаты не открываются.
+  const unans = {};   // id канала → число неотвеченных
+  let unansBusy = false;
+  async function loadUnans() {
+    if (unansBusy || document.hidden) return;
+    unansBusy = true;
+    try {
+      const chans = (await bsApi('dialogs.getChannels', { customersFilterData: {} })) || [];
+      await Promise.all(chans.map(c => bsApi('dialogs.get', {
+        channelId: c.id, startRowNumber: 1, pageSize: 500, newerThan: new Date(1), readState: 2, customersFilterData: {},
+      }).then(r => { unans[c.id] = (r || []).length; }).catch(() => {})));
+      paintUnans();
+    } catch (e) {} finally { unansBusy = false; }
+  }
+  function paintUnans() {
+    document.querySelectorAll('.channel-tab a[data-channel-id]').forEach(a => {
+      const n = unans[a.dataset.channelId];
+      let b = a.querySelector('.bs-unans');
+      if (!n) { if (b) b.remove(); return; }
+      if (!b) { b = document.createElement('span'); b.className = 'bs-unans'; a.appendChild(b); }
+      const txt = n >= 500 ? '500+' : String(n);
+      if (b.textContent !== txt) { b.textContent = txt; b.title = 'Неотвеченных: ' + txt; }
+    });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    const st = document.createElement('style');
+    st.textContent = '.bs-unans{display:inline-block;margin-left:3px;padding:1px 5px;border-radius:9px;font-size:10px;line-height:13px;font-weight:700;background:#f59e0b;color:#fff;vertical-align:1px}';
+    document.head.appendChild(st);
+    setTimeout(loadUnans, 2000);
+    setInterval(loadUnans, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadUnans(); });
+  });
 
   // ---------- Отчёт за смену ----------
   // Цифры берём со страницы «Клиенты» теми же фильтрами, что и вручную: только чтение, ничего не меняем.
