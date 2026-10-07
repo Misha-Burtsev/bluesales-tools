@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.22.0
+// @version      1.22.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -84,7 +84,7 @@
     if (/dialogs\.sendMessage/.test(text)) {
       const id = curDialog();
       playSent();
-      this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) onSent(id); else failTone(); });
+      this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) { onSent(id); tarSent(text); } else failTone(); });
       this.addEventListener('error', failTone);
     } else if (/dialogs\.get(?!LastUpdated|Channels)/.test(this._bsUrl)) {
       this.addEventListener('load', () => { try { onDialogs(JSON.parse(this.responseText)); } catch (e) {} });
@@ -96,7 +96,7 @@
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const body = init && typeof init.body === 'string' ? init.body : '';
     const p = nativeFetch.apply(this, arguments);
-    if (/dialogs\.sendMessage/.test(url + ' ' + body)) { playSent(); p.then(r => { if (!r.ok) failTone(); }).catch(failTone); }
+    if (/dialogs\.sendMessage/.test(url + ' ' + body)) { playSent(); p.then(r => { if (!r.ok) failTone(); else tarSent(url + ' ' + body); }).catch(failTone); }
     return p;
   };
   // ---------- Смайлики: избранное, поиск, сворачивание ----------
@@ -1287,9 +1287,14 @@
     ta.value = ta.value.slice(0, m.index) + res.t.u + ta.value.slice(m.index + m[0].length);
     ta.setSelectionRange(pos, pos);
     ta.dispatchEvent(new Event('input', { bubbles: true }));
-    // ссылку выставили – сразу +1 в счётчик и отчёт
-    linksSet(linksGet() + 1);
-    tarHint('✓ ' + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : '') + ' · ссылок +1', true);
+    tarHint('✓ ' + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : ''), true);
+  }
+  // сообщение ушло – сколько в нём ссылок из тарифов, столько +1 в «Ссылок выставлено»
+  function tarSent(raw) {
+    let t = raw.replace(/\\\//g, '/');
+    try { t += ' ' + decodeURIComponent(raw.replace(/\+/g, ' ')); } catch (e) {}
+    const n = jget(TAR_KEY, []).filter(x => t.includes(x.u)).length;
+    if (n) linksSet(linksGet() + n);
   }
   function closeTariffs() { const o = document.getElementById('bsTarWrap'); if (o) o.remove(); }
   function openTariffs() {
