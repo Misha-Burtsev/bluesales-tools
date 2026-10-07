@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.18.1
+// @version      1.19.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -358,8 +358,10 @@
     if (m) tzOffset = m[1];
     for (const d of json.response) {
       if (!d || !d.id) continue;
-      const bot = d.latestMessageUserId !== d.customerUserId && BOT_RE.test(d.latestMessage || '');
-      const waiting = (bot || (d.latestMessageUserId === d.customerUserId && !d.isAnswered)) && d.latestMessageDate;
+      // тип 10 – «Пользователь запретил присылать сообщения»: ждать некого
+      const blocked = d.latestMessageType === 10;
+      const bot = !blocked && d.latestMessageUserId !== d.customerUserId && BOT_RE.test(d.latestMessage || '');
+      const waiting = !blocked && (bot || (d.latestMessageUserId === d.customerUserId && !d.isAnswered)) && d.latestMessageDate;
       dlg[d.id] = { at: waiting ? Date.parse(d.latestMessageDate + tzOffset) : 0, bot };
     }
     paintWait();
@@ -383,11 +385,13 @@
       let info = dlg[it.dataset.dialogId];
       const time = it.querySelector('.dialogs_list_time');
       if (!time) return;
+      const prev = it.querySelector('.dialogs_list_preview:not(.bs-draft)'), ptxt = prev ? prev.textContent : '';
+      // заблокировал после нашего ответа – превью свежее данных dialogs.get
+      if (/запретил присылать/.test(ptxt)) info = null;
       // новые чаты сайт добавляет без dialogs.get – тогда бота узнаём по превью «Вы: Отлично! Куратор…»
-      if (!info || !info.at) {
-        const prev = it.querySelector('.dialogs_list_preview:not(.bs-draft)');
-        if (prev && BOT_RE.test(prev.textContent)) info = { at: listTime(time), bot: true };
-      }
+      else if ((!info || !info.at) && BOT_RE.test(ptxt)) info = { at: listTime(time), bot: true };
+      const isBot = !!(info && info.at && info.bot);
+      if (it.classList.contains('bs-botchat') !== isBot) it.classList.toggle('bs-botchat', isBot);
       let b = time.querySelector('.bs-wait');
       if (!info || !info.at) { if (b) b.remove(); return; }
       const min = Math.max(0, Math.floor((now - info.at) / 60000));
@@ -397,6 +401,7 @@
       if (b.dataset.lvl !== lvl) b.dataset.lvl = lvl;
       b.title = info.bot ? 'Ответил только бот – клиент ждёт куратора' : 'Клиент ждёт ответа';
     });
+    paintBotBtn();
   }
   function waitInit() {
     const st = document.createElement('style');
@@ -784,6 +789,28 @@
     dock.insertBefore(b, before);
   }
 
+  // ---------- Фильтр «ответил только бот»: кнопка 🤖 рядом с ⏰ ----------
+  function paintBotBtn() {
+    const b = document.getElementById('bsBotBtn');
+    if (!b) return;
+    const n = document.querySelectorAll('.dialogs_list_item.bs-botchat').length, on = flag('bsOnlyBot');
+    const cnt = b.querySelector('b');
+    if (cnt.textContent !== String(n || '')) cnt.textContent = n || '';
+    b.classList.toggle('bs-on', on);
+    document.body.classList.toggle('bs-only-bot', on);
+    b.title = (on ? 'Показаны только чаты, где ответил бот. Нажми, чтобы показать все' : 'Показать только чаты, где ответил бот') +
+      ' (в загруженном списке: ' + n + ')';
+  }
+  function botBtnInit() {
+    const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
+    if (!dock || document.getElementById('bsBotBtn')) return;
+    const b = btn('bsBotBtn', '');
+    b.innerHTML = '<span class="bs-bot-ic">🤖</span><b></b>';
+    b.addEventListener('click', () => { flip('bsOnlyBot'); paintBotBtn(); });
+    dock.insertBefore(b, before);
+    paintBotBtn();
+  }
+
   function marksInit() {
     const st = document.createElement('style');
     st.textContent =
@@ -825,6 +852,11 @@
       '#bsMenu .bs-note input:focus{border-color:var(--bs-accent,#3b82f6)}' +
       '#bsRemBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
       '#bsRemBtn b:empty{display:none}' +
+      '#bsBotBtn{position:relative}#bsBotBtn .bs-bot-ic{font-size:14px;line-height:1;filter:grayscale(1);opacity:.7}' +
+      '#bsBotBtn.bs-on{background:var(--bs-accent-soft,rgba(59,130,246,.14))!important}#bsBotBtn.bs-on .bs-bot-ic{filter:none;opacity:1}' +
+      '#bsBotBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:#d48806;color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
+      '#bsBotBtn b:empty{display:none}' +
+      'body.bs-only-bot .dialogs_list_item:not(.bs-botchat){display:none!important}' +
       '#bsRemBtn b.bs-due{background:#e04848}' +
       '#bsRemList{position:fixed;right:12px;bottom:54px;z-index:3000;width:260px;max-height:50vh;overflow:auto;box-sizing:border-box;padding:6px;border-radius:12px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
@@ -861,6 +893,7 @@
     }, true);
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closeMenu(); closeRemList(); closePeek(); } });
     remBtnInit();
+    botBtnInit();
     checkReminders();
     setInterval(checkReminders, 15000);
   }
