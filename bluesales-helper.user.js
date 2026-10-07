@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.18.0
+// @version      1.18.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -418,6 +418,19 @@
       .observe(document.body, { childList: true, subtree: true });
     setInterval(paintWait, 30000);
   }
+  // ---------- Капсула канала кликабельна целиком, а не только название ----------
+  document.addEventListener('click', ev => {
+    const tab = ev.target.closest && ev.target.closest('.channel-tab');
+    if (!tab || ev.target.closest('a, .cogwheel')) return;
+    const a = tab.querySelector('a');
+    if (a) a.click();
+  });
+  document.addEventListener('DOMContentLoaded', () => {
+    const st = document.createElement('style');
+    st.textContent = '.channel-tab{cursor:pointer}';
+    document.head.appendChild(st);
+  });
+
   // ---------- Серии: подряд от одного автора за 3 минуты – имя и аватар только у первого ----------
   const msgMin = b => { const m = /(\d{1,2}):(\d{2})/.exec((b.querySelector('.message_time') || {}).textContent || ''); return m ? m[1] * 60 + +m[2] : null; };
   const msgWho = b => {
