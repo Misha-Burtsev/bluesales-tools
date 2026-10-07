@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.13.0
+// @version      1.13.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -786,6 +786,12 @@
     const repDate = () => dateInp.value ? dateInp.value.split('-').reverse().join('.') : ddmm(new Date());
     // текст отчёта можно править руками: тогда он хранится как есть (bsReport.text) и цифры его не перезаписывают
     let edited = saved.text != null;
+    // статус – цветная плашка: синяя с крутилкой, зелёная с галочкой, красная
+    const setStatus = (st, text) => {
+      status.dataset.st = st;
+      status.innerHTML = '<i></i><span></span>';
+      status.querySelector('span').textContent = text;
+    };
     const values = () => { const v = {}; for (const k in inputs) v[k] = inputs[k].value; return v; };
     const update = () => {
       if (!edited) ta.value = repText(values(), (MANAGERS.find(x => x[0] === manager) || [])[2]);
@@ -801,7 +807,7 @@
       if (reset === true) edited = false;
       const t = repDate(), m = manager, my = ++run;
       const who = MANAGERS.find(x => x[0] === m)[1];
-      status.textContent = 'Считаю на странице «Клиенты» (' + t + ', ' + who + ')…';
+      setStatus('load', 'Считаю лиды и чаты – ' + who + ', ' + t.slice(0, 5) + '…');
       box.classList.add('bs-loading');
       try {
         const form = await clientsForm();
@@ -812,10 +818,11 @@
         ]);
         if (my !== run) return;   // пока считали, переключили менеджера
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
-        status.textContent = 'Посчитано: ' + t + ', менеджер – ' + who + '. Остальное впиши руками.';
+        setStatus('ok', 'Посчитано – ' + who + ', ' + t.slice(0, 5) + '. Остальное впиши руками');
+        box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        status.textContent = 'Не получилось посчитать – впиши цифры руками.';
+        setStatus('err', 'Не получилось посчитать – впиши цифры руками');
       }
       box.classList.remove('bs-loading');
       update();
@@ -869,8 +876,22 @@
       '.bs-rep-grid label.bs-auto span::after{content:" · авто";color:var(--bs-accent,#3b82f6)}' +
       '.bs-rep-grid input{padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:transparent;color:var(--bs-text,#222);font-size:13px;outline:none}' +
       '.bs-rep-grid input:focus{border-color:var(--bs-accent,#3b82f6)}' +
-      '#bsRep.bs-loading .bs-auto input{opacity:.4}' +
-      '.bs-rep-status{margin:8px 0;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      // пока считаем – поля «авто» переливаются, кнопки копирования и пересчёта неактивны
+      '#bsRep.bs-loading .bs-auto input{color:transparent!important;border-color:transparent!important;background:linear-gradient(90deg,var(--bs-hover,#eef1f5) 25%,rgba(59,130,246,.18) 50%,var(--bs-hover,#eef1f5) 75%)!important;background-size:200% 100%!important;animation:bsShim 1.1s linear infinite}' +
+      '@keyframes bsShim{from{background-position:100% 0}to{background-position:-100% 0}}' +
+      '#bsRep.bs-loading .bs-rep-btns button[data-a=copy],#bsRep.bs-loading .bs-rep-btns button[data-a=reload]{opacity:.45;pointer-events:none}' +
+      '#bsRep.bs-done .bs-auto input{animation:bsOk 1.4s ease-out}' +
+      '@keyframes bsOk{0%,40%{border-color:#22a55a;box-shadow:0 0 0 3px rgba(34,165,90,.18)}100%{box-shadow:0 0 0 0 rgba(34,165,90,0)}}' +
+      '.bs-rep-status{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:500}' +
+      '.bs-rep-status:empty{display:none}' +
+      '.bs-rep-status[data-st=load]{background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rep-status[data-st=ok]{background:rgba(34,165,90,.13);color:#1f9d55}' +
+      '.bs-rep-status[data-st=err]{background:rgba(229,62,62,.13);color:#e04848}' +
+      '.bs-rep-status i{flex:none;width:16px;height:16px;box-sizing:border-box;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;font-weight:700;color:#fff}' +
+      '.bs-rep-status[data-st=load] i{border:2px solid currentColor;border-right-color:transparent;animation:bsSpin .7s linear infinite}' +
+      '.bs-rep-status[data-st=ok] i{background:#22a55a}.bs-rep-status[data-st=ok] i::before{content:"✓"}' +
+      '.bs-rep-status[data-st=err] i{background:#e04848}.bs-rep-status[data-st=err] i::before{content:"!"}' +
+      '@keyframes bsSpin{to{transform:rotate(360deg)}}' +
       '#bsRep textarea{width:100%;box-sizing:border-box;height:210px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12.5px/1.4 inherit}' +
       '.bs-rep-btns{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:10px}' +
       '.bs-rep-btns button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);cursor:pointer;font-size:13px}' +
