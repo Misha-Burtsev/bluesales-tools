@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.21.0
+// @version      1.22.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -422,7 +422,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -951,7 +951,7 @@
       'новые лиды - ' + n('leads') + ' (' + n('blocks') + ' ' + plural(n('blocks'), 'блок', 'блока', 'блоков') + ')\n' +
       'чатов в работе - ' + n('chats') + '\n' +
       'выставлено ссылок - ' + n('links') + '\n\n' +
-      'купили (кол-во программ) - ' + n('bought') + '\n\n' +
+      'купили (кол-во программ) - ' + String(n('bought')).replace('.', ',') + '\n\n' +
       'сумма продаж за сегодня - ' + n('sum') + ' рублей\n\n' +
       'Работу ' + (fem ? 'завершила' : 'завершил') + '\n\n' +
       n('rem') + ' ' + plural(n('rem'), 'напоминание', 'напоминания', 'напоминаний');
@@ -1122,6 +1122,8 @@
     const on = document.body.classList.contains('slide-panel-right-open');
     const tog = document.getElementById('bsEmoToggle');
     b.style.display = on ? 'flex' : 'none';
+    const sd = document.getElementById('bsSold');
+    if (sd) sd.style.display = b.style.display;
     if (tog) tog.style.display = 'none';
     if (!on) return;
     // поле ввода скрыто (клиент заблокировал и т.п.) – плашку смайликов не показываем
@@ -1133,6 +1135,8 @@
     const bar = document.getElementById('bsEmoBar');
     const r = (open ? sel : can && bar ? bar : dock).getBoundingClientRect();
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
+    const sold = document.getElementById('bsSold');
+    if (sold) sold.style.bottom = (innerHeight - b.getBoundingClientRect().top + 6) + 'px';
     if (open && tog) {
       tog.style.display = 'flex';
       // вся верхняя полоса панели – кнопка сворачивания, стрелка справа
@@ -1160,8 +1164,8 @@
     if (document.getElementById('bsLinks')) return;
     const b = document.createElement('div');
     b.id = 'bsLinks';
-    b.innerHTML = '<span>Ссылок выставлено</span><i data-d="-1" title="Убрать одну">−</i><b></b><i data-d="1" class="bs-plus" title="Выставил ссылку">+</i>';
-    b.addEventListener('click', ev => { const d = +ev.target.dataset.d; if (d) linksSet(linksGet() + d); });
+    b.innerHTML = '<span>Ссылок выставлено</span><i data-a="tar" title="Тарифы и сокращения {…}">☰</i><i data-d="-1" title="Убрать одну">−</i><b></b><i data-d="1" class="bs-plus" title="Выставил ссылку">+</i>';
+    b.addEventListener('click', ev => { const d = +ev.target.dataset.d; if (d) linksSet(linksGet() + d); else if (ev.target.dataset.a === 'tar') openTariffs(); });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
@@ -1170,6 +1174,7 @@
       '#bsLinks span{flex:1}#bsLinks b{min-width:18px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
       '#bsLinks i{font-style:normal;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:15px}' +
       '#bsLinks i:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
+      '#bsLinks i[data-a]{font-size:13px;color:var(--bs-muted,#888)}' +
       '#bsLinks i.bs-plus{background:var(--bs-accent,#3b82f6);color:#fff;font-size:17px}#bsLinks i.bs-plus:hover{filter:brightness(1.1)}';
     document.head.appendChild(st);
     paintLinks(); placeLinks();
@@ -1177,9 +1182,159 @@
     document.getElementById('bsEmoLabel')?.addEventListener('click', () => setTimeout(placeLinks));
     addEventListener('resize', placeLinks);
     // панель смайликов сворачивается и появляется – просто переставляем раз в секунду, это дёшево
-    setInterval(() => { placeLinks(); paintLinks(); homeInit(); }, 1000);
+    setInterval(() => { placeLinks(); paintLinks(); paintSold(); homeInit(); }, 1000);
   }
   document.addEventListener('DOMContentLoaded', linksInit);
+
+  // ---------- Счётчик проданных курсов ----------
+  // Жмётся руками в момент продажи: ¼, ⅓, ½ или целый курс. Число идёт в отчёт («Купили (программ)»).
+  const r2 = x => Math.round(x * 100) / 100;
+  function soldGet() { return +repSaved().bought || 0; }
+  function soldAdd(d) {
+    const r = repSaved(), log = r.soldLog || [];
+    if (d) log.push(d); else if (log.length) d = -log.pop(); else return;
+    jset(REP_KEY, Object.assign(r, { bought: Math.max(0, r2((+r.bought || 0) + d)), soldLog: log }));
+    paintSold();
+    const i = document.querySelector('#bsRep input[data-k="bought"]');
+    if (i) { i.value = soldGet(); i.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  function paintSold() {
+    const b = document.getElementById('bsSold');
+    if (b) b.querySelector('b').textContent = String(soldGet()).replace('.', ',');
+  }
+  function soldInit() {
+    if (document.getElementById('bsSold')) return;
+    const b = document.createElement('div');
+    b.id = 'bsSold';
+    b.innerHTML = '<span>Продано</span><b></b>' +
+      [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [1, '1']].map(([v, t]) => '<i data-v="' + v + '" title="+' + String(v).replace('.', ',') + ' курса">+' + t + '</i>').join('') +
+      '<i data-v="0" class="bs-undo" title="Отменить последнее">↶</i>';
+    b.addEventListener('click', ev => { const v = ev.target.dataset.v; if (v != null) soldAdd(+v); });
+    document.body.appendChild(b);
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsSold{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;display:none;align-items:center;gap:3px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
+      'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
+      '#bsSold span{flex:1}#bsSold b{min-width:30px;margin-right:2px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
+      '#bsSold i{font-style:normal;min-width:26px;height:24px;padding:0 2px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:12.5px;' +
+      'background:var(--bs-accent-soft,rgba(59,130,246,.12));color:var(--bs-accent,#3b82f6);font-weight:600}' +
+      '#bsSold i:hover{background:var(--bs-accent,#3b82f6);color:#fff}' +
+      '#bsSold i.bs-undo{background:none;color:var(--bs-muted,#888);font-weight:400;font-size:14px}#bsSold i.bs-undo:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}';
+    document.head.appendChild(st);
+    paintSold();
+  }
+  document.addEventListener('DOMContentLoaded', soldInit);
+
+  // ---------- Тарифы: {мат кур год} в поле ввода превращается в ссылку ----------
+  // Ссылки хранятся только в этом браузере (localStorage bsTariffs), в репозиторий не попадают.
+  // Строка тарифа: «слова | ссылка | цена». Слова и сокращение сводятся к одним меткам:
+  const TAR_KEY = 'bsTariffs';
+  const TAR_WORDS = [['мат', ['мат', 'проф']], ['баз', ['баз']], ['рус', ['рус']], ['комбо', ['комб']],
+    ['бронь', ['брон', 'мес', 'сен']], ['год', ['год']], ['кур', ['кур']], ['сам', ['сам', 'бк']]];
+  const TAR_SKIP = ['с', 'и', 'на', 'егэ', 'курс', 'тариф', 'ссылка'];
+  // текст → набор меток; unknown – слова, которых нет в словаре
+  function tarTags(text) {
+    const t = norm(text).replace(/без\s*кур\S*/g, 'сам').replace(/мат\S*\s*\+\s*рус\S*|рус\S*\s*\+\s*мат\S*/g, 'комбо');
+    const tags = new Set(), unknown = [];
+    t.split(/[\s,.;:+/]+/).filter(Boolean).forEach(w => {
+      if (TAR_SKIP.includes(w)) return;
+      const hit = TAR_WORDS.find(([, stems]) => stems.some(x => w.startsWith(x)));
+      if (hit) tags.add(hit[0]); else unknown.push(w);
+    });
+    // и математика, и русский – это комбо
+    if (tags.has('мат') && tags.has('рус')) { tags.delete('мат'); tags.delete('рус'); tags.add('комбо'); }
+    // «базовая математика» – это база
+    if (tags.has('баз')) tags.delete('мат');
+    return { tags, unknown };
+  }
+  function tarParse(text) {
+    return text.split('\n').map(l => l.split('|').map(x => x.trim())).filter(c => c.length >= 2 && /^https?:\/\//.test(c[1]))
+      .map(([k, u, p]) => ({ k, u, p: p || '' }));
+  }
+  const tarText = list => list.map(t => t.k + ' | ' + t.u + (t.p ? ' | ' + t.p : '')).join('\n');
+  function tarFind(query) {
+    const { tags, unknown } = tarTags(query);
+    if (unknown.length) return { err: 'Не понял: ' + unknown.join(', ') };
+    if (!tags.size) return { err: 'Пустое сокращение' };
+    const list = jget(TAR_KEY, []);
+    if (!list.length) return { err: 'Тарифов нет – добавь их через ☰ на плашке «Ссылок выставлено»' };
+    const found = list.filter(t => { const own = tarTags(t.k).tags; return [...tags].every(x => own.has(x)); });
+    if (found.length === 1) return { t: found[0] };
+    if (!found.length) return { err: 'Нет такого тарифа: ' + [...tags].join(' ') };
+    return { err: 'Подходит несколько: ' + found.map(t => t.k).join(' · ') + ' – уточни' };
+  }
+  function tarHint(text, ok) {
+    let h = document.getElementById('bsTarHint');
+    if (!h) { h = document.createElement('div'); h.id = 'bsTarHint'; document.body.appendChild(h); }
+    const box = document.querySelector('.send_message_box');
+    const r = box ? box.getBoundingClientRect() : { left: 20, top: innerHeight - 60 };
+    h.style.left = r.left + 'px';
+    h.style.bottom = (innerHeight - r.top + 6) + 'px';
+    h.textContent = text;
+    h.className = ok ? 'bs-ok' : '';
+    h.style.display = 'block';
+    clearTimeout(h._t);
+    h._t = setTimeout(() => { h.style.display = 'none'; }, ok ? 2500 : 5000);
+  }
+  function tarOnInput(ev) {
+    const ta = ev.target;
+    if (!ta.matches || !ta.matches('textarea.send_message_textarea')) return;
+    const m = /\{([^{}\n]*)\}/.exec(ta.value);
+    if (!m) return;
+    const res = tarFind(m[1]);
+    if (!res.t) return tarHint(res.err);
+    const pos = m.index + res.t.u.length;
+    ta.value = ta.value.slice(0, m.index) + res.t.u + ta.value.slice(m.index + m[0].length);
+    ta.setSelectionRange(pos, pos);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    // ссылку выставили – сразу +1 в счётчик и отчёт
+    linksSet(linksGet() + 1);
+    tarHint('✓ ' + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : '') + ' · ссылок +1', true);
+  }
+  function closeTariffs() { const o = document.getElementById('bsTarWrap'); if (o) o.remove(); }
+  function openTariffs() {
+    if (document.getElementById('bsTarWrap')) return closeTariffs();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsTarWrap';
+    wrap.innerHTML =
+      '<div id="bsTar"><div class="bs-rep-head"><b>Тарифы</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-tar-help">Строка: <code>слова | ссылка | цена</code>. В сообщении пиши сокращение в фигурных скобках – после «}» оно станет ссылкой.<br>' +
+      'Слова: мат (проф), баз, рус, комбо (или мат+рус) · бронь (месяц) / год · кур / сам (без кур). Порядок любой, например <code>{рус сам год}</code>.<br>' +
+      'Хранится только в этом браузере.</div>' +
+      '<textarea spellcheck="false" placeholder="мат бронь сам | https://… | 4990"></textarea>' +
+      '<div class="bs-rep-btns"><span class="bs-tar-st"></span><button data-a="save" class="bs-main">Сохранить</button></div></div>';
+    document.body.appendChild(wrap);
+    const ta = wrap.querySelector('textarea'), st = wrap.querySelector('.bs-tar-st');
+    ta.value = tarText(jget(TAR_KEY, []));
+    wrap.addEventListener('click', ev => {
+      if (ev.target.tagName === 'I') closeTariffs();
+      else if (ev.target.dataset.a === 'save') {
+        const list = tarParse(ta.value);
+        jset(TAR_KEY, list);
+        ta.value = tarText(list);
+        st.textContent = 'Сохранено: ' + list.length;
+      }
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeTariffs(); });
+    ta.focus();
+  }
+  function tariffsInit() {
+    document.addEventListener('input', tarOnInput, true);
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeTariffs(); });
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsTarWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
+      '#bsTar{width:640px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
+      '.bs-tar-help{font-size:12px;line-height:1.5;color:var(--bs-muted,#888);margin-bottom:8px}' +
+      '.bs-tar-help code{padding:0 4px;border-radius:4px;background:var(--bs-hover,#f3f5f8);color:var(--bs-text,#222)}' +
+      '#bsTar textarea{width:100%;box-sizing:border-box;height:300px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre;overflow-wrap:normal}' +
+      '.bs-tar-st{margin-right:auto;align-self:center;font-size:12px;color:#1f9d55}' +
+      '#bsTarHint{position:fixed;z-index:2500;display:none;max-width:520px;padding:6px 10px;border-radius:9px;font-size:12.5px;background:rgba(229,62,62,.95);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}' +
+      '#bsTarHint.bs-ok{background:rgba(34,165,90,.95)}';
+    document.head.appendChild(st);
+  }
+  document.addEventListener('DOMContentLoaded', tariffsInit);
 
   // ---------- Кнопка BlueSales над аккаунтом – на главную CRM ----------
   function homeInit() {
