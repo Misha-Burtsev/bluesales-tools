@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.16.0
+// @version      1.16.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -75,14 +75,17 @@
   };
   window.Audio.prototype = NativeAudio.prototype;
 
-  // ---------- Отправка: запрос dialogs.sendMessage прошёл успешно ----------
+  // ---------- Отправка: звук сразу при отправке, при ошибке – низкий сигнал ----------
+  const failTone = () => { tone(330, 0, 0.18, 'triangle', 0.6); tone(220, 0.18, 0.3, 'triangle', 0.6); };
   const send = XMLHttpRequest.prototype.send, open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (m, url) { this._bsUrl = String(url || ''); return open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (body) {
     const text = this._bsUrl + ' ' + (typeof body === 'string' ? body : '');
     if (/dialogs\.sendMessage/.test(text)) {
       const id = curDialog();
-      this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) { playSent(); onSent(id); } });
+      playSent();
+      this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) onSent(id); else failTone(); });
+      this.addEventListener('error', failTone);
     } else if (/dialogs\.get(?!LastUpdated|Channels)/.test(this._bsUrl)) {
       this.addEventListener('load', () => { try { onDialogs(JSON.parse(this.responseText)); } catch (e) {} });
     }
@@ -93,7 +96,7 @@
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const body = init && typeof init.body === 'string' ? init.body : '';
     const p = nativeFetch.apply(this, arguments);
-    if (/dialogs\.sendMessage/.test(url + ' ' + body)) p.then(r => { if (r.ok) playSent(); }).catch(() => {});
+    if (/dialogs\.sendMessage/.test(url + ' ' + body)) { playSent(); p.then(r => { if (!r.ok) failTone(); }).catch(failTone); }
     return p;
   };
   // ---------- Смайлики: избранное, поиск, сворачивание ----------
@@ -449,12 +452,14 @@
       if (!prev) return;
       if (!box) {
         box = document.createElement('div');
-        box.className = 'dialogs_list_preview bs-draft';
+        box.className = 'bs-draft';
         box.innerHTML = '<b>Черновик: </b><span></span>';
         prev.after(box);
       }
       const txt = d.t.replace(/\s+/g, ' ').trim();
+      if (!box.firstChild || box.firstChild.tagName !== 'B') box.innerHTML = '<b>Черновик: </b><span></span>';
       if (box.lastChild.textContent !== txt) box.lastChild.textContent = txt;
+      if (box.previousElementSibling !== prev) prev.after(box);
     });
   }
   let shownDialog = null, shownTa = null;
@@ -476,7 +481,7 @@
     const st = document.createElement('style');
     st.textContent =
       '.bs-has-draft .dialogs_list_preview:not(.bs-draft){display:none!important}' +
-      '.bs-draft{display:block!important}' +
+      '.bs-draft{display:block!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:1.3;color:var(--bs-muted,#888);grid-column:1/-1}' +
       '.bs-draft b{color:#e04848;font-weight:600}';
     document.head.appendChild(st);
     document.addEventListener('input', ev => {
@@ -494,6 +499,12 @@
   const jget = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) || def; } catch (e) { return def; } };
   const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
   const itemById = id => document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]');
+  // чат есть в списке – кликаем; нет (не подгружен, другой канал, фильтр) – открываем по ссылке, сайт сам найдёт канал
+  function openChat(id) {
+    const it = itemById(id);
+    if (it) it.click();
+    else location.assign(location.origin + '/app/Messenger/?dialogId=' + encodeURIComponent(id));
+  }
   const nameOf = it => { const n = it && it.querySelector('.dialogs_list_person_name'); return n ? n.textContent.trim() : ''; };
 
   function togglePin(id) {
@@ -556,8 +567,7 @@
     t.addEventListener('click', ev => {
       t.remove();
       if (ev.target.tagName === 'I') return;
-      const it = itemById(id);
-      if (it) it.click();
+      openChat(id);
     });
     wrap.appendChild(t);
   }
@@ -713,11 +723,10 @@
       t.textContent = r.at <= now ? 'пора' : 'через ' + remText(r.at - now);
       t.classList.toggle('bs-due', r.at <= now);
       row.querySelector('small').textContent = r.note || '';
-      if (!itemById(id)) row.title = 'Чат сейчас не загружен в списке – найди его поиском';
+      if (!itemById(id)) row.title = 'Чата нет в загруженном списке – страница перезагрузится и откроет его';
       row.addEventListener('click', ev => {
         if (ev.target.tagName === 'I') { setRemind(id, 0); return; }
-        const it = itemById(id);
-        if (it) { it.click(); closeRemList(); }
+        closeRemList(); openChat(id);
       });
       box.appendChild(row);
     }
