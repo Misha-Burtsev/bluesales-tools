@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.14.3
+@version        1.14.4
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -371,7 +371,7 @@ td.dialog {
 .dialog_box {
   flex: none !important;
   display: flex !important;
-  align-items: flex-end !important;
+  align-items: center !important;
   gap: 10px !important;
   width: auto !important;
   margin: 0 !important; /* у сайта свои отступы 0 10px 10px – из-за них полоса была кривой */
@@ -398,6 +398,13 @@ td.dialog {
 }
 .dialog_box .send_message_textarea:focus { border-color: var(--bs-accent) !important; background: var(--bs-panel) !important; }
 .dialog_box .emoji_button { position: absolute !important; right: 12px !important; bottom: 9px !important; }
+/* Скрепка, поле и кнопка – по центру одной линии; убираем отступы сайта */
+.dialog_box .image-upload-control, .dialog_box .upload-file-button { display: flex !important; align-items: center !important; flex: none !important; }
+.dialog_box .upload-file-button label { margin: 0 !important; display: flex !important; align-items: center !important; cursor: pointer !important; }
+.dialog_box .send_message_buttons_and_voice_recorder_controls { flex: none !important; display: flex !important; align-items: center !important; gap: 6px !important; padding: 0 !important; }
+/* пустое место под превью картинки занимало ~60px справа */
+.dialog_box .thumbnail-placeholder:empty { display: none !important; }
+.dialog_box .thumbnail-placeholder { margin: 0 !important; padding: 0 !important; }
 /* Кнопка «Отправить/микрофон» + стрелка меню – одна склеенная кнопка */
 .dialog_box .btn-group {
   display: flex !important;
