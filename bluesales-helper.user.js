@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.17.0
+// @version      1.18.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -431,7 +431,7 @@
       const st = document.createElement('style');
       st.id = 'bsSeriesCss';
       st.textContent =
-        '.message_block.bs-cont{margin-top:-2px!important}' +
+        '.message_block.bs-cont{margin-top:-5px!important}' +
         '.message_block.bs-cont>.icon_link{visibility:hidden!important;height:0!important;overflow:hidden!important}' +
         '.message_block.bs-cont .message>.person_name,.message_block.bs-cont .message>.message_sender{display:none!important}';
       document.head.appendChild(st);
@@ -623,21 +623,20 @@
       '<div class="bs-mh">⏰ Напомнить через</div>' +
       '<div class="bs-note"><input class="bs-note-inp" type="text" maxlength="120" placeholder="Заметка: что сделать (необязательно)"></div>' +
       '<div class="bs-chips"><span data-h="0.5">30 мин</span><span data-h="1">1 ч</span><span data-h="2">2 ч</span><span data-h="4">4 ч</span></div>' +
-      '<div class="bs-hrs"><input class="bs-num" type="number" min="0.1" step="any" placeholder="Своё"><span class="bs-unit"><span data-u="min">мин</span><span data-u="h">ч</span></span><button title="Поставить">✓</button></div>' +
+      '<div class="bs-hrs"><input class="bs-num" data-k="h" type="number" min="0" step="1" placeholder="0"><span class="bs-lbl">ч</span><input class="bs-num" data-k="m" type="number" min="0" step="1" placeholder="0"><span class="bs-lbl">мин</span><button title="Поставить">✓</button></div>' +
       (r ? '<div class="bs-mi bs-del" data-a="unrem">Убрать напоминание</div>' : '');
     document.body.appendChild(m);
     const w = m.offsetWidth, h = m.offsetHeight;
     m.style.left = Math.min(x, innerWidth - w - 8) + 'px';
     m.style.top = Math.min(y, innerHeight - h - 8) + 'px';
-    const inp = m.querySelector('.bs-num'), note = m.querySelector('.bs-note-inp');
+    const inH = m.querySelector('[data-k="h"]'), inM = m.querySelector('[data-k="m"]'), note = m.querySelector('.bs-note-inp');
+    const inp = inH;
     if (r && r.note) note.value = r.note;
-    // единица для своего числа – минуты или часы, запоминается
-    let unit = flag('bsRemMin') ? 'min' : 'h';
-    const paintUnit = () => m.querySelectorAll('[data-u]').forEach(u => u.classList.toggle('bs-on', u.dataset.u === unit));
-    paintUnit();
+    // своё время: часы + минуты
+    const num = el => Math.max(0, parseFloat(String(el.value).replace(',', '.')) || 0);
     const custom = () => {
-      const v = parseFloat(String(inp.value).replace(',', '.'));
-      if (v > 0) { setRemind(id, unit === 'min' ? v / 60 : v, note.value); closeMenu(); } else inp.focus();
+      const hrs = num(inH) + num(inM) / 60;
+      if (hrs > 0) { setRemind(id, hrs, note.value); closeMenu(); } else inH.focus();
     };
     m.addEventListener('click', ev => {
       const a = ev.target.closest('[data-a]'), chip = ev.target.closest('[data-h]');
@@ -645,13 +644,9 @@
       else if (a && a.dataset.a === 'pin') { togglePin(id); closeMenu(); }
       else if (a && a.dataset.a === 'unrem') { setRemind(id, 0); closeMenu(); }
       else if (chip) { setRemind(id, +chip.dataset.h, note.value); closeMenu(); }
-      else if (ev.target.dataset.u) {
-        unit = ev.target.dataset.u; paintUnit(); inp.focus();
-        try { localStorage.setItem('bsRemMin', unit === 'min' ? '1' : '0'); } catch (e) {}
-      }
       else if (ev.target.tagName === 'BUTTON') custom();
     });
-    inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') custom(); if (ev.key === 'Escape') closeMenu(); });
+    [inH, inM].forEach(el => el.addEventListener('keydown', ev => { if (ev.key === 'Enter') custom(); if (ev.key === 'Escape') closeMenu(); }));
     note.addEventListener('keydown', ev => { if (ev.key === 'Enter') inp.focus(); if (ev.key === 'Escape') closeMenu(); });
   }
 
@@ -807,11 +802,9 @@
       '#bsMenu .bs-chips{display:flex;gap:4px;padding:0 6px 6px}' +
       '#bsMenu .bs-chips span{flex:1 0 auto;text-align:center;padding:4px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap}' +
       '#bsMenu .bs-hrs{display:flex;align-items:center;gap:5px;padding:0 6px 6px}' +
-      '#bsMenu .bs-hrs input{width:58px;padding:4px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:transparent;color:inherit;font-size:12px;outline:none}' +
+      '#bsMenu .bs-hrs input{width:44px;padding:4px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:transparent;color:inherit;font-size:12px;outline:none}' +
       '#bsMenu .bs-hrs input:focus{border-color:var(--bs-accent,#3b82f6)}' +
-      '#bsMenu .bs-unit{display:inline-flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;overflow:hidden;font-size:12px}' +
-      '#bsMenu .bs-unit span{padding:3px 7px;cursor:pointer;color:var(--bs-muted,#888)}' +
-      '#bsMenu .bs-unit span.bs-on{background:var(--bs-accent,#3b82f6);color:#fff}' +
+      '#bsMenu .bs-lbl{font-size:12px;color:var(--bs-muted,#888);margin-right:4px}' +
       '#bsMenu .bs-hrs button{margin-left:auto;padding:3px 10px;border:0;border-radius:6px;background:var(--bs-accent,#3b82f6);color:#fff;cursor:pointer}' +
       '#bsMenu .bs-del{color:#e04848;border-top:1px solid var(--bs-border,#D9E0E7);border-radius:0 0 6px 6px;margin-top:2px}' +
       '#bsMenu .bs-note{padding:0 6px 6px}' +

@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.15.0
+@version        1.15.1
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -317,7 +317,7 @@ td.dialog {
   align-items: flex-start !important;
   gap: 10px !important;
   width: auto !important;
-  margin: 0 0 10px !important;
+  margin: 0 0 14px !important;
   padding: 0 !important;
 }
 .message_block > .icon_link { flex: none !important; width: auto !important; }
@@ -916,7 +916,7 @@ td.dialog > .no_messages_label:not([style*="none"]) {
 
   /* Переписка */
   html body .dialog_messages { padding: 8px 14px !important; }
-  html body .message_block { margin: 0 0 4px !important; padding: 0 !important; gap: 6px !important; }
+  html body .message_block { margin: 0 0 9px !important; padding: 0 !important; gap: 6px !important; }
   html body .message_block .icon_link { width: 30px !important; }
   html body .message_block .icon, html body .message_block .icon > div, html body .message_block .icon img.avatar { width: 28px !important; height: 28px !important; font-size: 11px !important; }
   html body .message { padding: 5px 10px 6px !important; font-size: 12.5px !important; line-height: 1.35 !important; }
