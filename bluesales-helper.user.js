@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.13.2
-// @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
+// @version      1.14.0
+// @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
 // @grant        none
@@ -373,7 +373,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle';
+    const OWN = '#bsDock,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -547,6 +547,7 @@
     const m = document.createElement('div');
     m.id = 'bsMenu';
     m.innerHTML =
+      '<div class="bs-mi" data-a="peek">👁 Предпросмотр</div>' +
       '<div class="bs-mi" data-a="pin">' + (pinned ? '📌 Открепить' : '📌 Закрепить наверху') + '</div>' +
       '<div class="bs-mh">⏰ Напомнить через</div>' +
       '<div class="bs-note"><input class="bs-note-inp" type="text" maxlength="120" placeholder="Заметка: что сделать (необязательно)"></div>' +
@@ -569,7 +570,8 @@
     };
     m.addEventListener('click', ev => {
       const a = ev.target.closest('[data-a]'), chip = ev.target.closest('[data-h]');
-      if (a && a.dataset.a === 'pin') { togglePin(id); closeMenu(); }
+      if (a && a.dataset.a === 'peek') { closeMenu(); openPeek(it, x, y); }
+      else if (a && a.dataset.a === 'pin') { togglePin(id); closeMenu(); }
       else if (a && a.dataset.a === 'unrem') { setRemind(id, 0); closeMenu(); }
       else if (chip) { setRemind(id, +chip.dataset.h, note.value); closeMenu(); }
       else if (ev.target.dataset.u) {
@@ -580,6 +582,72 @@
     });
     inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') custom(); if (ev.key === 'Escape') closeMenu(); });
     note.addEventListener('keydown', ev => { if (ev.key === 'Enter') inp.focus(); if (ev.key === 'Escape') closeMenu(); });
+  }
+
+  // ---------- Предпросмотр чата без открытия (не ставит «прочитано») ----------
+  // Сайт при открытии чата сам отдельно шлёт dialogs.setReadStatus, а мы берём только
+  // dialogs.get и dialogs.getMessages – это чтение.
+  function bsApi(method, params) {
+    if (!(window.blueSales && window.blueSales.blueSalesApi))
+      return fetch('/app/Customers/WebServer.aspx?command=' + method + '&v=1', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(params),
+      }).then(r => r.json()).then(r => r && r.response);
+    return new Promise((ok, fail) => {
+      try {
+        new window.blueSales.blueSalesApi().callApi(method, params, { version: 1 })
+          .done(r => ok(r && r.response)).fail(e => fail(e));
+      } catch (e) { fail(e); }
+    });
+  }
+  const getDialog = id => bsApi('dialogs.get', { dialogId: +id, startRowNumber: 1, pageSize: 1 }).then(r => (r || [])[0]);
+  function closePeek() { const p = document.getElementById('bsPeek'); if (p) p.remove(); }
+  async function openPeek(it, x, y) {
+    closePeek();
+    const id = it.dataset.dialogId, p = document.createElement('div');
+    p.id = 'bsPeek';
+    p.innerHTML = '<div class="bs-pk-head"><b></b><span class="bs-pk-x" title="Закрыть">×</span></div>' +
+      '<div class="bs-pk-body"><div class="bs-pk-info">Загружаю…</div></div>' +
+      '<div class="bs-pk-foot"><span class="bs-pk-note">Чат не открыт и остаётся непрочитанным</span><button>Открыть чат</button></div>';
+    p.querySelector('b').textContent = nameOf(it) || 'Чат';
+    document.body.appendChild(p);
+    const r = it.getBoundingClientRect();
+    p.style.left = Math.min(r.right + 8, innerWidth - p.offsetWidth - 8) + 'px';
+    p.style.top = Math.max(8, Math.min(y - 40, innerHeight - p.offsetHeight - 8)) + 'px';
+    p.querySelector('.bs-pk-x').onclick = closePeek;
+    p.querySelector('button').onclick = () => { closePeek(); it.click(); };
+    const body = p.querySelector('.bs-pk-body'), info = t => { body.innerHTML = '<div class="bs-pk-info"></div>'; body.firstChild.textContent = t; };
+    try {
+      const d = await getDialog(id);
+      if (!d) return info('Не нашёл этот чат');
+      const tab = document.querySelector('.channel-tab a[data-channel-id="' + d.channelId + '"]') || document.querySelector('.channel-tab.active a[data-channel-type]');
+      const msgs = (await bsApi('dialogs.getMessages', { dialogId: +id, startRowNumber: 1, pageSize: 15, newerThan: new Date(1), channelType: tab ? +tab.dataset.channelType : undefined })) || [];
+      if (!document.body.contains(p)) return;
+      msgs.sort((a, b) => new Date(a.date) - new Date(b.date));
+      body.innerHTML = '';
+      msgs.forEach(m => {
+        const text = String(m.message || '').replace(/\[(?:id|club|public)\d+\|([^\]]+)\]/g, '$1').trim();
+        const files = (m.attachments || []).length + (m.forwardedMessages || []).length;
+        if (!text && !files && !m.fileUrl) return;
+        const row = document.createElement('div');
+        row.className = 'bs-pk-msg' + (m.fromUserId === d.shopUserId ? ' bs-pk-my' : '');
+        row.innerHTML = '<div class="bs-pk-bub"></div><small></small>';
+        row.firstChild.textContent = text || '📎 вложение';
+        if (text && files) row.firstChild.append(document.createElement('br'), '📎 вложение');
+        const dt = new Date(m.date);
+        row.lastChild.textContent = isNaN(dt) ? '' : dt.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        body.appendChild(row);
+      });
+      if (!body.children.length) return info('Сообщений нет');
+      body.scrollTop = body.scrollHeight;
+      // проверка: не пометил ли сервер чат прочитанным
+      if (d.isRead === false) {
+        const d2 = await getDialog(id);
+        if (d2 && d2.isRead) { const n = p.querySelector('.bs-pk-note'); n.textContent = '⚠ Сервер отметил чат прочитанным'; n.classList.add('bs-pk-warn'); }
+      }
+    } catch (e) {
+      if (document.body.contains(p)) info('Не получилось загрузить сообщения');
+    }
   }
 
   // ---------- Список напоминаний: кнопка ⏰ в панели справа внизу ----------
@@ -648,6 +716,22 @@
       '#bsMenu{position:fixed;z-index:3000;min-width:230px;padding:6px;border-radius:10px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
       '#bsMenu .bs-mi{padding:6px 8px;border-radius:6px;cursor:pointer}' +
+      '#bsPeek{position:fixed;z-index:3000;width:340px;max-width:calc(100vw - 16px);display:flex;flex-direction:column;border-radius:12px;font-size:13px;overflow:hidden;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 32px rgba(0,0,0,.2)}' +
+      '#bsPeek .bs-pk-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--bs-border,#D9E0E7)}' +
+      '#bsPeek .bs-pk-head b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '#bsPeek .bs-pk-x{cursor:pointer;color:var(--bs-muted,#888);font-size:18px;line-height:1}' +
+      '#bsPeek .bs-pk-body{max-height:360px;min-height:60px;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px}' +
+      '#bsPeek .bs-pk-info{margin:auto;color:var(--bs-muted,#888)}' +
+      '#bsPeek .bs-pk-msg{display:flex;flex-direction:column;align-items:flex-start;max-width:85%}' +
+      '#bsPeek .bs-pk-my{align-self:flex-end;align-items:flex-end}' +
+      '#bsPeek .bs-pk-bub{padding:6px 9px;border-radius:10px;background:var(--bs-hover,#f1f3f6);white-space:pre-wrap;word-break:break-word;line-height:1.35}' +
+      '#bsPeek .bs-pk-my .bs-pk-bub{background:rgba(59,130,246,.14)}' +
+      '#bsPeek .bs-pk-msg small{color:var(--bs-muted,#888);font-size:10.5px;margin:1px 4px 0}' +
+      '#bsPeek .bs-pk-foot{display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--bs-border,#D9E0E7)}' +
+      '#bsPeek .bs-pk-note{flex:1;color:var(--bs-muted,#888);font-size:11.5px}' +
+      '#bsPeek .bs-pk-warn{color:#e04848}' +
+      '#bsPeek button{padding:5px 11px;border:0;border-radius:7px;background:var(--bs-accent,#3b82f6);color:#fff;cursor:pointer;font-size:12.5px}' +
       '#bsMenu .bs-mi:hover,#bsMenu .bs-chips span:hover{background:var(--bs-hover,#f5f7fa)}' +
       '#bsMenu .bs-mh{padding:6px 8px 4px;color:var(--bs-muted,#888);font-size:12px}' +
       '#bsMenu .bs-chips{display:flex;gap:4px;padding:0 6px 6px}' +
@@ -696,9 +780,10 @@
     document.addEventListener('mousedown', ev => {
       if (!ev.target.closest) return;
       if (!ev.target.closest('#bsMenu')) closeMenu();
+      if (!ev.target.closest('#bsPeek,#bsMenu')) closePeek();
       if (!ev.target.closest('#bsRemList,#bsRemBtn')) closeRemList();
     }, true);
-    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closeMenu(); closeRemList(); } });
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') { closeMenu(); closeRemList(); closePeek(); } });
     remBtnInit();
     checkReminders();
     setInterval(checkReminders, 15000);
