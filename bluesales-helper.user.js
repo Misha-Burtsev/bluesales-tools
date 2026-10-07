@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.12.5
+// @version      1.13.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -373,7 +373,12 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    new MutationObserver(() => { if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); }, 150); })
+    const OWN = '#bsDock,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle';
+    const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
+    new MutationObserver(recs => {
+      if (recs.every(own)) return;
+      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); }, 150);
+    })
       .observe(document.body, { childList: true, subtree: true });
     setInterval(paintWait, 30000);
   }
@@ -583,7 +588,7 @@
     if (!b) return;
     const ids = Object.keys(rem), due = ids.some(id => rem[id].at <= now);
     const cnt = b.querySelector('b');
-    cnt.textContent = ids.length || '';
+    if (cnt.textContent !== String(ids.length || '')) cnt.textContent = ids.length || '';
     cnt.classList.toggle('bs-due', due);
     b.title = ids.length ? 'Напоминания: ' + ids.length : 'Напоминаний нет';
     if (document.getElementById('bsRemList')) fillRemList();
@@ -591,6 +596,9 @@
   function fillRemList() {
     const box = document.getElementById('bsRemList'), rem = jget(REM_KEY, {}), now = Date.now();
     const ids = Object.keys(rem).sort((a, b) => rem[a].at - rem[b].at);
+    const sig = JSON.stringify(ids.map(id => [id, rem[id].at <= now ? 'пора' : remText(rem[id].at - now), rem[id].note, !!itemById(id)]));
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
     box.textContent = '';
     const h = document.createElement('div');
     h.className = 'bs-rl-head'; h.textContent = ids.length ? 'Напоминания' : 'Напоминаний нет';
@@ -711,9 +719,12 @@
   const parseHtml = h => new DOMParser().parseFromString(h, 'text/html');
 
   // kind – psFirstContact (первый контакт) или psLastContact (последний)
-  async function countClients(kind, from, till, statuses, manager) {
-    const d0 = parseHtml(await (await fetch(CL_URL, { credentials: 'same-origin' })).text());
-    const fd = new FormData(d0.forms[0]);
+  // форма страницы «Клиенты» – одна на все три подсчёта
+  async function clientsForm() {
+    return parseHtml(await (await fetch(CL_URL, { credentials: 'same-origin' })).text()).forms[0];
+  }
+  async function countClients(form, kind, from, till, statuses, manager) {
+    const fd = new FormData(form);
     fd.set(CF + kind + '$cmbPeriod', '8');
     fd.set(CF + kind + '$dpDateFrom$dbcDate', from);
     fd.set(CF + kind + '$dpDateTill$dbcDate', till);
@@ -722,7 +733,7 @@
     fd.set('__EVENTTARGET', ''); fd.set('__EVENTARGUMENT', '');
     fd.set('ctl00$ContentPlaceHolder1$btnShow', 'Показать');
     const res = await fetch(CL_URL, { method: 'POST', body: new URLSearchParams(fd), credentials: 'same-origin' });
-    const txt = parseHtml(await res.text()).body.textContent.replace(/\s+/g, ' ');
+    const txt = (await res.text()).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
     // до 30 строк сайт пишет «Всего: N клиентов», больше – «Показаны строки с 1 по 30 из N»
     const m = /строки с \d+ по \d+ из (\d+)/.exec(txt) || /Всего:\s*(\d+)/.exec(txt);
     return m ? +m[1] : 0;
@@ -793,9 +804,12 @@
       status.textContent = 'Считаю на странице «Клиенты» (' + t + ', ' + who + ')…';
       box.classList.add('bs-loading');
       try {
-        const leads = await countClients('psFirstContact', t, t, ST_ALL, m);
-        const blocks = await countClients('psFirstContact', t, t, ST_BLOCK, m);
-        const chats = await countClients('psLastContact', t, t, ST_ALL, m);
+        const form = await clientsForm();
+        const [leads, blocks, chats] = await Promise.all([
+          countClients(form, 'psFirstContact', t, t, ST_ALL, m),
+          countClients(form, 'psFirstContact', t, t, ST_BLOCK, m),
+          countClients(form, 'psLastContact', t, t, ST_ALL, m),
+        ]);
         if (my !== run) return;   // пока считали, переключили менеджера
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
         status.textContent = 'Посчитано: ' + t + ', менеджер – ' + who + '. Остальное впиши руками.';
