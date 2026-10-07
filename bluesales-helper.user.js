@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.16.1
+// @version      1.17.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -413,10 +413,38 @@
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
-      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); }, 150);
+      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); paintSeries(); }, 150);
     })
       .observe(document.body, { childList: true, subtree: true });
     setInterval(paintWait, 30000);
+  }
+  // ---------- Серии: подряд от одного автора за 3 минуты – имя и аватар только у первого ----------
+  const msgMin = b => { const m = /(\d{1,2}):(\d{2})/.exec((b.querySelector('.message_time') || {}).textContent || ''); return m ? m[1] * 60 + +m[2] : null; };
+  const msgWho = b => {
+    const a = b.querySelector(':scope > .icon_link'), snd = b.querySelector('.message_sender');
+    return (a ? a.getAttribute('href') || a.textContent : '') + '|' + (snd ? snd.textContent.trim() : '');
+  };
+  function paintSeries() {
+    const box = document.querySelector('.dialog_messages');
+    if (!box) return;
+    if (!document.getElementById('bsSeriesCss')) {
+      const st = document.createElement('style');
+      st.id = 'bsSeriesCss';
+      st.textContent =
+        '.message_block.bs-cont{margin-top:-2px!important}' +
+        '.message_block.bs-cont>.icon_link{visibility:hidden!important;height:0!important;overflow:hidden!important}' +
+        '.message_block.bs-cont .message>.person_name,.message_block.bs-cont .message>.message_sender{display:none!important}';
+      document.head.appendChild(st);
+    }
+    for (const b of box.querySelectorAll(':scope > .message_block, :scope > * > .message_block')) {
+      const p = b.previousElementSibling;
+      let cont = false;
+      if (p && p.classList.contains('message_block') && msgWho(p) === msgWho(b)) {
+        const a = msgMin(p), c = msgMin(b);
+        cont = a !== null && c !== null && c - a >= 0 && c - a <= 3;
+      }
+      if (b.classList.contains('bs-cont') !== cont) b.classList.toggle('bs-cont', cont);
+    }
   }
   // мы ответили – этот чат больше не ждёт
   function markAnswered(id) { if (id && dlg[id]) { dlg[id].at = 0; paintWait(); } }

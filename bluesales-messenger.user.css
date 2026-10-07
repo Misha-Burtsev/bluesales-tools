@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.14.4
+@version        1.15.0
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -795,12 +795,8 @@ td.dialog > .no_messages_label:not([style*="none"]) {
     font-size: 12.5px !important;
   }
 
-  /* наши сообщения (есть подпись менеджера или «Бот») – справа, как в Telegram */
-  .message_block:has(.message_sender > *) { flex-direction: row-reverse !important; }
-  .message_block:has(.message_sender > *) .message {
-    background: var(--bs-own) !important;
-    border-radius: var(--bs-radius) 4px var(--bs-radius) var(--bs-radius) !important;
-  }
+  /* наши сообщения (есть подпись менеджера или «Бот») – тоже слева, отличаются цветом */
+  .message_block:has(.message_sender > *) .message { background: var(--bs-own) !important; }
   .message_block:has(.message_sender > *) .bot_keyboard .button { background: var(--bs-keyboard) !important; }
 
   /* ===== 1.4.0 ===== */
