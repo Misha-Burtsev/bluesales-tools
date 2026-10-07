@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.12.1
+// @version      1.12.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -292,7 +292,8 @@
       '#bsEmoLabel{display:none;flex:1;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
       'body.bs-emo-closed #bsEmoSearch{display:none}',
       'body.bs-emo-closed #bsEmoLabel{display:block}',
-      '#bsEmoToggle{position:fixed;z-index:2002;display:none;background:var(--bs-panel,#fff)}',
+      '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:30px;justify-content:flex-end;padding-right:10px;box-sizing:border-box;border-radius:11px 11px 0 0;background:none}',
+      '#bsEmoToggle:hover{background:rgba(127,127,127,.12)}',
       '#bsEmoLabel::after{content:" ▴"}',
       '.bs-dock-btn{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:7px;background:none;color:var(--bs-muted,#888);cursor:pointer;position:relative}',
       '.bs-dock-btn:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}',
@@ -891,8 +892,10 @@
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
     if (open && tog) {
       tog.style.display = 'flex';
-      tog.style.top = (r.top + 4) + 'px';
-      tog.style.right = (innerWidth - r.right + 6) + 'px';
+      // вся верхняя полоса панели – кнопка сворачивания, стрелка справа
+      tog.style.top = (r.top + 1) + 'px';
+      tog.style.left = (r.left + 1) + 'px';
+      tog.style.width = (r.width - 2) + 'px';
     }
   }
   // много тегов – карточка клиента растёт вниз; панель смайликов сужаем, чтобы не наезжала на неё
