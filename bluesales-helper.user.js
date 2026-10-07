@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.12.2
+// @version      1.12.3
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -642,7 +642,7 @@
       '#bsMenu .bs-mi:hover,#bsMenu .bs-chips span:hover{background:var(--bs-hover,#f5f7fa)}' +
       '#bsMenu .bs-mh{padding:6px 8px 4px;color:var(--bs-muted,#888);font-size:12px}' +
       '#bsMenu .bs-chips{display:flex;gap:4px;padding:0 6px 6px}' +
-      '#bsMenu .bs-chips span{flex:1;text-align:center;padding:4px 0;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap}' +
+      '#bsMenu .bs-chips span{flex:1 0 auto;text-align:center;padding:4px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;cursor:pointer;font-size:12px;white-space:nowrap}' +
       '#bsMenu .bs-hrs{display:flex;align-items:center;gap:5px;padding:0 6px 6px}' +
       '#bsMenu .bs-hrs input{width:58px;padding:4px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:transparent;color:inherit;font-size:12px;outline:none}' +
       '#bsMenu .bs-hrs input:focus{border-color:var(--bs-accent,#3b82f6)}' +
