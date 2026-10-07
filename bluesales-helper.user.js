@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.15.0
+// @version      1.16.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -326,11 +326,28 @@
     else waitSel.observe(document.body, { childList: true, subtree: true });
   });
 
+  // ---------- Каждое сообщение – отдельно, со своим временем ----------
+  // Сайт склеивает сообщения одного автора за 3 минуты в один блок со временем первого.
+  // Подменяем у его сборщика порог на -1 – тогда каждый блок из одного сообщения.
+  function unstackInit() {
+    const m = window.messenger, B = m && m.messagesViewBuilder;
+    if (!B || B.bsPatched) return !!B;
+    const W = function (opts) { return B.call(this, Object.assign({}, opts, { maxSecondsBetweenMessagesInBlock: -1 })); };
+    W.prototype = B.prototype; W.bsPatched = true;
+    m.messagesViewBuilder = W;
+    return true;
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    if (unstackInit()) return;
+    let n = 0;
+    const iv = setInterval(() => { if (unstackInit() || ++n > 40) clearInterval(iv); }, 250);
+  });
+
   // ---------- Таймер «клиент ждёт» в списке чатов ----------
   // Данные берём из ответа dialogs.get, который сайт и так запрашивает: кто написал последним и когда.
   const dlg = {};   // id диалога → { at: время последнего сообщения клиента (мс) или 0, если ждать некого; bot: за нас ответил бот }
   // автоответы бота – сайт считает чат отвеченным, а клиент на самом деле ждёт куратора
-  const BOT_RE = /^\s*Отлично! Куратор скоро подключится/i;
+  const BOT_RE = /^\s*(?:Вы:\s*)?Отлично!\s*Куратор скоро подключится/i;
   let tzOffset = '+03:00';
   function onDialogs(json) {
     if (!json || !Array.isArray(json.response)) return;
@@ -350,11 +367,24 @@
     if (min < 1440) return Math.floor(min / 60) + ' ч' + (min % 60 ? ' ' + (min % 60) + ' мин' : '');
     return Math.floor(min / 1440) + ' д';
   }
+  // время из списка: «15:50:29» – сегодня; иначе даты не знаем
+  function listTime(el) {
+    const m = /(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec((el.lastChild && el.lastChild.textContent) || el.textContent);
+    if (!m) return Date.now();
+    const d = new Date(); d.setHours(+m[1], +m[2], +(m[3] || 0), 0);
+    return Math.min(d.getTime(), Date.now());
+  }
   function paintWait() {
     const now = Date.now();
     document.querySelectorAll('.dialogs_list_item[data-dialog-id]').forEach(it => {
-      const info = dlg[it.dataset.dialogId], time = it.querySelector('.dialogs_list_time');
+      let info = dlg[it.dataset.dialogId];
+      const time = it.querySelector('.dialogs_list_time');
       if (!time) return;
+      // новые чаты сайт добавляет без dialogs.get – тогда бота узнаём по превью «Вы: Отлично! Куратор…»
+      if (!info || !info.at) {
+        const prev = it.querySelector('.dialogs_list_preview:not(.bs-draft)');
+        if (prev && BOT_RE.test(prev.textContent)) info = { at: listTime(time), bot: true };
+      }
       let b = time.querySelector('.bs-wait');
       if (!info || !info.at) { if (b) b.remove(); return; }
       const min = Math.max(0, Math.floor((now - info.at) / 60000));
