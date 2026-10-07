@@ -1,0 +1,145 @@
+/* ==UserStyle==
+@name           BlueSales – тёмная тема
+@namespace      bluesales-messenger-dark
+@version        1.6.1
+@updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger-dark.user.css
+@description    Тёмная тема для мессенджера BlueSales. Работает поверх стиля «BlueSales – новый мессенджер», включается и выключается отдельно. Кнопкой в помощнике (класс bs-light на html) временно выключается.
+==/UserStyle== */
+
+@-moz-document url-prefix("https://bluesales.ru/app/Messenger") {
+
+/* ---------- Цвета: переопределяем переменные основного стиля ---------- */
+html:root:not(.bs-light) {
+  --bs-bg: #15171c !important;
+  --bs-panel: #1e2127 !important;
+  --bs-chat-bg: #17191e !important;
+  --bs-border: #2d3139 !important;
+  --bs-text: #e3e6eb !important;
+  --bs-muted: #8a929d !important;
+  --bs-accent: #5b9cf5 !important;
+  --bs-accent-soft: #1d3150 !important;
+  --bs-hover: #262a31 !important;
+  --bs-own: #1f3350 !important;
+  --bs-btn-hover: #2a3445 !important;
+  --bs-scroll: #3a3f48 !important;
+  --bs-keyboard: rgba(255, 255, 255, .07) !important;
+  color-scheme: dark;
+}
+
+/* ---------- Карточки боковых панелей ---------- */
+html:not(.bs-light) body #infoPlace,
+html:not(.bs-light) body #remindersContent,
+html:not(.bs-light) body #faqContent,
+html:not(.bs-light) body div.right-panel,
+html:not(.bs-light) body div.right-panel.customer,
+html:not(.bs-light) body div.right-panel.goods,
+html:not(.bs-light) body #orderPanel.right-panel {
+  background: var(--bs-panel) !important;
+  border-color: var(--bs-border) !important;
+  color: var(--bs-text) !important;
+}
+html:not(.bs-light) body #remindersContent *,
+html:not(.bs-light) body #faqContent *,
+html:not(.bs-light) body .right-panel * { border-color: var(--bs-border) !important; }
+/* статусы, которым сайт ставит чёрный или тёмно-серый цвет прямо в разметке */
+html:not(.bs-light) body [style*="#3B3B3B" i],
+html:not(.bs-light) body [style*="#000000"] { color: var(--bs-text) !important; }
+html:not(.bs-light) body a.show_more_filters,
+html:not(.bs-light) body #orderPlaceTitle,
+html:not(.bs-light) body #goodsPlaceTitle { color: var(--bs-accent) !important; }
+
+/* ---------- Список чатов ---------- */
+html:not(.bs-light) body .dialogs_list_item.is_not_read,
+html:not(.bs-light) body .dialogs_list_item.is_not_read .dialogs_list_item_content { background: #1b2636 !important; }
+html:not(.bs-light) body .dialogs_list_item:hover,
+html:not(.bs-light) body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important; }
+html:not(.bs-light) body .dialogs_list_item.selected,
+html:not(.bs-light) body .dialogs_list_item.selected .dialogs_list_item_content,
+html:not(.bs-light) body .dialogs_list_item.active,
+html:not(.bs-light) body .dialogs_list_item.active .dialogs_list_item_content { background: var(--bs-accent-soft) !important; }
+html:not(.bs-light) body .dialogs_filters label.btn { background: transparent !important; color: var(--bs-muted) !important; border-color: transparent !important; }
+html:not(.bs-light) body .dialogs_filters label.btn.active { background: var(--bs-accent-soft) !important; color: var(--bs-accent) !important; }
+
+/* ---------- Переписка ---------- */
+html:not(.bs-light) body .message,
+html:not(.bs-light) body .message .message_text { color: var(--bs-text) !important; }
+html:not(.bs-light) body .message_block:has(.message_sender > *) .message { background: var(--bs-own) !important; }
+html:not(.bs-light) body .message a { color: var(--bs-accent) !important; }
+html:not(.bs-light) body .bot_keyboard .button { background: var(--bs-keyboard) !important; color: var(--bs-text) !important; border-color: var(--bs-border) !important; }
+html:not(.bs-light) body .bot_keyboard .button.clicked_button { background: var(--bs-hover) !important; }
+
+/* ---------- Поля ввода, выпадашки, календарь ---------- */
+html:not(.bs-light) body input:not([type="checkbox"]):not([type="radio"]),
+html:not(.bs-light) body textarea,
+html:not(.bs-light) body select,
+html:not(.bs-light) body .selectize-input,
+html:not(.bs-light) body .selectize-input.focus,
+html:not(.bs-light) body textarea.send_message_textarea,
+html:not(.bs-light) body textarea.send_message_textarea:focus,
+html:not(.bs-light) body input.dialogs_search_box,
+html:not(.bs-light) body input.dialogs_search_box:focus {
+  background: var(--bs-hover) !important;
+  color: var(--bs-text) !important;
+  border-color: var(--bs-border) !important;
+}
+html:not(.bs-light) body ::placeholder { color: var(--bs-muted) !important; }
+html:not(.bs-light) body .selectize-dropdown,
+html:not(.bs-light) body .selectize-dropdown .option,
+html:not(.bs-light) body #calendar.calendar,
+html:not(.bs-light) body .dropdown-menu,
+html:not(.bs-light) body .modal-content,
+html:not(.bs-light) body .popover {
+  background: var(--bs-panel) !important;
+  color: var(--bs-text) !important;
+  border-color: var(--bs-border) !important;
+}
+html:not(.bs-light) body .selectize-dropdown .option.active,
+html:not(.bs-light) body .selectize-dropdown .option:hover,
+html:not(.bs-light) body .dropdown-menu .dropdown-item:hover { background: var(--bs-hover) !important; color: var(--bs-text) !important; }
+html:not(.bs-light) body .dropdown-menu .dropdown-item { color: var(--bs-text) !important; }
+html:not(.bs-light) body .modal-header,
+html:not(.bs-light) body .modal-footer { border-color: var(--bs-border) !important; }
+html:not(.bs-light) body .modal-header .close { color: var(--bs-text) !important; text-shadow: none !important; }
+
+/* ---------- Кнопки «Сохранить» / «Обновить» ---------- */
+html:not(.bs-light) body #customerPlaceSave .button-link-disabled { background: var(--bs-hover) !important; color: var(--bs-muted) !important; border-color: var(--bs-border) !important; }
+
+
+/* ---------- 1.1.0 ---------- */
+html:not(.bs-light) body .messenger > table,
+html:not(.bs-light) body .dialogs_filters { border-color: var(--bs-border) !important; }
+/* цветные статусы чуть светлее, чтобы читались на тёмном */
+html:not(.bs-light) body .crm-status-name:not([style*="#3B3B3B" i]):not([style*="#000000"]),
+html:not(.bs-light) body .crm_status:not([style*="#3B3B3B" i]):not([style*="#000000"]) { filter: brightness(1.35) saturate(1.1); }
+html:not(.bs-light) body .more_filters .selectize-dropdown-content > div { background: none !important; }
+
+
+/* ---------- 1.2.0 ---------- */
+html:not(.bs-light) body #dialogPlace { box-shadow: 0 8px 24px rgba(0, 0, 0, .5) !important; }
+
+
+/* ---------- 1.3.0 ---------- */
+/* в выпадашках selectize цвет статуса записан как rgb(...) */
+html:not(.bs-light) body [style^="color: rgb(59, 59, 59)"],
+html:not(.bs-light) body [style^="color: rgb(0, 0, 0)"] { color: var(--bs-text) !important; }
+html:not(.bs-light) body .crm-status-selectize .tag-selectize-option:not([style^="color: rgb(59, 59, 59)"]):not([style^="color: rgb(0, 0, 0)"]) { filter: brightness(1.35) saturate(1.1); }
+
+
+/* ---------- 1.5.0: открытый чат и непрочитанные различаются ---------- */
+html:not(.bs-light) body .dialogs_list_item.is_not_read,
+html:not(.bs-light) body .dialogs_list_item.is_not_read .dialogs_list_item_content { background: #1a202b !important; }
+html:not(.bs-light) body .dialogs_list_item:hover,
+html:not(.bs-light) body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important; }
+html:not(.bs-light) body .dialogs_list_item.active,
+html:not(.bs-light) body .dialogs_list_item.active .dialogs_list_item_content { background: #233b60 !important; }
+
+/* ---------- 1.6.0: непрочитанные заметнее ---------- */
+html:not(.bs-light) body .dialogs_list_item.is_not_read,
+html:not(.bs-light) body .dialogs_list_item.is_not_read .dialogs_list_item_content { background: #1f2c45 !important; }
+html:not(.bs-light) body .dialogs_list_item.is_not_read .dialogs_list_person_name::after { background: #6ea8ff !important; }
+html:not(.bs-light) body .dialogs_list_item:hover,
+html:not(.bs-light) body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important; }
+html:not(.bs-light) body .dialogs_list_item.active,
+html:not(.bs-light) body .dialogs_list_item.active .dialogs_list_item_content { background: #2b4a78 !important; }
+
+}

@@ -1,0 +1,1018 @@
+/* ==UserStyle==
+@name           BlueSales – новый мессенджер
+@namespace      bluesales-messenger
+@version        1.14.1
+@updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
+@description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
+==/UserStyle== */
+
+@-moz-document url-prefix("https://bluesales.ru/app/Messenger") {
+
+:root {
+  --bs-bg: #f3f5f8;
+  --bs-panel: #ffffff;
+  --bs-own: #dcebff;          /* свои сообщения */
+  --bs-btn-hover: #e3ebf8;
+  --bs-scroll: #c9d0d8;
+  --bs-keyboard: rgba(255, 255, 255, .7);
+  --bs-chat-bg: #eef2f6;
+  --bs-border: #e3e7ec;
+  --bs-text: #1f2329;
+  --bs-muted: #7a828c;
+  --bs-accent: #2f80ed;
+  --bs-accent-soft: #e8f1fe;
+  --bs-hover: #f5f7fa;
+  --bs-radius: 14px;
+  --bs-font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+/* ---------- Общее ---------- */
+body {
+  background: var(--bs-bg) !important;
+  font-family: var(--bs-font) !important;
+  font-size: 14px !important;
+  color: var(--bs-text) !important;
+}
+body *:not(.glyphicon):not([class*="socicon"]) {
+  font-family: var(--bs-font) !important;
+}
+
+/* ---------- Раскладка: на всю ширину между боковыми панелями ---------- */
+.main_container {
+  box-sizing: border-box !important;
+  width: 100% !important;
+  padding: 0 16px !important;
+}
+body.slide-panel-left-open .main_container { padding-left: 274px !important; }
+body.slide-panel-right-open .main_container { padding-right: 274px !important; }
+
+.main {
+  /* контейнер BlueSales – flex с центрированием, без этого .main сжимается под содержимое */
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  margin: 0 !important;
+  height: 100vh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  box-sizing: border-box !important;
+  padding-bottom: 16px !important;
+}
+
+/* Логотип сверху не нужен – освобождаем место */
+.main > div:first-child { display: none !important; }
+
+/* ---------- Вкладки каналов ---------- */
+.main .tabs {
+  flex: none !important;
+  height: auto !important;
+  padding: 12px 0 10px !important;
+}
+.main .tabs .nav-tabs {
+  border: none !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 6px !important;
+  height: auto !important;
+}
+.main .tabs .nav-item { margin: 0 !important; }
+.channel-tab.nav-link {
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 999px !important;
+  background: var(--bs-panel) !important;
+  padding: 6px 12px !important;
+  font-size: 13px !important;
+  transition: background .15s, border-color .15s;
+}
+.channel-tab.nav-link:hover { background: var(--bs-hover) !important; }
+.channel-tab.nav-link.active {
+  background: var(--bs-accent-soft) !important;
+  border-color: var(--bs-accent) !important;
+}
+.channel-tab.nav-link a { color: var(--bs-text) !important; text-decoration: none !important; font-size: 13px !important; }
+
+/* ---------- Окно мессенджера ---------- */
+.messenger {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  background: var(--bs-panel) !important;
+  border-radius: var(--bs-radius) !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 16px rgba(16, 24, 40, .06) !important;
+  overflow: hidden !important;
+}
+.messenger > table,
+.messenger > table > tbody,
+.messenger > table > tbody > tr {
+  display: flex !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ---------- Список диалогов ---------- */
+.dialogs_list_container {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 0 0 340px !important;
+  width: 340px !important;
+  height: 100% !important;
+  border-right: 1px solid var(--bs-border) !important;
+  background: var(--bs-panel) !important;
+}
+.dialogs_search_box_container { padding: 12px 12px 6px !important; height: auto !important; }
+.dialogs_search_box {
+  width: 100% !important;
+  height: 38px !important;
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 10px !important;
+  background: var(--bs-hover) !important;
+  padding: 0 12px !important;
+  font-size: 14px !important;
+  outline: none !important;
+}
+.dialogs_search_box:focus { border-color: var(--bs-accent) !important; background: var(--bs-panel) !important; }
+
+.dialogs_filters { padding: 4px 12px 10px !important; height: auto !important; }
+.dialogs_filters .btn-group .btn {
+  border: none !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: var(--bs-muted) !important;
+  font-size: 13px !important;
+  padding: 4px 10px !important;
+  margin-right: 2px !important;
+  box-shadow: none !important;
+}
+.dialogs_filters .btn-group .btn.active {
+  background: var(--bs-accent-soft) !important;
+  color: var(--bs-accent) !important;
+  font-weight: 600 !important;
+}
+
+.dialogs_list {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+.dialogs_list_item {
+  height: auto !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: background .12s;
+}
+.dialogs_list_item:hover { background: var(--bs-hover) !important; }
+.dialogs_list_item.active { background: var(--bs-accent-soft) !important; }
+.dialogs_list_item_content {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 10px 14px !important;
+  width: auto !important;
+}
+.dialogs_list_item .big_icon {
+  flex: none !important;
+  width: 46px !important;
+  height: 46px !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+}
+.dialogs_list_summary { flex: 1 1 auto !important; min-width: 0 !important; width: auto !important; margin: 0 !important; }
+.dialogs_list_person_name_and_post { width: auto !important; }
+.dialogs_list_person_name {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: var(--bs-text) !important;
+}
+.dialogs_list_time { font-size: 12px !important; color: var(--bs-muted) !important; }
+.dialogs_list_preview {
+  font-size: 13px !important;
+  color: var(--bs-muted) !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  margin-top: 2px !important;
+}
+
+/* Время и превью без синей подсветки у активного диалога */
+.dialogs_list_item .dialogs_list_time,
+.dialogs_list_item .dialogs_list_preview,
+.dialogs_list_item.active .dialogs_list_time,
+.dialogs_list_item.active .dialogs_list_time *,
+.dialogs_list_item.active .dialogs_list_preview,
+.dialogs_list_item.active .dialogs_list_preview * {
+  background: transparent !important;
+  color: var(--bs-muted) !important;
+}
+.dialogs_list_item .crm_status,
+.dialogs_list_item .crm-status-name {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+/* цвет статуса не трогаем – сайт ставит его сам, как в правой колонке */
+.dialogs_list_item .crm_status { color: var(--bs-text) !important; }
+
+/* Теги – аккуратные «таблетки», максимум две строки */
+.dialogs_list_item .tags {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 3px !important;
+  max-height: 42px !important;
+  overflow: hidden !important;
+  margin: 3px 0 2px !important;
+  white-space: normal !important;
+}
+.dialogs_list_item .tags nobr { display: contents !important; }
+.dialogs_list_item .tags span {
+  border-radius: 6px !important;
+  padding: 1px 6px !important;
+  font-size: 11px !important;
+  line-height: 16px !important;
+}
+
+.dialogs_filters {
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: wrap !important;
+  row-gap: 4px !important;
+}
+.dialogs_filters .more_filters {
+  margin-left: 10px !important;
+  font-size: 13px !important;
+  white-space: nowrap !important;
+}
+
+/* ---------- Боковые панели (напоминания, быстрые фразы, карточка клиента) ---------- */
+.slide-panel-content {
+  background: var(--bs-panel) !important;
+  font-size: 13px !important;
+}
+.slide-panel-section {
+  padding: 10px 12px !important;
+  border-bottom: 1px solid var(--bs-border) !important;
+  line-height: 1.45 !important;
+}
+.slide-panel-section a { color: var(--bs-accent) !important; }
+.slide-panel-section .title b { font-weight: 600 !important; color: var(--bs-muted) !important; }
+
+/* ---------- Открытый диалог ---------- */
+td.dialog {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  height: 100% !important;
+  background: var(--bs-chat-bg) !important;
+}
+.dialog_header {
+  flex: none !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  height: 60px !important;
+  width: auto !important;
+  padding: 0 18px !important;
+  background: var(--bs-panel) !important;
+  border-bottom: 1px solid var(--bs-border) !important;
+}
+.dialog_header .small_icon { width: 36px !important; height: 36px !important; border-radius: 50% !important; overflow: hidden !important; }
+.dialog_header .person_name, .dialog_header .person_name a {
+  width: auto !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--bs-text) !important;
+}
+
+.dialog_messages {
+  flex: 1 1 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+  width: auto !important;
+  overflow-y: auto !important;
+  padding: 16px 24px !important;
+}
+
+/* Разделитель дат – «пилюля» по центру */
+.date_heading {
+  width: auto !important;
+  text-align: center !important;
+  margin: 14px 0 10px !important;
+  font-size: 12px !important;
+  color: var(--bs-muted) !important;
+}
+.dialog_marked_as_answered {
+  width: auto !important;
+  text-align: center !important;
+  font-size: 12px !important;
+  color: var(--bs-muted) !important;
+  margin: 8px 0 !important;
+}
+
+/* Сообщение: аватар + карточка */
+.message_block {
+  display: flex !important;
+  align-items: flex-start !important;
+  gap: 10px !important;
+  width: auto !important;
+  margin: 0 0 10px !important;
+  padding: 0 !important;
+}
+.message_block > .icon_link { flex: none !important; width: auto !important; }
+.message_block .icon {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+}
+.message_block .icon img { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+
+.message_block .message {
+  width: auto !important;
+  max-width: min(680px, 75%) !important;
+  background: var(--bs-panel) !important;
+  border-radius: 4px var(--bs-radius) var(--bs-radius) var(--bs-radius) !important;
+  padding: 8px 14px 10px !important;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .06) !important;
+}
+.message .person_name { width: auto !important; display: inline-block !important; margin-right: 6px !important; }
+.message .person_name a {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--bs-accent) !important;
+  text-decoration: none !important;
+}
+.message .message_time, .message .message_sender, .message .message_wait_time {
+  font-size: 11px !important;
+  color: var(--bs-muted) !important;
+  width: auto !important;
+}
+.message .message_sender a { color: var(--bs-muted) !important; }
+.message .message_text {
+  width: auto !important;
+  font-size: 14px !important;
+  line-height: 1.45 !important;
+  color: var(--bs-text) !important;
+  margin-top: 4px !important;
+  word-wrap: break-word !important;
+}
+.message .message_image img,
+.message .message_video video {
+  max-width: 320px !important;
+  width: auto !important;
+  height: auto !important;
+  border-radius: 10px !important;
+  margin-top: 6px !important;
+}
+
+/* ---------- Поле ввода ---------- */
+.dialog_box {
+  flex: none !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  gap: 10px !important;
+  width: auto !important;
+  padding: 12px 18px !important;
+  background: var(--bs-panel) !important;
+  border-top: 1px solid var(--bs-border) !important;
+}
+.dialog_box .send_message_box {
+  flex: 1 1 auto !important;
+  position: relative !important;
+  width: auto !important;
+}
+.dialog_box .send_message_textarea {
+  width: 100% !important;
+  min-height: 42px !important;
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 12px !important;
+  background: var(--bs-hover) !important;
+  padding: 10px 40px 10px 14px !important;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
+  resize: none !important;
+  box-shadow: none !important;
+}
+.dialog_box .send_message_textarea:focus { border-color: var(--bs-accent) !important; background: var(--bs-panel) !important; }
+.dialog_box .emoji_button { position: absolute !important; right: 12px !important; bottom: 9px !important; }
+/* Кнопка «Отправить/микрофон» + стрелка меню – одна склеенная кнопка */
+.dialog_box .btn-group {
+  display: flex !important;
+  flex: none !important;
+  width: auto !important;
+}
+.dialog_box .btn-group > .btn {
+  height: 42px !important;
+  margin: 0 !important;
+  background: var(--bs-accent) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+.dialog_box .btn-group > .btn:hover { filter: brightness(1.08); }
+#btnSendMessage {
+  border-radius: 12px 0 0 12px !important;
+  padding: 0 16px !important;
+}
+#btnSendMessageDropDownToggle {
+  border-radius: 0 12px 12px 0 !important;
+  padding: 0 10px !important;
+  border-left: 1px solid rgba(255, 255, 255, .35) !important;
+}
+.dialog_box .dropdown-menu {
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, .12) !important;
+  padding: 6px !important;
+}
+.dialog_box .dropdown-item { border-radius: 6px !important; font-size: 14px !important; padding: 8px 12px !important; }
+
+/* ---------- Диалог не выбран: только надпись по центру ---------- */
+td.dialog:has(> .no_messages_label:not([style*="none"])) > :not(.no_messages_label) {
+  display: none !important;
+}
+td.dialog > .no_messages_label:not([style*="none"]) {
+  flex: 1 1 auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--bs-muted) !important;
+  font-size: 15px !important;
+}
+
+/* ---------- Календарь (поле «След. конт.») ---------- */
+#calendar.calendar {
+  width: 260px !important;
+  padding: 10px !important;
+  background: var(--bs-panel) !important;
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 30px rgba(16, 24, 40, .16) !important;
+  z-index: 3000 !important;
+}
+#calendar .calendar-top-wr {
+  background: transparent !important;
+  padding: 0 0 8px !important;
+}
+#calendar .calendar-top-c { display: flex !important; align-items: center !important; gap: 6px !important; padding: 0 24px !important; }
+#calendar .calendar-top-c select {
+  float: none !important;
+  flex: 1 1 auto !important;
+  height: 30px !important;
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 8px !important;
+  background: var(--bs-hover) !important;
+  font-size: 13px !important;
+  padding: 0 6px !important;
+}
+#calendar .month-prev, #calendar .month-next {
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  filter: grayscale(1) brightness(.6);
+}
+#calendar ul.calendar-day,
+#calendar ul.calendar-date {
+  display: grid !important;
+  grid-template-columns: repeat(7, 1fr) !important;
+  gap: 2px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  list-style: none !important;
+}
+#calendar ul.calendar-day li {
+  float: none !important;
+  width: auto !important;
+  text-align: center !important;
+  font-size: 11px !important;
+  color: var(--bs-muted) !important;
+  padding: 2px 0 4px !important;
+}
+#calendar ul.calendar-date li {
+  float: none !important;
+  width: auto !important;
+  height: 32px !important;
+  border: none !important;
+  margin: 0 !important;
+}
+#calendar ul.calendar-date li a {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 8px !important;
+  color: var(--bs-text) !important;
+  font-size: 13px !important;
+  text-decoration: none !important;
+}
+#calendar ul.calendar-date li a:hover { background: var(--bs-hover) !important; }
+#calendar ul.calendar-date li a.today { color: var(--bs-accent) !important; font-weight: 600 !important; }
+#calendar ul.calendar-date li a.active {
+  background: var(--bs-accent) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+}
+#calendar > div:last-child { text-align: center !important; padding-top: 6px !important; }
+#calendar > div:last-child a { color: var(--bs-accent) !important; font-size: 13px !important; }
+
+/* ---------- Левая и правая панели ---------- */
+.slide-panel-control {
+  background: var(--bs-border) !important;
+  width: 4px !important;
+}
+#infoPlace, #remindersContent, #faqContent,
+.right-panel.customer, #orderPanel.right-panel, .right-panel.goods {
+  border: 1px solid var(--bs-border) !important;
+  border-radius: 10px !important;
+  padding: 8px 10px !important;
+  background: var(--bs-panel) !important;
+}
+#remindersHeader, #faqHeader {
+  font-size: 12px !important;
+  letter-spacing: .03em !important;
+  margin-bottom: 6px !important;
+}
+#remindersHeader a, #faqHeader a { color: var(--bs-text) !important; }
+
+/* Вкладки напоминаний: Сегодня / Завтра / Будущие / Просроченные */
+#remindersTabsOnly {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 4px !important;
+  font-size: 0 !important; /* прячем разделители «|» */
+}
+#remindersTabsOnly > span > *,
+#remindersTabsOnly a {
+  display: inline-block !important;
+  font-size: 12px !important;
+  padding: 3px 8px !important;
+  border-radius: 999px !important;
+  background: var(--bs-hover) !important;
+  color: var(--bs-text) !important;
+  text-decoration: none !important;
+}
+#remindersTabsOnly .selected-tab {
+  background: var(--bs-accent) !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+}
+#remindersTabsOnly .selected-tab * { color: #fff !important; font-size: 12px !important; }
+#moreFiltersLink { display: inline-block !important; margin-top: 6px !important; font-size: 12px !important; }
+
+/* Список напоминаний */
+.customersList table { width: 100% !important; border-collapse: collapse !important; }
+.customersList tr { border-bottom: 1px solid var(--bs-hover) !important; }
+.customersList tr:hover { background: var(--bs-hover) !important; }
+.customersList td { padding: 5px 4px !important; font-size: 12px !important; vertical-align: middle !important; }
+.customersList td.title a { color: var(--bs-text) !important; font-weight: 500 !important; }
+.customersList .crm-status-name {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+.customersList td.delete-button { opacity: .35; text-align: right !important; }
+.customersList tr:hover td.delete-button { opacity: 1; }
+
+/* Быстрые фразы */
+#faqContent .crm_clear_fix {
+  margin: 8px 0 2px !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  color: var(--bs-muted) !important;
+  text-transform: uppercase !important;
+  letter-spacing: .03em !important;
+}
+#faqContent p { margin: 0 0 6px !important; }
+#faqContent p a {
+  display: block !important;
+  padding: 4px 8px !important;
+  margin: 0 -4px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  color: var(--bs-text) !important;
+  text-decoration: none !important;
+}
+#faqContent p a:hover { background: var(--bs-accent-soft) !important; color: var(--bs-accent) !important; }
+#faqContent p br { display: none !important; }
+
+/* ---------- Скроллбары потоньше ---------- */
+.dialogs_list::-webkit-scrollbar, .dialog_messages::-webkit-scrollbar { width: 8px; }
+.dialogs_list::-webkit-scrollbar-thumb, .dialog_messages::-webkit-scrollbar-thumb {
+  background: var(--bs-scroll); border-radius: 4px;
+}
+.dialogs_list::-webkit-scrollbar-track, .dialog_messages::-webkit-scrollbar-track { background: transparent; }
+
+  /* ===== 1.2.0: боковые панели без растягивания строк ===== */
+  .slide-panel .slide-panel-content {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+  }
+  .slide-panel .slide-panel-content > tbody {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    gap: 10px !important;
+    padding: 10px 0 !important;
+  }
+  .slide-panel .slide-panel-content > tbody > tr { display: flex !important; flex: none !important; }
+  .slide-panel .slide-panel-content > tbody > tr > td { display: block !important; flex: 1 1 auto !important; min-width: 0 !important; padding-top: 0 !important; padding-bottom: 0 !important; border: none !important; }
+  .slide-panel .slide-panel-content > tbody > tr:has(> td.blueSalesVkGroupWidget:not(:has(*))),
+  .slide-panel .slide-panel-content > tbody > tr:has(> td.ordersList:not(:has(*))) { display: none !important; }
+
+  /* быстрые фразы занимают весь остаток высоты */
+  .slide-panel .slide-panel-content > tbody > tr:has(> td.faq) { flex: 1 1 auto !important; min-height: 0 !important; }
+  td.slide-panel-section.faq, #faqPlace { display: flex !important; flex-direction: column !important; flex: 1 1 auto !important; min-height: 0 !important; }
+  #faqContent { flex: 1 1 auto !important; min-height: 0 !important; height: auto !important; max-height: none !important; overflow-y: auto !important; padding: 6px 8px !important; }
+  #faqContent .crm_clear_fix { margin: 6px 0 2px !important; font-size: 11px !important; }
+  #faqContent p { margin: 0 0 2px !important; }
+  #faqContent p a { padding: 3px 6px !important; margin: 0 -2px !important; font-size: 12.5px !important; line-height: 1.3 !important; }
+
+  /* ===== карточка клиента: подпись слева, значение справа ===== */
+  #customer-data {
+    display: grid !important;
+    grid-template-columns: 92px minmax(0, 1fr) !important;
+    column-gap: 8px !important;
+    row-gap: 4px !important;
+    align-items: baseline !important;
+  }
+  #customer-data > .title { color: var(--bs-muted) !important; font-size: 11.5px !important; line-height: 1.3 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+  #customer-data > .title b { font-weight: 500 !important; }
+  #customer-data > .value { font-size: 12.5px !important; line-height: 1.3 !important; min-width: 0 !important; overflow-wrap: anywhere !important; }
+  #customer-data select, #customer-data input[type="text"], #customer-data textarea {
+    max-width: 100% !important; border: 1px solid var(--bs-border) !important; border-radius: 6px !important; padding: 2px 6px !important; font-size: 12.5px !important; background: var(--bs-panel) !important;
+  }
+
+  /* календарь в правой панели не обрезается прокруткой */
+  .slide-panel .calendar-wr { position: static !important; }
+  .slide-panel #calendar.calendar { left: 10px !important; right: auto !important; top: auto !important; margin-top: 4px !important; width: 232px !important; }
+
+  /* ===== Selectize: фильтры «Менеджеры», «Статусы CRM», «Тэги» ===== */
+  .selectize-control { width: 100% !important; margin: 0 0 6px !important; }
+  .selectize-control .selectize-input {
+    min-height: 34px !important;
+    padding: 6px 10px !important;
+    border: 1px solid var(--bs-border) !important;
+    border-radius: 10px !important;
+    background: var(--bs-hover) !important;
+    box-shadow: none !important;
+    font: 13px/1.4 var(--bs-font) !important;
+    display: flex !important; flex-wrap: wrap !important; align-items: center !important; gap: 4px !important;
+  }
+  .selectize-control .selectize-input.focus { border-color: var(--bs-accent) !important; background: var(--bs-panel) !important; box-shadow: 0 0 0 3px var(--bs-accent-soft) !important; }
+  .selectize-control .selectize-input > input { font: 13px var(--bs-font) !important; }
+  .selectize-control .selectize-input > input::placeholder { color: var(--bs-muted) !important; }
+  .selectize-control .selectize-input > .item { margin: 0 !important; border-radius: 999px !important; padding: 2px 8px !important; border: none !important; box-shadow: none !important; background-image: none !important; font-size: 12px !important; }
+  .selectize-control.plugin-remove_button .item .remove { border: none !important; opacity: .6; }
+  .selectize-dropdown {
+    margin-top: 4px !important;
+    border: 1px solid var(--bs-border) !important;
+    border-radius: 10px !important;
+    box-shadow: 0 10px 30px rgba(16, 24, 40, .14) !important;
+    background: var(--bs-panel) !important;
+    overflow: hidden !important;
+    z-index: 3000 !important;
+  }
+  .selectize-dropdown-content { padding: 4px !important; max-height: 280px !important; }
+  .selectize-dropdown .option {
+    padding: 6px 10px !important;
+    border-radius: 6px !important;
+    font: 13px/1.35 var(--bs-font) !important;
+    cursor: pointer !important;
+  }
+  .selectize-dropdown .option.active { background: var(--bs-hover) !important; }
+  .tag-selectize-option, .tag-selectize-item {
+    display: inline-block !important;
+    border-radius: 999px !important;
+    padding: 2px 9px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    max-width: 100% !important;
+    overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important;
+  }
+  .selectize-dropdown .option:has(.tag-selectize-option) { padding: 3px 8px !important; }
+
+  /* фильтры напоминаний */
+  #remindersPlace .hybrid-control-edit:not(.selectized), #remindersPlace select {
+    width: 100% !important; height: 30px !important; border: 1px solid var(--bs-border) !important; border-radius: 8px !important; background: var(--bs-hover) !important; font-size: 12.5px !important; padding: 0 6px !important;
+  }
+
+  /* ===== Смайлики ===== */
+  .emoji_selector {
+    width: 384px !important;
+    min-width: 384px !important;
+    max-width: none !important;
+    box-sizing: border-box !important;
+    max-height: 320px !important;
+    padding: 10px 8px !important;
+    border: 1px solid var(--bs-border) !important;
+    border-radius: 14px !important;
+    background: var(--bs-panel) !important;
+    box-shadow: 0 12px 32px rgba(16, 24, 40, .16) !important;
+    overflow-y: auto !important;
+    z-index: 3000 !important;
+  }
+  .emoji_group_label {
+    display: block !important;
+    padding: 6px 4px 4px !important;
+    font: 600 11px var(--bs-font) !important;
+    color: var(--bs-muted) !important;
+    text-transform: uppercase !important;
+    letter-spacing: .04em !important;
+  }
+  .emoji_group { display: grid !important; grid-template-columns: repeat(10, 1fr) !important; gap: 2px !important; }
+  .emoji_selector .emoji {
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    width: auto !important; height: 34px !important; margin: 0 !important;
+    font-size: 22px !important; line-height: 1 !important;
+    border-radius: 8px !important; cursor: pointer !important;
+    transition: background .12s, transform .12s;
+  }
+  .emoji_selector .emoji:hover { background: var(--bs-hover) !important; transform: scale(1.12); }
+  .emoji_button { opacity: .7; cursor: pointer !important; transition: opacity .12s; }
+  .emoji_button:hover { opacity: 1; }
+
+  /* поправки 1.2.0 */
+  #customer-data { align-items: start !important; }
+  #customer-data .selectize-control { margin: 0 !important; width: 100% !important; }
+  #customer-data .selectize-control .selectize-input { min-height: 0 !important; padding: 0 !important; border: none !important; background: transparent !important; box-shadow: none !important; gap: 3px !important; }
+  #customer-data .selectize-control .selectize-input.focus { background: var(--bs-panel) !important; box-shadow: 0 0 0 2px var(--bs-accent-soft) !important; border-radius: 6px !important; padding: 2px !important; }
+  #customer-data .selectize-control .selectize-input:not(.focus) > input { position: absolute !important; opacity: 0 !important; width: 0 !important; padding: 0 !important; border: 0 !important; }
+  #customer-data .tag-selectize-item { font-size: 11.5px !important; padding: 1px 8px !important; }
+  .slide-panel #calendar.calendar { bottom: auto !important; transform: none !important; margin-top: 12px !important; }
+  #calendar .calendar-top-c { background: none !important; }
+  #calendar .month-prev, #calendar .month-next {
+    background: none !important;
+    width: 7px !important; height: 7px !important;
+    border: solid var(--bs-muted) !important; border-width: 0 0 2px 2px !important;
+    cursor: pointer !important;
+  }
+  #calendar .month-prev { transform: translateY(-50%) rotate(45deg) !important; }
+  #calendar .month-next { transform: translateY(-50%) rotate(-135deg) !important; }
+
+  /* ===== 1.3.0 ===== */
+  /* поле ввода растёт вниз-вверх вместе с блоком, а не налезает на сообщения */
+  .dialog_box { height: auto !important; min-height: 0 !important; }
+  .dialog_box .send_message_textarea { max-height: 40vh !important; overflow-y: auto !important; }
+
+  /* список чатов на всю ширину колонки, скролл у края */
+  .dialogs_list { width: 100% !important; }
+
+  /* кнопка «Сохранить» в карточке клиента */
+  #customerPlaceSave a, #customerPlaceSave .button-link {
+    display: inline-block !important;
+    padding: 4px 12px !important;
+    border: none !important;
+    border-radius: 8px !important;
+    background: var(--bs-accent) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    font-size: 12.5px !important;
+    text-decoration: none !important;
+    box-shadow: none !important;
+  }
+  #customerPlaceSave a:hover { filter: brightness(1.08); }
+  #customerPlaceSave .button-link-disabled {
+    display: inline-block !important;
+    padding: 4px 12px !important;
+    border-radius: 8px !important;
+    background: var(--bs-hover) !important;
+    color: var(--bs-muted) !important;
+    font-weight: 600 !important;
+    font-size: 12.5px !important;
+  }
+
+  /* наши сообщения (есть подпись менеджера или «Бот») – справа, как в Telegram */
+  .message_block:has(.message_sender > *) { flex-direction: row-reverse !important; }
+  .message_block:has(.message_sender > *) .message {
+    background: var(--bs-own) !important;
+    border-radius: var(--bs-radius) 4px var(--bs-radius) var(--bs-radius) !important;
+  }
+  .message_block:has(.message_sender > *) .bot_keyboard .button { background: var(--bs-keyboard) !important; }
+
+  /* ===== 1.4.0 ===== */
+  /* теги и поля карточки не вылезают за границу */
+  #customer-data .hybrid-control { display: block !important; width: auto !important; max-width: 100% !important; min-width: 0 !important; }
+  #customer-data .selectize-control, #customer-data .selectize-input { width: 100% !important; max-width: 100% !important; box-sizing: border-box !important; }
+  #customer-data .tag-selectize-item { max-width: 100% !important; }
+
+  /* строка «Сохранить / Обновить» */
+  .buttons-section { display: flex !important; align-items: center !important; gap: 10px !important; margin-top: 8px !important; }
+  .buttons-section > .title, .buttons-section > .value { width: auto !important; overflow: visible !important; padding: 0 !important; margin: 0 !important; }
+  #customerPlaceSave a, #customerPlaceSave .button-link, #customerPlaceSave .button-link-disabled { padding: 4px 12px !important; font-size: 12px !important; }
+
+  /* быстрые фразы плотнее */
+  #faqContent { padding: 4px 6px !important; }
+  #faqContent .crm_clear_fix { margin: 4px 0 1px !important; font-size: 10.5px !important; }
+  #faqContent p { margin: 0 !important; }
+  #faqContent p a { padding: 2px 5px !important; margin: 0 -1px !important; font-size: 11.5px !important; line-height: 1.25 !important; }
+
+  /* вкладки каналов на всю ширину */
+  .tabs { width: 100% !important; }
+  .tabs > ul.nav-tabs { width: 100% !important; flex-wrap: wrap !important; }
+  .tabs > ul.nav-tabs > li.nav-item { flex: 1 1 auto !important; }
+  .tabs > ul.nav-tabs > li.add_channel { flex: none !important; }
+  .tabs > ul.nav-tabs > li.nav-item > .channel-tab { display: flex !important; justify-content: center !important; align-items: center !important; width: 100% !important; box-sizing: border-box !important; }
+
+  /* ===== 1.5.0: каналы на всю ширину, кнопки карточки, компактная левая панель ===== */
+  html body .main > .tabs { max-width: none !important; width: 100% !important; }
+  html body .tabs > ul.nav-tabs { flex-wrap: nowrap !important; gap: 6px !important; }
+  html body .tabs > ul.nav-tabs > li.nav-item { flex: 1 1 0 !important; min-width: 0 !important; }
+  html body .tabs > ul.nav-tabs > li.add_channel { flex: none !important; }
+  html body .tabs li.nav-item > .channel-tab { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+
+  /* Сохранить + Обновить – две одинаковые кнопки в ряд */
+  html body .buttons-section { gap: 6px !important; }
+  html body .buttons-section > .title, html body .buttons-section > .value { flex: 1 1 0 !important; max-width: none !important; min-width: 0 !important; }
+  html body .buttons-section b, html body #customerPlaceSave { display: block !important; font-weight: 600 !important; }
+  html body .buttons-section a, html body .buttons-section .button-link, html body .buttons-section .button-link-disabled {
+    display: block !important; width: 100% !important; box-sizing: border-box !important;
+    text-align: center !important; padding: 5px 8px !important; border-radius: 8px !important;
+    font-size: 12px !important; font-weight: 600 !important; line-height: 1.3 !important; text-decoration: none !important;
+  }
+  html body .buttons-section > .value a { background: var(--bs-hover) !important; color: var(--bs-accent) !important; }
+  html body .buttons-section > .value a:hover { background: var(--bs-btn-hover) !important; }
+
+  /* Аккаунт: почта и «Выход» в одну строку, без логотипа */
+  html body #infoPlace { display: flex !important; align-items: center !important; gap: 6px !important; padding: 5px 8px !important; line-height: 1.25 !important; font-size: 11px !important; }
+  html body #infoPlace > span.title, html body #infoPlace > div { display: none !important; }
+  html body #infoPlace > span.value { order: 2 !important; flex: none !important; margin-left: auto !important; width: auto !important; min-width: 0 !important; padding-top: 0 !important; text-align: right !important; }
+  html body #infoPlace > span:not(.title):not(.value) { flex: 1 1 auto !important; min-width: 0 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+  html body #infoPlace a { font-size: 11px !important; }
+
+  /* Напоминания */
+  html body .slide-panel .slide-panel-content > tbody { gap: 6px !important; padding: 6px 0 !important; }
+  html body #remindersHeader { margin-bottom: 3px !important; font-size: 11px !important; }
+  html body #remindersContent { padding: 5px 6px !important; }
+  html body #remindersTabsOnly { display: flex !important; flex-wrap: wrap !important; gap: 3px !important; }
+  html body #remindersTabsOnly > span { flex: 1 1 40% !important; }
+  html body #remindersTabsOnly > span > *, html body #remindersTabsOnly a { display: block !important; text-align: center !important; padding: 2px 4px !important; font-size: 11px !important; white-space: nowrap !important; }
+  html body #remindersTabsOnly .selected-tab * { font-size: 11px !important; }
+  html body #remindersTabs br { display: none !important; }
+  html body #moreFiltersLink { margin: 3px 0 2px !important; font-size: 11px !important; }
+  html body #moreFiltersLink a { font-size: 11px !important; }
+  html body .customersList td { padding: 2px 3px !important; font-size: 11.5px !important; line-height: 1.25 !important; }
+  html body .customersList td.title { max-width: 90px !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
+  html body .customersList td.title a { white-space: nowrap !important; }
+  html body .customersList .crm-status-name { font-size: 10.5px !important; white-space: nowrap !important; }
+
+  /* ===== 1.6.0: сообщения до поля ввода, кликабельные напоминания, компактный список чатов ===== */
+  /* сайт задаёт высоту calc(100% - 148px) – из-за неё снизу был пустой зазор */
+  html body td.dialog > .dialog_messages { flex: 1 1 0 !important; height: auto !important; min-height: 0 !important; margin-bottom: 0 !important; }
+  html body td.dialog > .dialog_box { margin-top: 0 !important; }
+
+  /* Напоминания: кликается вся строка, крестик остаётся поверх */
+  html body .customersList tr { position: relative !important; cursor: pointer !important; }
+  html body .customersList td.title a.openDialogLink::after { content: "" !important; position: absolute !important; inset: 0 !important; }
+  html body .customersList td.delete-button { position: relative !important; z-index: 1 !important; }
+
+  /* Сохранить и Обновить одного размера */
+  html body #customerPlaceSave .button-link-disabled, html body #customerPlaceSave a, html body .buttons-section > .value a {
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    width: 100% !important; height: 26px !important; padding: 0 8px !important; box-sizing: border-box !important;
+    font-size: 12px !important; line-height: 1 !important; border-radius: 8px !important;
+  }
+
+  /* Вкладки каналов мельче */
+  html body .tabs .channel-tab.nav-link { padding: 4px 8px !important; font-size: 11.5px !important; }
+  html body .tabs .channel-tab.nav-link, html body .tabs .channel-tab.nav-link * { font-size: 11.5px !important; }
+  html body .tabs .channel-tab.nav-link img { width: 16px !important; height: 16px !important; }
+  html body .tabs li.add_channel img { width: 18px !important; height: 18px !important; }
+
+  /* Список чатов: компактные строки – имя и время, статус и теги в одну строку, превью */
+  html body .dialogs_list_item_content { gap: 8px !important; padding: 6px 10px !important; align-items: flex-start !important; }
+  html body .dialogs_list_item .big_icon { width: 34px !important; height: 34px !important; font-size: 13px !important; margin-top: 2px !important; }
+  html body .dialogs_list_summary { display: grid !important; grid-template-columns: minmax(0, 1fr) auto !important; column-gap: 6px !important; row-gap: 1px !important; align-items: center !important; }
+  html body .dialogs_list_person_name_and_post { grid-column: 1 !important; min-width: 0 !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; line-height: 1.2 !important; }
+  html body .dialogs_list_person_name { font-size: 13px !important; }
+  html body .dialogs_list_time { grid-column: 2 !important; grid-row: 1 !important; font-size: 10.5px !important; line-height: 1.2 !important; }
+  html body .dialogs_list_summary > .customer_summary { grid-column: 1 / -1 !important; display: flex !important; flex-wrap: nowrap !important; height: auto !important; align-items: center !important; gap: 2px 3px !important; }
+  html body .dialogs_list_item .crm_status { flex: none !important; margin-right: 2px !important; }
+  html body .dialogs_list_item .crm_status, html body .dialogs_list_item .crm-status-name { font-size: 11.5px !important; line-height: 15px !important; }
+  html body .dialogs_list_item .tags { display: flex !important; flex-wrap: wrap !important; gap: 2px 3px !important; flex: 1 1 0 !important; min-width: 0 !important; max-height: 14px !important; overflow: hidden !important; margin: 0 !important; }
+  html body .dialogs_list_item .tags span { font-size: 9.5px !important; height: 14px !important; line-height: 14px !important; padding: 0 4px !important; margin: 0 !important; border-radius: 4px !important; }
+  html body .dialogs_list_summary > .dialogs_list_preview { grid-column: 1 / -1 !important; font-size: 11.5px !important; line-height: 1.3 !important; margin-top: 1px !important; }
+
+  /* ===== 1.7.0: список чатов на всю ширину, компактная переписка и шапка ===== */
+  /* сайт задаёт строке чата ширину 287px, а тексту max-width 225px */
+  html body .dialogs_list_item_content { flex: 1 1 auto !important; width: auto !important; min-width: 0 !important; }
+  html body .dialogs_list_summary { max-width: none !important; width: auto !important; }
+  html body .dialogs_list_preview { max-width: none !important; width: auto !important; }
+
+  /* Шапка открытого чата */
+  html body .dialog_header { padding: 0 14px !important; gap: 8px !important; min-height: 0 !important; height: 44px !important; }
+  html body .dialog_header .icon_link { width: auto !important; }
+  html body .dialog_header .small_icon, html body .dialog_header .small_icon > div, html body .dialog_header .small_icon img { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+  html body .dialog_header .person_name, html body .dialog_header .person_name a { font-size: 13px !important; }
+
+  /* Переписка */
+  html body .dialog_messages { padding: 8px 14px !important; }
+  html body .message_block { margin: 0 0 4px !important; padding: 0 !important; gap: 6px !important; }
+  html body .message_block .icon_link { width: 30px !important; }
+  html body .message_block .icon, html body .message_block .icon > div, html body .message_block .icon img.avatar { width: 28px !important; height: 28px !important; font-size: 11px !important; }
+  html body .message { padding: 5px 10px 6px !important; font-size: 12.5px !important; line-height: 1.35 !important; }
+  html body .message .message_text { font-size: 12.5px !important; line-height: 1.35 !important; }
+  html body .message .person_name, html body .message .person_name a { font-size: 11.5px !important; margin-bottom: 1px !important; }
+  html body .message .message_time, html body .message .message_sender, html body .message .message_sender a { font-size: 10px !important; }
+  html body .date_heading { margin: 6px 0 !important; padding: 0 !important; font-size: 10.5px !important; }
+  html body .forwarded_messages { margin: 3px 0 !important; }
+  html body .forwarded_message_block { margin: 0 0 3px !important; }
+  html body .forwarded_message_block .message { padding: 3px 8px !important; }
+  html body .forwarded_message_block .icon, html body .forwarded_message_block .icon > div, html body .forwarded_message_block .icon img.avatar { width: 22px !important; height: 22px !important; }
+
+  /* ===== 1.8.0: скрытые элементы ===== */
+  /* кнопки подключения каналов (+ ВК, ОК, Instagram...) – нужны только руководителю */
+  html body .tabs li.add_channel { display: none !important }
+
+  /* ===== 1.9.0: поиск и фильтры в размер списка, мелкие логотипы каналов ===== */
+  html body .dialogs_search_box_container { padding: 10px 10px 4px !important }
+  html body input.dialogs_search_box { height: 30px !important; font-size: 12px !important; padding: 0 10px !important; border-radius: 8px !important }
+  html body .dialogs_filters { display: flex !important; align-items: center !important; flex-wrap: wrap !important; gap: 4px 6px !important; padding: 2px 10px 6px !important; font-size: 12px !important }
+  html body .dialogs_filters .read_state_filter { display: contents !important }
+  html body .dialogs_filters .btn-group > label.btn { font-size: 11.5px !important; height: 22px !important; line-height: 22px !important; padding: 0 8px !important; border-radius: 6px !important }
+  html body .dialogs_filters a.show_more_filters { font-size: 11.5px !important; margin-left: auto !important }
+
+  html body .tabs .channel-tab > a:first-child { display: inline-flex !important; align-items: center !important; gap: 4px !important; max-width: 100% !important; min-width: 0 !important; vertical-align: middle !important }
+  html body .tabs .channel-tab [class$="_logo"] { display: inline-flex !important; align-items: center !important; justify-content: center !important; flex: none !important; position: static !important; top: auto !important; width: 15px !important; height: 15px !important; padding: 0 !important; margin: 0 !important; border-radius: 4px !important; font-size: 9px !important; line-height: 1 !important; vertical-align: middle !important; overflow: hidden !important; box-sizing: border-box !important }
+  html body .tabs .channel-tab [class$="_logo"] > * { width: auto !important; height: auto !important; max-width: 100% !important; max-height: 100% !important; font-size: 9px !important; line-height: 1 !important }
+  html body .tabs .channel-tab .max_logo svg { width: 10px !important; height: 10px !important }
+  html body .tabs .channel-tab .instagram_logo > div { width: 15px !important; height: 15px !important; background-size: contain !important }
+  html body .tabs .channel-tab .badge { font-size: 9.5px !important; padding: 1px 4px !important; line-height: 12px !important; vertical-align: 1px !important }
+  html body .tabs .channel-tab .cogwheel { font-size: 10px !important }
+
+  /* инициалы в аватарках – по центру */
+  html body .dialog_header .small_icon > div, html body .message_block .icon > div { display: flex !important; align-items: center !important; justify-content: center !important; line-height: 1 !important }
+  /* ===== 1.10.0: компактные доп. фильтры, ровные шрифты в правой колонке ===== */
+  html body .more_filters .customers_filters { display: flex !important; flex-direction: column !important; gap: 4px !important; padding: 4px 0 2px !important }
+  html body .more_filters .selectize-control { width: 100% !important; margin: 0 !important }
+  html body .more_filters .selectize-input { min-height: 26px !important; padding: 3px 8px !important; font-size: 12px !important; border-radius: 7px !important; box-shadow: none !important }
+  html body .more_filters .selectize-input input { font-size: 12px !important; height: 18px !important; line-height: 18px !important }
+  html body .more_filters .selectize-input .tag-selectize-item { font-size: 10.5px !important; line-height: 16px !important; padding: 0 6px !important; margin: 1px 3px 1px 0 !important }
+  html body .more_filters .selectize-dropdown { width: 100% !important; max-height: 260px !important }
+  html body .more_filters .selectize-dropdown-content { display: flex !important; flex-wrap: wrap !important; gap: 3px !important; padding: 6px !important; max-height: 250px !important }
+  html body .more_filters .selectize-dropdown-content > div { padding: 0 !important; background: none !important }
+  html body .more_filters .selectize-dropdown-content > div > span,
+  html body .more_filters .selectize-dropdown-content .tag-selectize-option { display: inline-block !important; font-size: 10.5px !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
+  html body .more_filters .selectize-dropdown-content > div.active > span { outline: 2px solid var(--bs-accent) !important; outline-offset: 0 !important }
+  html body .more_filters .multiple-toggle-butt label.btn { font-size: 11.5px !important; height: 22px !important; line-height: 22px !important; padding: 0 8px !important }
+
+  html body #customer-data .hybrid-control-view,
+  html body #customer-data .hybrid-control-view * { font-size: 12px !important; line-height: 1.35 !important }
+  html body #customer-data .crm-status-name { font-weight: 600 !important; white-space: nowrap !important; display: block !important; overflow: hidden !important; text-overflow: ellipsis !important }
+  html body #orderPanel a.button-link, html body #goodsPlace a.button-link { font-size: 12px !important; font-weight: 600 !important }
+
+  /* кнопка бота, которую нажал клиент */
+  html body .message .button.clicked_button { display: inline-block !important; margin-top: 4px !important; padding: 3px 10px !important; border-radius: 8px !important; font-size: 12px !important; background: var(--bs-accent-soft) !important; color: var(--bs-accent) !important; border: 1px solid var(--bs-accent) !important; box-shadow: none !important }
+
+
+  /* ===== 1.11.0: подсказки скриптов при вводе, цвета статусов в списке ===== */
+  html body #dialogPlace { top: auto !important; bottom: calc(100% + 6px) !important; left: 0 !important; width: min(560px, 100%) !important; max-height: 45vh !important; overflow-y: auto !important; padding: 4px !important; background: var(--bs-panel) !important; border: 1px solid var(--bs-border) !important; border-radius: 10px !important; box-shadow: 0 8px 24px rgba(0, 0, 0, .18) !important; font-size: 12.5px !important }
+  html body #dialogPlace > div { margin: 0 !important; padding: 0 !important; background: none !important; border: 0 !important }
+  html body #dialogPlace a { display: block !important; padding: 5px 9px !important; border-radius: 7px !important; color: var(--bs-text) !important; line-height: 1.35 !important; text-decoration: none !important; cursor: pointer !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
+  html body #dialogPlace a b { color: var(--bs-accent) !important; font-weight: 600 !important }
+  html body #dialogPlace a:hover, html body #dialogPlace a:focus { background: var(--bs-hover) !important }
+
+  html body .dialogs_list_item .crm-status-name { font-weight: 600 !important }
+
+  /* смайлики всегда открыты – внизу правой колонки (правая панель z-index 2000) */
+  html body.slide-panel-right-open .send_message_box .emoji_selector { display: block !important; position: fixed !important; right: 12px !important; bottom: 12px !important; left: auto !important; top: auto !important; width: 230px !important; min-width: 230px !important; max-width: 230px !important; box-sizing: border-box !important; height: 34vh !important; max-height: none !important; overflow-y: auto !important; padding: 6px 8px !important; margin: 0 !important; background: var(--bs-panel) !important; border: 1px solid var(--bs-border) !important; border-radius: 12px !important; box-shadow: none !important; z-index: 2001 !important }
+  html body.slide-panel-right-open .send_message_box .emoji_button { display: none !important }
+  html body .emoji_selector .emoji_group_label { display: block !important; font-size: 10.5px !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: .03em !important; color: var(--bs-muted) !important; margin: 6px 2px 2px !important; position: sticky !important; top: -6px !important; background: var(--bs-panel) !important; padding: 2px 0 !important; z-index: 1 !important }
+  html body .emoji_selector .emoji_group { display: grid !important; grid-template-columns: repeat(7, 1fr) !important; gap: 0 !important }
+  html body .emoji_selector .emoji { font-size: 18px !important; line-height: 28px !important; height: 28px !important; width: auto !important; padding: 0 !important; margin: 0 !important; text-align: center !important; border-radius: 6px !important; cursor: pointer !important }
+  html body .emoji_selector .emoji:hover { background: var(--bs-hover) !important }
+
+
+  /* ===== 1.12.0: фильтр «Статусы CRM» ===== */
+  html body .more_filters .selectize-input input { background: transparent !important; border: 0 !important; box-shadow: none !important }
+  html body .more_filters .crm-status-selectize .selectize-dropdown { min-width: 200px !important }
+  html body .more_filters .crm-status-selectize .selectize-dropdown-content { display: block !important; padding: 4px !important }
+  html body .more_filters .crm-status-selectize .selectize-dropdown-content > div > span { display: block !important; font-size: 12px !important; line-height: 18px !important; padding: 3px 8px !important; font-weight: 600 !important; max-width: none !important; border-radius: 6px !important }
+  html body .more_filters .crm-status-selectize .selectize-dropdown-content > div.active > span { outline: none !important; background: var(--bs-hover) !important }
+
+  /* ===== 1.13.0: открытый чат и непрочитанные различаются ===== */
+  /* непрочитанные – лёгкий фон и синяя точка у имени */
+  html body .dialogs_list_item.is_not_read,
+  html body .dialogs_list_item.is_not_read .dialogs_list_item_content { background: #f4f7fd !important }
+  html body .dialogs_list_item.is_not_read .dialogs_list_person_name::after { content: "" !important; display: inline-block !important; width: 7px !important; height: 7px !important; border-radius: 50% !important; background: var(--bs-accent) !important; margin-left: 6px !important; vertical-align: 2px !important }
+  /* открытый – насыщеннее и с полосой слева */
+  html body .dialogs_list_item:hover,
+  html body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important }
+  html body .dialogs_list_item.active,
+  html body .dialogs_list_item.active .dialogs_list_item_content { background: #dce8fd !important }
+  html body .dialogs_list_item.active { box-shadow: inset 3px 0 0 var(--bs-accent) !important }
+
+  /* ===== 1.14.0: непрочитанные заметнее ===== */
+  html body .dialogs_list_item.is_not_read,
+  html body .dialogs_list_item.is_not_read .dialogs_list_item_content { background: #eaf1fd !important }
+  html body .dialogs_list_item:hover,
+  html body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important }
+  html body .dialogs_list_item.active,
+  html body .dialogs_list_item.active .dialogs_list_item_content { background: #d2e2fc !important }
+
+}
