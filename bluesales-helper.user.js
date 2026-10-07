@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.13.1
+// @version      1.13.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -877,14 +877,15 @@
       '.bs-rep-grid input{padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:transparent;color:var(--bs-text,#222);font-size:13px;outline:none}' +
       '.bs-rep-grid input:focus{border-color:var(--bs-accent,#3b82f6)}' +
       // пока считаем – поля «авто» переливаются, кнопки копирования и пересчёта неактивны
-      '#bsRep.bs-loading .bs-auto input{color:transparent!important;border-color:transparent!important;background:linear-gradient(90deg,var(--bs-hover,#eef1f5) 25%,rgba(59,130,246,.18) 50%,var(--bs-hover,#eef1f5) 75%)!important;background-size:200% 100%!important;animation:bsShim 1.1s linear infinite}' +
-      '@keyframes bsShim{from{background-position:100% 0}to{background-position:-100% 0}}' +
+      '#bsRep.bs-loading .bs-auto input{color:transparent!important;background-image:linear-gradient(var(--bs-border,#D9E0E7),var(--bs-border,#D9E0E7))!important;background-repeat:no-repeat!important;background-position:9px center!important;background-size:22px 8px;animation:bsBar .9s ease-in-out infinite alternate}' +
+      '@keyframes bsBar{from{background-size:22px 8px}to{background-size:58px 8px}}' +
       '#bsRep.bs-loading .bs-rep-btns button[data-a=copy],#bsRep.bs-loading .bs-rep-btns button[data-a=reload]{opacity:.45;pointer-events:none}' +
       '#bsRep.bs-done .bs-auto input{animation:bsOk 1.4s ease-out}' +
       '@keyframes bsOk{0%,40%{border-color:#22a55a;box-shadow:0 0 0 3px rgba(34,165,90,.18)}100%{box-shadow:0 0 0 0 rgba(34,165,90,0)}}' +
       '.bs-rep-status{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:500}' +
       '.bs-rep-status:empty{display:none}' +
-      '.bs-rep-status[data-st=load]{background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rep-status[data-st=load]{background:var(--bs-hover,#f3f5f8);color:var(--bs-muted,#777)}' +
+      '.bs-rep-status[data-st=load] i{color:var(--bs-accent,#3b82f6)}' +
       '.bs-rep-status[data-st=ok]{background:rgba(34,165,90,.13);color:#1f9d55}' +
       '.bs-rep-status[data-st=err]{background:rgba(229,62,62,.13);color:#e04848}' +
       '.bs-rep-status i{flex:none;width:16px;height:16px;box-sizing:border-box;border-radius:50%;display:flex;align-items:center;justify-content:center;font-style:normal;font-size:11px;font-weight:700;color:#fff}' +
