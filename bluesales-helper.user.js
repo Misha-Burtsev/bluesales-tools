@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.20.1
+// @version      1.21.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -281,15 +281,23 @@
     });
     document.addEventListener('mousedown', ev => { if (!ev.target.closest('#bsSndMenu,#bsSndBtn')) closeSnd(); }, true);
     tog.addEventListener('click', () => flip('bsEmoClosed'));
-    dock.append(inp, label, theme, snd);
+    dock.append(theme, snd);
+    // поиск смайликов / «Смайлики ▴» – своя плашка между ссылками и кнопками
+    const bar = document.createElement('div');
+    bar.id = 'bsEmoBar';
+    bar.append(inp, label);
     // кнопка сворачивания – в правом верхнем углу панели смайликов (ставит placeLinks); свёрнутые открываются по «Смайлики» в панели
-    document.body.append(dock, tog);
+    document.body.append(dock, bar, tog);
 
     const st = document.createElement('style');
     st.textContent = [
       '#bsDock{display:none;position:fixed;right:12px;bottom:12px;width:230px;box-sizing:border-box;height:36px;align-items:center;gap:2px;padding:0 4px 0 6px;',
       'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);border-radius:12px;z-index:2001;font-size:12.5px;color:var(--bs-text,#222)}',
       'body.slide-panel-right-open #bsDock{display:flex}',
+      '#bsDock{justify-content:space-around;padding:0 6px}',
+      '#bsEmoBar{display:none;position:fixed;right:12px;bottom:54px;width:230px;box-sizing:border-box;height:36px;align-items:center;padding:0 6px;',
+      'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);border-radius:12px;z-index:2001;font-size:12.5px;color:var(--bs-text,#222)}',
+      'body.slide-panel-right-open.bs-can-send #bsEmoBar{display:flex}',
       '#bsEmoSearch{flex:1;min-width:0;height:24px;padding:0 8px;border:1px solid var(--bs-border,#D9E0E7)!important;border-radius:7px;background:var(--bs-hover,#f3f4f6)!important;color:var(--bs-text,#222)!important;font-size:12px;outline:none}',
       '#bsEmoSearch:focus{border-color:var(--bs-accent,#3b82f6)!important}',
       '#bsEmoLabel{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
@@ -311,7 +319,7 @@
       '#bsSndMenu i::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}',
       '#bsSndMenu .bs-on i{background:var(--bs-accent,#3b82f6)}',
       '#bsSndMenu .bs-on i::after{left:13px}',
-      'html:root body.slide-panel-right-open .send_message_box .emoji_selector{bottom:54px!important}',
+      'html:root body.slide-panel-right-open .send_message_box .emoji_selector{bottom:96px!important}',
       'html:root body.bs-emo-closed .send_message_box .emoji_selector{display:none!important}',
       'html:root body .emoji_selector .bs-pop,html:root body .emoji_selector .bs-hide{display:none!important}',
     ].join('');
@@ -414,11 +422,11 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
-      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); paintSeries(); paintUnans(); }, 150);
+      if (!t) t = setTimeout(() => { t = 0; paintWait(); paintDrafts(); paintMarks(); paintSeries(); }, 150);
     })
       .observe(document.body, { childList: true, subtree: true });
     setInterval(paintWait, 30000);
@@ -536,7 +544,7 @@
     setInterval(draftTick, 250);
   }
   // сообщение ушло – черновик этого чата больше не нужен
-  function onSent(id) { if (id) saveDraft(id, ''); markAnswered(id); setTimeout(loadUnans, 2500); }
+  function onSent(id) { if (id) saveDraft(id, ''); markAnswered(id); }
 
   document.addEventListener('DOMContentLoaded', () => { waitInit(); draftInit(); });
 
@@ -898,45 +906,6 @@
   }
   document.addEventListener('DOMContentLoaded', marksInit);
 
-  // ---------- Неотвеченные на капсуле канала (оранжевый счётчик рядом с непрочитанными) ----------
-  // Тот же запрос, что у вкладки «Неотвеченные» (readState: 2), только по каждому каналу. Это чтение, чаты не открываются.
-  const unans = {};   // id канала → число неотвеченных
-  let unansBusy = false;
-  async function loadUnans() {
-    if (unansBusy || document.hidden) return;
-    unansBusy = true;
-    try {
-      const chans = (await bsApi('dialogs.getChannels', { customersFilterData: {} })) || [];
-      await Promise.all(chans.map(c => bsApi('dialogs.get', {
-        channelId: c.id, startRowNumber: 1, pageSize: 500, newerThan: new Date(1), readState: 2, customersFilterData: {},
-      }).then(r => { unans[c.id] = (r || []).length; }).catch(() => {})));
-      paintUnans();
-    } catch (e) {} finally { unansBusy = false; }
-  }
-  function paintUnans() {
-    document.querySelectorAll('.channel-tab a[data-channel-id]').forEach(a => {
-      const n = unans[a.dataset.channelId];
-      let b = a.querySelector('.bs-unans');
-      if (!n) { if (b) b.remove(); return; }
-      if (!b) {
-        b = document.createElement('span'); b.className = 'badge bs-unans';
-        const site = a.querySelector('.badge:not(.bs-unans)');
-        if (site) site.after(b); else a.appendChild(b);
-      }
-      const txt = n >= 500 ? '500+' : String(n);
-      if (b.textContent !== txt) { b.textContent = txt; b.title = 'Неотвеченных: ' + txt; }
-    });
-  }
-  document.addEventListener('DOMContentLoaded', () => {
-    const st = document.createElement('style');
-    st.textContent = '.channel-tab .badge.bs-unans{background:#f59e0b!important;color:#fff!important}' +
-      '.channel-tab .badge:not(.bs-unans)+.bs-unans{margin-left:-2px}' +
-      'html body .tabs>ul.nav-tabs>li.nav-item:has(.bs-unans){flex:1 0 auto!important}';
-    document.head.appendChild(st);
-    setTimeout(loadUnans, 2000);
-    setInterval(loadUnans, 60000);
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) loadUnans(); });
-  });
 
   // ---------- Отчёт за смену ----------
   // Цифры берём со страницы «Клиенты» теми же фильтрами, что и вручную: только чтение, ничего не меняем.
@@ -1155,10 +1124,14 @@
     b.style.display = on ? 'flex' : 'none';
     if (tog) tog.style.display = 'none';
     if (!on) return;
-    const sel = document.querySelector('.send_message_box .emoji_selector');
+    // поле ввода скрыто (клиент заблокировал и т.п.) – плашку смайликов не показываем
+    const box = document.querySelector('.send_message_box'), can = !!(box && box.getClientRects().length);
+    if (document.body.classList.contains('bs-can-send') !== can) document.body.classList.toggle('bs-can-send', can);
+    const sel = can && document.querySelector('.send_message_box .emoji_selector');
     const open = sel && sel.getClientRects().length && !document.body.classList.contains('bs-emo-closed');
     if (open) fitEmoji(sel, b);
-    const r = open ? sel.getBoundingClientRect() : dock.getBoundingClientRect();
+    const bar = document.getElementById('bsEmoBar');
+    const r = (open ? sel : can && bar ? bar : dock).getBoundingClientRect();
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
     if (open && tog) {
       tog.style.display = 'flex';
