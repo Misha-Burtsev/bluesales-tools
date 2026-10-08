@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.35.1
+// @version      1.35.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1775,6 +1775,7 @@
       const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
       const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
       const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+      if (histKeep) { open.add(histKeep); histKeep = null; }
       body.innerHTML =
         statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
         (list.length ? '<div class="bs-hist-list">' + list.map(e => {
@@ -1783,7 +1784,7 @@
             '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
-              '<div' + (x.cnt === false ? ' class="bs-hist-other"' : '') + '><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
+              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
             '</div></div>';
@@ -1830,6 +1831,12 @@
         histSave(f.h);
         return paintBody();
       }
+      const sd = t.closest('.bs-hist-s');
+      if (sd) {
+        if (sd.dataset.id) return openSale(sd.dataset.id, true);
+        const f = find(row);
+        return f ? openHistSale(f.i, f.h[f.i].end, +sd.dataset.si) : paintBody();
+      }
       if (!t.closest('.bs-hist-sales')) row.classList.toggle('open');
     };
     // период «с–по»: пересчитываем только список, поля ввода не трогаем
@@ -1847,6 +1854,75 @@
     box.oninput = onRange;
     box.onchange = onRange;
     fromInp.onblur = toInp.onblur = paintPer;
+  }
+  // правка продажи из прошлой смены: цифры смены пересчитываются на разницу
+  let histKeep = null;   // какую смену оставить раскрытой после возврата в «Историю»
+  function openHistSale(hi, end, si) {
+    const h = histGet(), e = h[hi];
+    if (!e || String(e.end) !== String(end) || !e.sales[si]) return openSales('hist');
+    histKeep = hi + ':' + end;
+    closeSale();
+    const old = e.sales[si], x = Object.assign({}, old, { mops: (old.mops || []).slice() });
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    const field = (k, t, ph) => '<label><span>' + t + '</span><input data-k="' + k + '" placeholder="' + (ph || '') + '"></label>';
+    wrap.innerHTML = '<div id="bsSale" class="bs-hedit"><div class="bs-rep-head"><b>Продажа за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-sale-form">' + field('fio', 'Имя и фамилия') + field('name', 'Тариф') +
+      '<div class="bs-hedit-2">' + field('price', 'Цена, ₽') + field('disc', 'Скидка', '₽ или 10%') + '</div>' +
+      '<label><span>Менеджеры</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+      '<div class="bs-sale-note"></div>' +
+      (x.dlg ? '<a class="bs-hedit-chat" href="/app/messenger/?dialogId=' + encodeURIComponent(x.dlg) + '" target="_blank">Открыть чат ↗</a>' : '') + '</div>' +
+      '<div class="bs-rep-btns"><button data-a="del" class="bs-sale-del">Удалить</button><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="save" class="bs-main">Сохранить</button></div></div>';
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('#bsSale'), note = box.querySelector('.bs-sale-note');
+    ['fio', 'name', 'price', 'disc'].forEach(k => { box.querySelector('[data-k="' + k + '"]').value = x[k] == null ? '' : x[k]; });
+    const paint = () => {
+      // «моя» – если я среди менеджеров (как при импорте)
+      x.cnt = !meSet() || x.mops.includes(meName());
+      box.querySelectorAll('[data-g="mops"] em').forEach(m => m.classList.toggle('bs-on', x.mops.includes(m.dataset.v)));
+      box.querySelectorAll('[data-g="share"] em').forEach(m => m.classList.toggle('bs-on', +m.dataset.v === +x.share));
+      box.querySelector('.bs-sale-share').hidden = !x.cnt;
+      const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
+      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
+        (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '');
+    };
+    paint();
+    box.addEventListener('input', ev => { const k = ev.target.dataset.k; if (k) { x[k] = ev.target.value; paint(); } });
+    // в истории могли что-то поменять в другой вкладке – перечитываем и сверяем перед записью
+    const fresh = () => { const h2 = histGet(), e2 = h2[hi]; return e2 && String(e2.end) === String(end) && e2.sales[si] ? { h2, e2 } : null; };
+    box.addEventListener('click', ev => {
+      const em = ev.target.closest('.bs-chips em'), a = ev.target.dataset.a;
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (em) {
+        const v = em.dataset.v;
+        if (em.parentNode.dataset.g === 'mops') {
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.share = shareFor(x.mops.length);
+        } else x.share = +v;
+        return paint();
+      }
+      if (a === 'back') return openSales('hist');
+      if (a !== 'save' && a !== 'del') return;
+      const f = fresh();
+      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales('hist'); }
+      const r = f.e2.rep;
+      if (a === 'del') {
+        if (!confirm('Удалить продажу из смены ' + e.d + '? Продано и сумма этой смены уменьшатся.')) return;
+        f.e2.sales.splice(si, 1);
+        x.cnt = false; x.price = 0;   // новая «продажа» – пустая, разница = минус старая
+      } else {
+        x.price = String(x.price).replace(/\s/g, '');
+        x.who = x.fio || x.who;
+        f.e2.sales[si] = histSale(x);
+      }
+      r.bought = Math.max(0, Math.round(((+r.bought || 0) + saleShare(x) - saleShare(old)) * 100) / 100);
+      r.sum = Math.max(0, (+r.sum || 0) + salePart(x) - salePart(old));
+      if (!histSave(f.h2)) return;
+      openSales('hist');
+      tarHint(a === 'del' ? '✓ Продажа удалена из смены ' + e.d : '✓ Продажа за ' + e.d + ' сохранена', true);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   // ---------- Резервная копия: все данные помощника (ключи bs* в localStorage) в файл и обратно ----------
   const bakKeys = () => Object.keys(localStorage).filter(k => /^bs[A-Z]/.test(k));
@@ -2140,6 +2216,8 @@
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
+      '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
+      '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
       '.bs-hist-move{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}.bs-hist-move span{flex:1}' +
       '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
