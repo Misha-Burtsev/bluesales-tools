@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.16.0
+@version        1.16.1
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -1042,7 +1042,7 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body .selectize-dropdown .selectize-dropdown-content > div > .tag-selectize-option { border-radius: 999px !important; outline: none !important; transition: filter .12s, box-shadow .12s }
   html body .selectize-dropdown .selectize-dropdown-content > div.active > .tag-selectize-option { outline: none !important; filter: brightness(1.08) !important; box-shadow: 0 0 0 2px var(--bs-panel), 0 0 0 4px var(--bs-accent) !important }
   /* теги в карточке клиента: одинаковые отступы, список не обрезается справа */
-  html body #customer-data .selectize-dropdown { width: 240px !important; max-width: calc(100vw - 24px) !important; left: auto !important; right: 0 !important }
+  html body #customer-data .selectize-dropdown { width: auto !important; max-width: none !important; left: 0 !important; right: 0 !important; box-sizing: border-box !important }
   html body #customer-data .selectize-dropdown-content { display: flex !important; flex-wrap: wrap !important; gap: 4px !important; padding: 8px !important; max-height: 300px !important; overflow-x: hidden !important }
   html body #customer-data .selectize-dropdown-content > div { padding: 0 !important; margin: 0 !important; max-width: 100% !important; min-width: 0 !important }
   html body #customer-data .selectize-dropdown-content .tag-selectize-option { box-sizing: border-box !important; padding: 2px 10px !important; margin: 0 !important; font-size: 11.5px !important; line-height: 16px !important; max-width: 100% !important }
@@ -1056,5 +1056,8 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   /* календарь «След. конт.» – контурная иконка вместо старой картинки */
   html body .ico-calendar { background: var(--bs-accent) !important; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='3'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E") center / 18px 18px no-repeat !important; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='3'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E") center / 18px 18px no-repeat !important; width: 26px !important; height: 26px !important; border-radius: 0 !important; cursor: pointer !important; opacity: .85; vertical-align: middle !important; transition: opacity .12s }
   html body .ico-calendar:hover { opacity: 1 }
-
+  /* 1.16.1: у простых списков (менеджеры) при наведении – только фон строки, без колец и рамок */
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div > span,
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div.active > span { box-shadow: none !important; filter: none !important; outline: none !important; background: none !important }
+  html body #customer-data .selectize-dropdown-content > div > .tag-selectize-option { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important }
 }
