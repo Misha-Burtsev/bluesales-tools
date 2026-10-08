@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.15.3
+@version        1.16.0
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -964,11 +964,11 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body .more_filters .selectize-dropdown-content .tag-selectize-option { display: inline-block !important; font-size: 10.5px !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
   html body .more_filters .selectize-dropdown-content > div.active > .tag-selectize-option { outline: 2px solid var(--bs-accent) !important; outline-offset: 0 !important }
   /* 1.15.2: списки без тегов (менеджеры и т.п.) – столбиком, имена целиком */
-  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option)) { width: max-content !important; min-width: 100% !important; max-width: 340px !important }
-  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option)) .selectize-dropdown-content { flex-direction: column !important; flex-wrap: nowrap !important; gap: 1px !important; padding: 4px !important }
-  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option)) .selectize-dropdown-content > div { padding: 5px 9px !important; border-radius: 6px !important; font-size: 12px !important; line-height: 1.3 !important; white-space: nowrap !important; outline: none !important }
-  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option)) .selectize-dropdown-content > div > span { display: inline !important; font-size: inherit !important; line-height: inherit !important; padding: 0 !important; overflow: visible !important; text-overflow: clip !important; outline: none !important; background: none !important }
-  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option)) .selectize-dropdown-content > div.active { background: var(--bs-hover) !important }
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) { width: max-content !important; min-width: 100% !important; max-width: 340px !important }
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content { flex-direction: column !important; flex-wrap: nowrap !important; gap: 1px !important; padding: 4px !important }
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div { padding: 5px 9px !important; border-radius: 6px !important; font-size: 12px !important; line-height: 1.3 !important; white-space: nowrap !important; outline: none !important }
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div > span { display: inline !important; font-size: inherit !important; line-height: inherit !important; padding: 0 !important; overflow: visible !important; text-overflow: clip !important; outline: none !important; background: none !important }
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div.active { background: var(--bs-hover) !important }
   html body .more_filters .multiple-toggle-butt label.btn { font-size: 11.5px !important; height: 22px !important; line-height: 22px !important; padding: 0 8px !important }
 
   html body #customer-data .hybrid-control-view,
@@ -1031,5 +1031,30 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body #customerAjaxIcon { display: block; width: 18px !important; height: 18px !important; margin: 10px auto 2px !important; padding: 0 !important; box-sizing: border-box !important; background: none !important; border: 2px solid var(--bs-accent) !important; border-right-color: transparent !important; border-radius: 50% !important; font-size: 0 !important; animation: bsAjaxSpin .7s linear infinite !important }
   html body #customerAjaxIcon > * { display: none !important }
   @keyframes bsAjaxSpin { to { transform: rotate(360deg) } }
+
+  /* ===== 1.16.0: выпадашки и теги в одном виде ===== */
+  /* простые списки (менеджеры) – как «Статусы CRM»: шире поля, пункты обычным текстом */
+  html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div > span { font-weight: 600 !important; color: var(--bs-text) !important; border-radius: 0 !important; max-width: none !important }
+  /* теги в фильтре: список шире, при наведении тег остаётся круглым */
+  html body .more_filters .selectize-dropdown:has(.tag-selectize-option[style*="background"]) { width: 320px !important; min-width: 100% !important; max-width: calc(100vw - 24px) !important }
+  html body .selectize-dropdown .selectize-dropdown-content > .option:has(.tag-selectize-option),
+  html body .selectize-dropdown .selectize-dropdown-content > .option.active:has(.tag-selectize-option) { background: none !important; outline: none !important; box-shadow: none !important; border-radius: 0 !important }
+  html body .selectize-dropdown .selectize-dropdown-content > div > .tag-selectize-option { border-radius: 999px !important; outline: none !important; transition: filter .12s, box-shadow .12s }
+  html body .selectize-dropdown .selectize-dropdown-content > div.active > .tag-selectize-option { outline: none !important; filter: brightness(1.08) !important; box-shadow: 0 0 0 2px var(--bs-panel), 0 0 0 4px var(--bs-accent) !important }
+  /* теги в карточке клиента: одинаковые отступы, список не обрезается справа */
+  html body #customer-data .selectize-dropdown { width: 240px !important; max-width: calc(100vw - 24px) !important; left: auto !important; right: 0 !important }
+  html body #customer-data .selectize-dropdown-content { display: flex !important; flex-wrap: wrap !important; gap: 4px !important; padding: 8px !important; max-height: 300px !important; overflow-x: hidden !important }
+  html body #customer-data .selectize-dropdown-content > div { padding: 0 !important; margin: 0 !important; max-width: 100% !important; min-width: 0 !important }
+  html body #customer-data .selectize-dropdown-content .tag-selectize-option { box-sizing: border-box !important; padding: 2px 10px !important; margin: 0 !important; font-size: 11.5px !important; line-height: 16px !important; max-width: 100% !important }
+  html body #customer-data .selectize-input .item { display: inline-flex !important; align-items: center !important; max-width: 100% !important; margin: 0 3px 3px 0 !important }
+  html body #customer-data .selectize-input .item:not(.tag-selectize-item):has(.tag-selectize-item) { padding: 0 !important; background: none !important }
+  html body #customer-data .selectize-input .item.tag-selectize-item, html body #customer-data .selectize-input .item .tag-selectize-item { box-sizing: border-box !important; padding: 2px 10px !important; line-height: 16px !important }
+  html body #customer-data .selectize-input .item.tag-selectize-item:has(.remove), html body #customer-data .selectize-input .item:has(.remove) .tag-selectize-item { padding-right: 22px !important }
+  html body #customer-data .selectize-input .item .remove { position: absolute !important; right: 6px !important; top: 50% !important; transform: translateY(-50%) !important; left: auto !important; width: 12px !important; height: 12px !important; padding: 0 !important; border: 0 !important; display: flex !important; align-items: center !important; justify-content: center !important; font-size: 12px !important; line-height: 1 !important; color: #fff !important; opacity: .75 !important }
+  html body #customer-data .selectize-input .item { position: relative !important }
+  html body #customer-data .selectize-input.focus > input { border: 0 !important; background: transparent !important; box-shadow: none !important; outline: none !important; min-width: 20px !important }
+  /* календарь «След. конт.» – контурная иконка вместо старой картинки */
+  html body .ico-calendar { background: var(--bs-accent) !important; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='3'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E") center / 18px 18px no-repeat !important; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='5' width='18' height='16' rx='3'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E") center / 18px 18px no-repeat !important; width: 26px !important; height: 26px !important; border-radius: 0 !important; cursor: pointer !important; opacity: .85; vertical-align: middle !important; transition: opacity .12s }
+  html body .ico-calendar:hover { opacity: 1 }
 
 }
