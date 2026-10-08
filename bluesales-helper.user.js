@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.24.0
+// @version      1.25.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1103,6 +1103,16 @@
     document.head.appendChild(st);
   }
   document.addEventListener('DOMContentLoaded', reportInit);
+  // ---------- Кнопка «Тарифы и фразы» в нижней панели ----------
+  function tarBtnInit() {
+    const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
+    if (!dock || document.getElementById('bsTarBtn')) return;
+    const b = btn('bsTarBtn', 'Тарифы и свои фразы {…}');
+    b.innerHTML = svg('<path d="M8 4H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1M16 4h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1"/>');
+    b.addEventListener('click', openTariffs);
+    dock.insertBefore(b, before);
+  }
+  document.addEventListener('DOMContentLoaded', tarBtnInit);
 
   // ---------- Счётчик выставленных ссылок над смайликами ----------
   // «+» после каждой ссылки на оплату – число сразу попадает в отчёт (поле «Выставлено ссылок»).
@@ -1166,8 +1176,8 @@
     const b = document.createElement('div');
     b.id = 'bsLinks';
     b.className = 'bs-pill';
-    b.innerHTML = '<span>Ссылки</span><b></b><i data-a="tar" class="bs-ico" title="Тарифы и свои фразы {…}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></i><i data-d="-1" class="bs-ico" title="Убрать одну">−</i><i data-d="1" class="bs-cta bs-sq" title="Выставил ссылку">+</i>';
-    b.addEventListener('click', ev => { const i = ev.target.closest('i'); if (!i) return; const d = +i.dataset.d; if (d) linksSet(linksGet() + d); else if (i.dataset.a === 'tar') openTariffs(); });
+    b.innerHTML = '<span>Ссылки</span><b></b><i data-d="-1" class="bs-ico" title="Убрать одну">−</i><i data-d="1" class="bs-cta bs-sq" title="Выставил ссылку">+</i>';
+    b.addEventListener('click', ev => { const i = ev.target.closest('i'); if (!i) return; const d = +i.dataset.d; if (d) linksSet(linksGet() + d); });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
