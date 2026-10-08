@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.0
+// @version      1.28.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1021,11 +1021,11 @@
         ]);
         if (my !== run) return;   // пока считали, переключили менеджера
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
-        setStatus('ok', 'Посчитано – ' + who + ', ' + t.slice(0, 5) + '. Остальное впиши руками');
+        setStatus('ok', 'Посчитано: ' + who + ', ' + t.slice(0, 5) + ' · остальное вручную');
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        setStatus('err', 'Не получилось посчитать – впиши цифры руками');
+        setStatus('err', 'Не посчиталось – впиши цифры вручную');
       }
       box.classList.remove('bs-loading');
       update();
@@ -1087,6 +1087,7 @@
       '@keyframes bsOk{0%,40%{border-color:#22a55a;box-shadow:0 0 0 3px rgba(34,165,90,.18)}100%{box-shadow:0 0 0 0 rgba(34,165,90,0)}}' +
       '.bs-rep-status{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:500}' +
       '.bs-rep-status:empty{display:none}' +
+      '.bs-rep-status span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
       '.bs-rep-status[data-st=load]{background:var(--bs-hover,#f3f5f8);color:var(--bs-muted,#777)}' +
       '.bs-rep-status[data-st=load] i{color:var(--bs-accent,#3b82f6)}' +
       '.bs-rep-status[data-st=ok]{background:rgba(34,165,90,.13);color:#1f9d55}' +
@@ -1168,7 +1169,9 @@
     });
     sel.style.removeProperty('height');
     const r = sel.getBoundingClientRect();
-    const room = r.bottom - (bottom + 8 + pill.offsetHeight + 6);
+    const sold = document.getElementById('bsSold');
+    const pills = pill.offsetHeight + 6 + (sold && sold.offsetHeight ? sold.offsetHeight + 6 : 0);
+    const room = r.bottom - (bottom + 22 + pills);
     if (room < r.height) sel.style.setProperty('height', Math.max(110, room) + 'px', 'important');
   }
   function linksInit() {
