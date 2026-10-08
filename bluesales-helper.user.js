@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.33.0
+// @version      1.34.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -968,7 +968,8 @@
   }
 
   function repSaved() {
-    const r = jget(REP_KEY, {});
+    let r = jget(REP_KEY, {});
+    if (r.d && r.d !== ddmm(new Date()) && histRoll()) r = jget(REP_KEY, {});
     return r.d === ddmm(new Date()) ? r : { d: ddmm(new Date()) };
   }
   function repText(v, fem) {
@@ -1450,7 +1451,46 @@
   const shareFor = n => n >= 4 ? 0.25 : n === 3 ? 0.33 : n === 2 ? 0.5 : 1;
   const rub = n => String(Math.round(+n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  function salesGet() { const r = jget(SALES_KEY, {}); return r.d === ddmm(new Date()) ? r.list || [] : []; }
+  function salesGet() {
+    let r = jget(SALES_KEY, {});
+    if (r.d && r.d !== ddmm(new Date()) && histRoll()) r = jget(SALES_KEY, {});
+    return r.d === ddmm(new Date()) ? r.list || [] : [];
+  }
+  // ---------- История смен: закрытая смена (кнопкой или сменой даты) уходит в архив bsHistory ----------
+  const HIST_KEY = 'bsHistory', HIST_MAX = 180;
+  const histGet = () => jget(HIST_KEY, []);
+  const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
+  // в архив – только то, что нужно для статистики, без лишних полей
+  const histSale = x => ({ dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who });
+  const histRep = r => { const o = {}; ['leads', 'blocks', 'chats', 'links', 'bought', 'sum', 'rem'].forEach(k => { if (r[k] != null && r[k] !== '') o[k] = +r[k] || 0; }); return o; };
+  // true – если запись получилась (если место в браузере кончилось – выкидываем самые старые смены)
+  function histPush(e) {
+    const h = histGet();
+    h.push(e);
+    while (h.length > HIST_MAX) h.shift();
+    for (;;) {
+      try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; } catch (err) { if (h.length <= 1) return false; h.shift(); }
+    }
+  }
+  // данные за прошлые даты (или текущая смена при «Начать новую смену») – в архив, потом очищаем
+  function histRoll(all) {
+    const today = ddmm(new Date());
+    const r = jget(REP_KEY, {}), sl = jget(SALES_KEY, {});
+    const rOld = r.d && (all || r.d !== today) && repHas(r), sOld = sl.d && (all || sl.d !== today) && (sl.list || []).length;
+    if (!rOld && !sOld) {
+      if (r.d && r.d !== today) jset(REP_KEY, { d: today });
+      if (sl.d && sl.d !== today) jset(SALES_KEY, { d: today, list: [] });
+      return false;
+    }
+    const days = [...new Set([rOld && r.d, sOld && sl.d].filter(Boolean))];
+    for (const d of days) {
+      const ok = histPush({ d, end: Date.now(), rep: rOld && r.d === d ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [] });
+      if (!ok) return false;   // не влезло – ничего не стираем
+    }
+    if (rOld || r.d !== today) jset(REP_KEY, { d: today });
+    if (sOld || sl.d !== today) jset(SALES_KEY, { d: today, list: [] });
+    return true;
+  }
   function salesSet(list) { jset(SALES_KEY, { d: ddmm(new Date()), list }); }
   function sumAdd(x) {
     if (!x) return;
@@ -1608,6 +1648,7 @@
   }
   // новая смена: обнуляем отчёт (продано, сумма, ссылки, правки текста) и список продаж
   function newShift() {
+    histRoll(true);
     jset(REP_KEY, { d: ddmm(new Date()) });
     salesSet([]);
     paintSold(); paintLinks();
@@ -1623,13 +1664,14 @@
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="bak" class="bs-imp-btn" title="Сохранить все данные помощника в файл или загрузить из файла">Копия</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
+      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="hist" class="bs-imp-btn" title="Прошлые смены: продажи, суммы, ссылки за неделю и месяц">История</button><button data-a="bak" class="bs-imp-btn" title="Сохранить все данные помощника в файл или загрузить из файла">Копия</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (ev.target.dataset.a === 'me') return askMe();
       if (ev.target.dataset.a === 'imp') return openImport();
       if (ev.target.dataset.a === 'bak') return openBackup();
+      if (ev.target.dataset.a === 'hist') return openHistory();
       if (ev.target.dataset.a === 'shift') {
         if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
         newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
@@ -1641,6 +1683,42 @@
         saleDel(x.id); return openSales();
       }
       if (row) openSale(row.dataset.id, true);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  const dmyDate = d => { const [a, b, c] = String(d).split('.'); return new Date(+c, b - 1, +a); };
+  const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  function openHistory(per) {
+    closeSale();
+    per = per || 7;
+    const now = Date.now(), cur = repSaved(), curSales = salesGet();
+    const all = histGet().slice().reverse();
+    if (repHas(cur) || curSales.length) all.unshift({ d: ddmm(new Date()), now: true, rep: histRep(cur), sales: curSales });
+    const list = per === 'all' ? all : all.filter(e => now - dmyDate(e.d) < per * 864e5);
+    const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
+    const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-hist"><div class="bs-rep-head"><b>История смен</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-hist-per">' + [[7, '7 дней'], [30, '30 дней'], ['all', 'Всё']].map(([v, t]) => '<em data-p="' + v + '"' + (v === per ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</div>' +
+      '<div class="bs-hist-sum">' + [['Смен', list.length], ['Продано', String(bought).replace('.', ',')], ['Сумма, ₽', rub(sum)], ['Средний чек, ₽', bought ? rub(sum / bought) : '–'], ['Ссылок', tot('links')]]
+        .map(([t, v]) => '<div><span>' + t + '</span><b>' + v + '</b></div>').join('') + '</div>' +
+      (list.length ? '<div class="bs-hist-list">' + list.map((e, i) => {
+        const dt = dmyDate(e.d);
+        return '<div class="bs-hist-row" data-i="' + i + '"><b>' + e.d.slice(0, 5) + ' <span>' + WD[dt.getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
+          '<em>' + String(+e.rep.bought || 0).replace('.', ',') + ' прод. · ' + rub(e.rep.sum) + ' ₽ · ' + (+e.rep.links || 0) + ' ссыл.</em>' +
+          '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map(x =>
+            '<div' + (x.cnt === false ? ' class="bs-hist-other"' : '') + '><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : String(x.share).replace('.', ',')) + '</span></div>').join('') : '<div><span>Список продаж не вёлся</span></div>') + '</div></div>';
+      }).join('') + '</div>' : '<div class="bs-tar-help">За этот период смен нет. История копится с версии 1.34: каждая закрытая смена (кнопкой «Начать новую смену» или со сменой даты) попадает сюда.</div>') +
+      '<div class="bs-rep-btns"><button data-a="back">Назад</button></div></div>';
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', ev => {
+      const t = ev.target;
+      if (t.matches('.bs-rep-head i')) return closeSale();
+      if (t.dataset.a === 'back') return openSales();
+      if (t.dataset.p) return openHistory(t.dataset.p === 'all' ? 'all' : +t.dataset.p);
+      const row = t.closest('.bs-hist-row');
+      if (row) row.classList.toggle('open');
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
@@ -1895,6 +1973,16 @@
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
       '.bs-sale-dup{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:9px;background:rgba(245,158,11,.14);color:var(--bs-text,#222);font-size:12.5px;line-height:1.35}' +
       '.bs-sale-dup button{flex:none;padding:5px 12px;border:1px solid #f59e0b;border-radius:7px;background:none;color:inherit;font-size:12.5px;cursor:pointer}.bs-sale-dup button:hover{background:#f59e0b;color:#fff}' +
+      '#bsSale.bs-hist{width:560px}' +
+      '.bs-hist-per{display:flex;gap:6px;margin-bottom:10px}.bs-hist-per em{font-style:normal;padding:4px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;cursor:pointer}.bs-hist-per em.on{background:var(--bs-accent,#3b82f6);border-color:var(--bs-accent,#3b82f6);color:#fff}' +
+      '.bs-hist-sum{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px}.bs-hist-sum div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px}' +
+      '.bs-hist-sum span{font-size:11px;color:var(--bs-muted,#888)}.bs-hist-sum b{font-size:16px;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-list{display:flex;flex-direction:column;gap:6px}' +
+      '.bs-hist-row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-row>b span{font-weight:400;color:var(--bs-muted,#888)}.bs-hist-row em{font-style:normal;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px}.bs-hist-row.open .bs-hist-sales{display:flex}' +
+      '.bs-hist-sales div{display:flex;justify-content:space-between;gap:10px}.bs-hist-sales div span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span:last-child{flex:none;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-other{color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
