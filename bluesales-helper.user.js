@@ -6,8 +6,8 @@
 // @match        https://bluesales.ru/*
 // @run-at       document-start
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-helper.user.js
-// @downloadURL  https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-helper.user.js
+// @updateURL    https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/beta/bluesales-helper.user.js
+// @downloadURL  https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/beta/bluesales-helper.user.js
 // ==/UserScript==
 
 (function () {
