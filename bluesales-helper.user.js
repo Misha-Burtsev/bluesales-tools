@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.30.1
+// @version      1.30.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1693,7 +1693,7 @@
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-imp"><div class="bs-rep-head"><b>Импорт продаж из Telegram</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-tar-help">Скопируй из ТГ отчёты о продажах за день (можно все разом) и вставь сюда. Каждый отчёт – со ссылки на чат, дальше в любом порядке тариф, сумма («45 000», «45000р», «45к») и менеджеры. Добавятся только те, где есть ' + esc(meName()) + ', – с твоей долей.</div>' +
+      '<div class="bs-tar-help">Скопируй из ТГ отчёты о продажах за день (можно все разом) и вставь сюда. Каждый отчёт – со ссылки на чат, дальше в любом порядке тариф, сумма («45 000», «45000р», «45к») и менеджеры. Добавятся все продажи, но в «Продано» и сумму пойдут только те, где есть ' + esc(meName()) + ', – с твоей долей.</div>' +
       '<textarea class="bs-imp-in" spellcheck="false" placeholder="https://bluesales.ru/app/messenger/?dialogId=…"></textarea>' +
       '<div class="bs-imp-list"></div>' +
       '<div class="bs-rep-btns"><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="add" class="bs-main" disabled>Добавить</button></div></div>';
@@ -1706,14 +1706,14 @@
         mine: !x.bad && x.mops.includes(me),
         dup: have.some(s => s.dlg === x.dlg && norm(s.name) === norm(x.name)),
       }));
-      const ok = found.filter(x => x.mine && !x.dup);
+      const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine);
       out.innerHTML = found.length ? found.map(x =>
-        '<div class="bs-imp-row' + (x.mine && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
         '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – пропущу') + '</u></div>').join('')
+        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – без учёта в сумме') + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
       btn.disabled = !ok.length;
-      btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · ' + rub(ok.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
+      btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
     };
     ta.addEventListener('input', paint);
     box.addEventListener('click', ev => {
@@ -1723,10 +1723,11 @@
       if (a !== 'add') return;
       const all = salesGet();
       let n = 0;
-      found.filter(x => x.mine && !x.dup).forEach(f => {
+      found.filter(x => !x.bad && !x.dup).forEach(f => {
         const x = { id: Date.now().toString(36) + (n++), dlg: f.dlg, t: Date.now(), tar: 'own', name: f.name, price: f.price, disc: f.disc,
-          mops: f.mops, share: shareFor(f.mops.length), email: f.email, fio: f.fio, nick: f.nick, src: f.src, quote: f.quote, who: f.fio, imp: 1, cnt: true };
-        soldAdd(x.share);
+          mops: f.mops, share: shareFor(f.mops.length), email: f.email, fio: f.fio, nick: f.nick, src: f.src, quote: f.quote, who: f.fio, imp: 1, cnt: f.mine };
+        // чужая продажа хранится в списке (cnt:false), но в «Продано» и сумму не идёт
+        if (saleShare(x)) soldAdd(saleShare(x));
         sumAdd(salePart(x));
         all.push(x);
       });
