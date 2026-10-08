@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.3
+// @version      1.28.4
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1486,7 +1486,8 @@
   const saleDone = x => !!((x.email || '').trim() && (x.fio || '').trim());
   // «я» – выбирается один раз при первом заходе (bsMe); продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
   const meName = () => (MANAGERS.find(m => m[0] === meId()) || [])[1];
-  const saleMine = x => !x.mops.length || x.mops.includes(meName());
+  const meSet = () => MANAGERS.some(m => m[0] === localStorage.getItem(ME_KEY));
+  const saleMine = x => !meSet() || !x.mops.length || x.mops.includes(meName());
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   function openSale(id) {
@@ -1535,7 +1536,7 @@
       box.querySelector('[data-a="copy"]').textContent = mine ? 'Сохранить и скопировать' : 'Скопировать';
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – в «Продано» и сумму не пойдёт, только текст для ТГ. Сменить себя – в «Продажах за смену».' + (old ? ' Из твоих продаж она уберётся.' : ''));
       const part = Math.round((+x.price || 0) * x.share);
-      note.textContent = 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
+      note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
     box.addEventListener('input', ev => {
       const k = ev.target.dataset.k;
@@ -1607,7 +1608,7 @@
         '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + esc(meName()) + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
+      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
@@ -1626,14 +1627,14 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
-  // при первом заходе – спросить, кто ты; потом сменить можно в «Продажах за смену»
+  // «кто я» выбирается кнопкой «Я: …» в «Продажах за смену»
   function askMe() {
     closeSale();
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const cur = localStorage.getItem(ME_KEY);
-    wrap.innerHTML = '<div id="bsSale" class="bs-me"><div class="bs-rep-head"><b>Кто ты?</b>' + (cur ? '<i title="Закрыть">×</i>' : '') + '</div>' +
-      '<div class="bs-tar-help">Выбери себя – на тебя будут считаться продажи и отчёт смены. Поменять можно потом в «Продажах за смену».</div>' +
+    wrap.innerHTML = '<div id="bsSale" class="bs-me"><div class="bs-rep-head"><b>Кто ты?</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-tar-help">Выбери себя – на тебя будут считаться продажи и отчёт смены.</div>' +
       '<div class="bs-chips">' + MANAGERS.map(m => '<em data-v="' + m[0] + '"' + (m[0] === cur ? ' class="bs-on"' : '') + '>' + m[1] + '</em>').join('') + '</div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
@@ -1641,12 +1642,12 @@
       const em = ev.target.closest('.bs-chips em');
       if (!em) return;
       try { localStorage.setItem(ME_KEY, em.dataset.v); } catch (e) {}
-      closeSale();
+      openSales();
       tarHint('✓ Привет, ' + em.textContent + '! Продажи и отчёт считаются на тебя', true);
     });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   function salesInit() {
-    if (!localStorage.getItem(ME_KEY) && /\/app\/messenger/i.test(location.pathname)) setTimeout(askMe, 1500);
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeSale(); });
     const st = document.createElement('style');
     st.textContent =
