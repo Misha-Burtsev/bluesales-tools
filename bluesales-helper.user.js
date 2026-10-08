@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.27.0
+// @version      1.28.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1291,11 +1291,13 @@
     ta.dispatchEvent(new Event('input', { bubbles: true }));
     tarHint('✓ ' + (sn ? 'фраза: ' : '') + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : ''), true);
   }
-  // сообщение ушло – сколько в нём ссылок из тарифов, столько +1 в «Ссылок выставлено»
+  // сообщение ушло – сколько в нём ссылок из тарифов и на заказы, столько +1 в «Ссылки»
   function tarSent(raw) {
     let t = raw.replace(/\\\//g, '/');
     try { t += ' ' + decodeURIComponent(raw.replace(/\+/g, ' ')); } catch (e) {}
-    const n = jget(TAR_KEY, []).filter(x => t.includes(x.u)).length;
+    // плюс ссылки на заказ (…/sales/shop/deal?id=…) – каждый заказ один раз
+    const deals = new Set([...t.matchAll(/\/sales\/shop\/deal\?id=(\d+)/g)].map(m => m[1]));
+    const n = jget(TAR_KEY, []).filter(x => t.includes(x.u)).length + deals.size;
     if (n) linksSet(linksGet() + n);
   }
   function closeTariffs() { const o = document.getElementById('bsTarWrap'); if (o) o.remove(); }
