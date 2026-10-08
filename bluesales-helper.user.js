@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.25.0
+// @version      1.26.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -300,13 +300,13 @@
       'body.slide-panel-right-open.bs-can-send #bsEmoBar{display:flex}',
       '#bsEmoSearch{flex:1;min-width:0;height:24px;padding:0 8px;border:1px solid var(--bs-border,#D9E0E7)!important;border-radius:7px;background:var(--bs-hover,#f3f4f6)!important;color:var(--bs-text,#222)!important;font-size:12px;outline:none}',
       '#bsEmoSearch:focus{border-color:var(--bs-accent,#3b82f6)!important}',
-      '#bsEmoLabel{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--bs-muted,#888);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-left:4px}',
+      '#bsEmoLabel{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--bs-muted,#888);font-size:12.5px;padding-left:6px}',
       'body.bs-emo-closed #bsEmoSearch{display:none}',
       'body.bs-emo-closed #bsEmoLabel{display:block}',
       '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:34px;justify-content:flex-end;padding:6px 12px 0 0;outline:none!important;box-shadow:none!important;border:0!important;box-sizing:border-box;border-radius:11px 11px 0 0;background:none!important}',
       '#bsEmoToggle:hover{color:var(--bs-text,#222)}',
       '#bsEmoToggle:focus,#bsEmoToggle:focus-visible,#bsEmoToggle:active{outline:none!important;box-shadow:none!important}',
-      '#bsEmoLabel::after{content:" ▴"}',
+      '#bsEmoLabel::after{content:" ▴";font-size:10px}',
       '.bs-dock-btn{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:7px;background:none;color:var(--bs-muted,#888);cursor:pointer;position:relative}',
       '.bs-dock-btn:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}',
       '.bs-dock-btn.bs-off{opacity:.45}',
@@ -1250,17 +1250,12 @@
     if (tags.has('баз')) tags.delete('мат');
     return { tags, unknown };
   }
-  function tarParse(text) {
-    return text.split('\n').map(l => l.split('|').map(x => x.trim())).filter(c => c.length >= 2 && /^https?:\/\//.test(c[1]))
-      .map(([k, u, p, ...n]) => ({ k, u, p: p || '', n: n.join(' | ') }));
-  }
-  const tarText = list => list.map(t => t.k + ' | ' + t.u + (t.p || t.n ? ' | ' + t.p : '') + (t.n ? ' | ' + t.n : '')).join('\n');
   function tarFind(query) {
     const { tags, unknown } = tarTags(query);
     if (unknown.length) return { err: 'Не понял: ' + unknown.join(', ') };
     if (!tags.size) return { err: 'Пустое сокращение' };
     const list = jget(TAR_KEY, []);
-    if (!list.length) return { err: 'Тарифов нет – добавь их через ☰ на плашке «Ссылок выставлено»' };
+    if (!list.length) return { err: 'Тарифов нет – добавь их через кнопку { } в нижней панели' };
     const found = list.filter(t => { const own = tarTags(t.k).tags; return [...tags].every(x => own.has(x)); });
     if (found.length === 1) return { t: found[0] };
     if (!found.length) return { err: 'Нет такого тарифа: ' + [...tags].join(' ') };
@@ -1279,19 +1274,9 @@
     clearTimeout(h._t);
     h._t = setTimeout(() => { h.style.display = 'none'; }, ok ? 2500 : 5000);
   }
-  // свои фразы: «## ключ» и под ним текст (можно в несколько строк); {ключ} – слова в любом порядке
+  // свои фразы {ключ} → текст; слова ключа – в любом порядке
   const SNIP_KEY = 'bsSnippets';
   const snipKey = t => norm(t).split(/[\s,.;]+/).filter(Boolean).sort().join(' ');
-  function snipParse(text) {
-    const out = [];
-    text.split('\n').forEach(l => {
-      const h = /^##\s*(.+)$/.exec(l);
-      if (h) out.push({ k: h[1].trim(), v: [] });
-      else if (out.length) out[out.length - 1].v.push(l);
-    });
-    return out.map(x => ({ k: x.k, v: x.v.join('\n').trim() })).filter(x => x.k && x.v);
-  }
-  const snipText = list => list.map(x => '## ' + x.k + '\n' + x.v).join('\n\n');
   function tarOnInput(ev) {
     const ta = ev.target;
     if (!ta.matches || !ta.matches('textarea.send_message_textarea')) return;
@@ -1314,39 +1299,82 @@
     if (n) linksSet(linksGet() + n);
   }
   function closeTariffs() { const o = document.getElementById('bsTarWrap'); if (o) o.remove(); }
+  // редактор – табличка; сохраняется сам при каждом изменении
   function openTariffs() {
     if (document.getElementById('bsTarWrap')) return closeTariffs();
     const wrap = document.createElement('div');
     wrap.id = 'bsTarWrap';
     wrap.innerHTML =
-      '<div id="bsTar"><div class="bs-rep-head"><b>Сокращения {…}</b><i title="Закрыть">×</i></div>' +
+      '<div id="bsTar"><div class="bs-rep-head"><b>Тарифы и фразы</b><i title="Закрыть">×</i></div>' +
       '<div class="bs-rep-range bs-tar-tabs"><span data-tab="tar" class="bs-on">Тарифы</span><span data-tab="snip">Свои фразы</span></div>' +
-      '<div class="bs-tar-pane" data-pane="tar"><div class="bs-tar-help">Строка: <code>слова | ссылка | цена | название для отчёта</code> (название можно не писать – соберётся само).<br>' +
-      'Слова: мат (проф), баз, рус, комбо (или мат+рус) · бронь (месяц) / год · кур / сам (без кур). Порядок любой, например <code>{рус сам год}</code>.</div>' +
-      '<textarea data-k="tar" spellcheck="false" placeholder="мат бронь сам | https://… | 4990"></textarea></div>' +
-      '<div class="bs-tar-pane" data-pane="snip" hidden><div class="bs-tar-help">Строка <code>## ключ</code>, под ней текст или ссылка – можно в несколько строк. В сообщении <code>{мат отзывы}</code> заменится на этот текст. Слова ключа – в любом порядке.</div>' +
-      '<textarea data-k="snip" spellcheck="false" placeholder="## мат отзывы&#10;Вот отзывы наших учеников: …&#10;&#10;## мат пробный&#10;https://…"></textarea></div>' +
-      '<div class="bs-rep-btns"><span class="bs-tar-note">Хранится только в этом браузере</span><span class="bs-tar-st"></span><button data-a="save" class="bs-main">Сохранить</button></div></div>';
+      '<div class="bs-tar-pane" data-pane="tar"><div class="bs-tar-help">В сообщении пиши <code>{мат мес сам}</code> – подставится ссылка. ' +
+      'Слова: мат / баз / рус / комбо · мес / год · кур / сам, порядок любой.</div>' +
+      '<div class="bs-tr bs-th"><span>Сокращение</span><span>Ссылка</span><span>Цена, ₽</span><span>Название в отчёте</span><span></span></div>' +
+      '<div class="bs-tbody" data-list="tar"></div><button class="bs-tar-add" data-add="tar">+ Добавить тариф</button></div>' +
+      '<div class="bs-tar-pane" data-pane="snip" hidden><div class="bs-tar-help">В сообщении пиши <code>{мат отзывы}</code> – подставится текст. Слова ключа – в любом порядке.</div>' +
+      '<div class="bs-tr bs-sr bs-th"><span>Ключ</span><span>Текст или ссылка</span><span></span></div>' +
+      '<div class="bs-tbody" data-list="snip"></div><button class="bs-tar-add" data-add="snip">+ Добавить фразу</button></div>' +
+      '<div class="bs-tar-foot"><span class="bs-tar-note">Сохраняется само · хранится только в этом браузере</span><span class="bs-tar-st"></span></div></div>';
     document.body.appendChild(wrap);
-    const taT = wrap.querySelector('[data-k="tar"]'), taS = wrap.querySelector('[data-k="snip"]'), st = wrap.querySelector('.bs-tar-st');
-    taT.value = tarText(jget(TAR_KEY, []));
-    taS.value = snipText(jget(SNIP_KEY, []));
+    const lists = { tar: wrap.querySelector('[data-list="tar"]'), snip: wrap.querySelector('[data-list="snip"]') };
+    const st = wrap.querySelector('.bs-tar-st');
+    const grow = ta => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, 200) + 'px'; };
+    const row = (kind, x) => {
+      const r = document.createElement('div');
+      r.className = kind === 'tar' ? 'bs-tr' : 'bs-tr bs-sr';
+      r.innerHTML = kind === 'tar'
+        ? '<input data-f="k" placeholder="мат мес сам"><input data-f="u" placeholder="https://…"><input data-f="p" placeholder="0" inputmode="numeric"><input data-f="n" placeholder="соберётся само"><i title="Удалить">×</i>'
+        : '<input data-f="k" placeholder="мат отзывы"><textarea data-f="v" rows="1" placeholder="Текст, можно в несколько строк"></textarea><i title="Удалить">×</i>';
+      r.querySelectorAll('[data-f]').forEach(e => { e.value = (x && x[e.dataset.f]) || ''; e.spellcheck = false; });
+      lists[kind].appendChild(r);
+      return r;
+    };
+    const val = (r, f) => r.querySelector('[data-f="' + f + '"]').value.trim();
+    const check = r => {
+      const kind = r.classList.contains('bs-sr') ? 'snip' : 'tar';
+      const any = [...r.querySelectorAll('[data-f]')].some(e => e.value.trim());
+      const ok = kind === 'tar' ? val(r, 'k') && /^https?:\/\/\S+$/.test(val(r, 'u')) : val(r, 'k') && val(r, 'v');
+      r.classList.toggle('bs-bad', !!any && !ok);
+      return ok;
+    };
+    let tm;
+    const save = () => {
+      const tar = [...lists.tar.children].filter(check).map(r => ({ k: val(r, 'k'), u: val(r, 'u'), p: val(r, 'p').replace(/\s/g, ''), n: val(r, 'n') }));
+      const sn = [...lists.snip.children].filter(check).map(r => ({ k: val(r, 'k'), v: val(r, 'v') }));
+      jset(TAR_KEY, tar); jset(SNIP_KEY, sn);
+      const bad = wrap.querySelectorAll('.bs-bad').length;
+      st.className = 'bs-tar-st' + (bad ? ' bs-warn' : '');
+      st.textContent = bad ? 'Не сохранено строк: ' + bad + ' – заполни сокращение и ссылку' : '✓ Сохранено';
+    };
+    jget(TAR_KEY, []).forEach(t => row('tar', t));
+    jget(SNIP_KEY, []).forEach(t => row('snip', t));
+    if (!lists.tar.children.length) row('tar');
+    if (!lists.snip.children.length) row('snip');
+    requestAnimationFrame(() => wrap.querySelectorAll('textarea').forEach(grow));
+    wrap.addEventListener('input', ev => {
+      if (ev.target.matches('textarea')) grow(ev.target);
+      const r = ev.target.closest('.bs-tr');
+      if (r && r.classList.contains('bs-bad')) check(r);
+      clearTimeout(tm); tm = setTimeout(save, 400);
+    });
     wrap.addEventListener('click', ev => {
-      const tab = ev.target.dataset.tab;
-      if (ev.target.matches('.bs-rep-head i')) closeTariffs();
+      const t = ev.target, tab = t.dataset.tab, add = t.dataset.add;
+      if (t.matches('.bs-rep-head i')) closeTariffs();
       else if (tab) {
-        wrap.querySelectorAll('[data-tab]').forEach(e => e.classList.toggle('bs-on', e === ev.target));
+        wrap.querySelectorAll('[data-tab]').forEach(e => e.classList.toggle('bs-on', e === t));
         wrap.querySelectorAll('[data-pane]').forEach(e => { e.hidden = e.dataset.pane !== tab; });
-        (tab === 'tar' ? taT : taS).focus();
-      } else if (ev.target.dataset.a === 'save') {
-        const list = tarParse(taT.value), sn = snipParse(taS.value);
-        jset(TAR_KEY, list); jset(SNIP_KEY, sn);
-        taT.value = tarText(list); taS.value = snipText(sn);
-        st.textContent = 'Сохранено: тарифов ' + list.length + ', фраз ' + sn.length;
+        wrap.querySelectorAll('textarea').forEach(grow);
+      } else if (add) {
+        const r = row(add);
+        r.querySelector('[data-f]').focus();
+        lists[add].scrollTop = lists[add].scrollHeight;
+      } else if (t.matches('.bs-tr:not(.bs-th) > i')) {
+        const r = t.closest('.bs-tr');
+        if ([...r.querySelectorAll('[data-f]')].some(e => e.value.trim()) && !confirm('Удалить «' + (val(r, 'k') || 'строку') + '»?')) return;
+        r.remove(); save();
       }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeTariffs(); });
-    taT.focus();
   }
 
   function tariffsInit() {
@@ -1355,13 +1383,26 @@
     const st = document.createElement('style');
     st.textContent =
       '#bsTarWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
-      '#bsTar{width:640px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
+      '#bsTar{width:780px;max-width:calc(100vw - 32px);box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
       '.bs-tar-help{font-size:12px;line-height:1.5;color:var(--bs-muted,#888);margin-bottom:8px}' +
       '.bs-tar-help code{padding:0 4px;border-radius:4px;background:var(--bs-hover,#f3f5f8);color:var(--bs-text,#222)}' +
-      '#bsTar textarea{width:100%;box-sizing:border-box;height:300px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre;overflow-wrap:normal}' +
-      '.bs-tar-st{margin-right:auto;align-self:center;font-size:12px;color:#1f9d55}.bs-tar-st:not(:empty)~*{}.bs-tar-note{align-self:center;font-size:11.5px;color:var(--bs-muted,#888)}.bs-tar-st:not(:empty){margin-left:8px}' +
-      '.bs-tar-tabs{margin-bottom:8px}.bs-tar-pane[hidden]{display:none}' +
+      '.bs-tr{display:grid;grid-template-columns:120px minmax(0,1fr) 76px 170px 24px;gap:6px;align-items:start;margin-bottom:6px}' +
+      '.bs-tr.bs-sr{grid-template-columns:150px minmax(0,1fr) 24px}' +
+      '.bs-th{margin-bottom:4px;font-size:11.5px;color:var(--bs-muted,#888)}.bs-th span{padding-left:2px}' +
+      '.bs-tbody{max-height:min(420px,calc(100vh - 300px));overflow:auto;padding-right:2px}' +
+      '.bs-tr input,.bs-tr textarea{width:100%;min-width:0;box-sizing:border-box;height:30px;padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);font:inherit;font-size:12.5px;outline:none;resize:none;line-height:18px}' +
+      '.bs-tr input[data-f="u"]{color:var(--bs-muted,#888)}.bs-tr input[data-f="p"]{text-align:right;font-variant-numeric:tabular-nums}' +
+      '.bs-tr input:focus,.bs-tr textarea:focus{border-color:var(--bs-accent,#3b82f6);color:var(--bs-text,#222)}' +
+      '.bs-tr.bs-bad input[data-f="k"],.bs-tr.bs-bad input[data-f="u"],.bs-tr.bs-bad textarea{border-color:#e04848}' +
+      '.bs-tr > i{font-style:normal;height:30px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);cursor:pointer;font-size:17px}' +
+      '.bs-tr > i:hover{background:rgba(224,72,72,.12);color:#e04848}' +
+      '.bs-tar-add{margin-top:2px;padding:5px 10px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-accent,#3b82f6);font-size:12.5px;cursor:pointer}' +
+      '.bs-tar-add:hover{background:var(--bs-hover,#f5f7fa)}' +
+      '.bs-tar-foot{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:11.5px}.bs-tar-note{color:var(--bs-muted,#888)}' +
+      '.bs-tar-st{margin-left:auto;font-size:12px;color:#1f9d55}.bs-tar-st.bs-warn{color:#e04848}' +
+      '.bs-tar-tabs{margin-bottom:10px}.bs-tar-pane[hidden]{display:none}' +
       '#bsTarHint{position:fixed;z-index:2500;display:none;max-width:520px;padding:6px 10px;border-radius:9px;font-size:12.5px;background:rgba(229,62,62,.95);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}' +
       '#bsTarHint.bs-ok{background:rgba(34,165,90,.95)}';
     document.head.appendChild(st);
