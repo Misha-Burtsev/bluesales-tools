@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.15.2
+@version        1.15.3
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -1024,5 +1024,12 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body .dialogs_list_item:hover .dialogs_list_item_content { background: var(--bs-hover) !important }
   html body .dialogs_list_item.active,
   html body .dialogs_list_item.active .dialogs_list_item_content { background: #d2e2fc !important }
+
+  /* 1.15.3: служебное поле фраз (#dialogInput) – серый квадрат в поле ввода; прячем, но оставляем рабочим */
+  html body #dialogInput { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; border: 0 !important; margin: 0 !important; opacity: 0 !important; pointer-events: none !important; overflow: hidden !important; clip-path: inset(50%) !important }
+  /* загрузка карточки клиента: вместо трёх полосок – аккуратная крутилка */
+  html body #customerAjaxIcon { display: block; width: 18px !important; height: 18px !important; margin: 10px auto 2px !important; padding: 0 !important; box-sizing: border-box !important; background: none !important; border: 2px solid var(--bs-accent) !important; border-right-color: transparent !important; border-radius: 50% !important; font-size: 0 !important; animation: bsAjaxSpin .7s linear infinite !important }
+  html body #customerAjaxIcon > * { display: none !important }
+  @keyframes bsAjaxSpin { to { transform: rotate(360deg) } }
 
 }
