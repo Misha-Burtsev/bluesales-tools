@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.4
+// @version      1.28.5
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1488,6 +1488,9 @@
   const meName = () => (MANAGERS.find(m => m[0] === meId()) || [])[1];
   const meSet = () => MANAGERS.some(m => m[0] === localStorage.getItem(ME_KEY));
   const saleMine = x => !meSet() || !x.mops.length || x.mops.includes(meName());
+  // доля, которая идёт в отчёт: продажа не на меня (cnt === false) хранится в списке, но не считается
+  const saleShare = s => s && s.cnt !== false ? s.share : 0;
+  const salePart = s => Math.round((s && +s.price || 0) * saleShare(s));
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   function openSale(id) {
@@ -1532,9 +1535,7 @@
       prev.value = saleText(x);
       const mine = saleMine(x);
       box.querySelector('.bs-sale-share').hidden = !mine;
-      box.querySelector('[data-a="save"]').hidden = !mine;
-      box.querySelector('[data-a="copy"]').textContent = mine ? 'Сохранить и скопировать' : 'Скопировать';
-      if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – в «Продано» и сумму не пойдёт, только текст для ТГ. Сменить себя – в «Продажах за смену».' + (old ? ' Из твоих продаж она уберётся.' : ''));
+      if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
       const part = Math.round((+x.price || 0) * x.share);
       note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
@@ -1553,10 +1554,10 @@
     });
     const save = () => {
       const all = salesGet(), i = all.findIndex(s => s.id === x.id), was = i >= 0 ? all[i] : null;
-      const part = s => s ? Math.round((+s.price || 0) * s.share) : 0;
-      const dShare = r2(x.share - (was ? was.share : 0));
+      x.cnt = saleMine(x);
+      const dShare = r2(saleShare(x) - saleShare(was));
       if (dShare) soldAdd(dShare);
-      sumAdd(part(x) - part(was));
+      sumAdd(salePart(x) - salePart(was));
       if (i >= 0) all[i] = x; else all.push(x);
       salesSet(all);
       box.querySelector('.bs-tar-st').textContent = 'Сохранено';
@@ -1574,9 +1575,8 @@
       } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
-        const mine = saleMine(x);
-        if (mine) save(); else if (old) saleDel(x.id);
-        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(mine ? '✓ Продажа сохранена, текст скопирован' : '✓ Текст скопирован, в смену не добавлено', true); });
+        save();
+        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(x.cnt ? '✓ Продажа сохранена, текст скопирован' : '✓ Сохранено без учёта в сумме, текст скопирован', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
@@ -1589,7 +1589,7 @@
   // список продаж за сегодня – клик открывает продажу, чтобы дописать данные
   function saleDel(id) {
     const all = salesGet(), was = all.find(s => s.id === id);
-    if (was) { soldAdd(-was.share); sumAdd(-Math.round((+was.price || 0) * was.share)); salesSet(all.filter(s => s.id !== id)); }
+    if (was) { if (saleShare(was)) soldAdd(-saleShare(was)); sumAdd(-salePart(was)); salesSet(all.filter(s => s.id !== id)); }
   }
   // новая смена: обнуляем отчёт (продано, сумма, ссылки, правки текста) и список продаж
   function newShift() {
@@ -1605,7 +1605,7 @@
     wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(x.price) + ' ₽ · ' + (x.cnt === false ? 'не моя' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
       '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
