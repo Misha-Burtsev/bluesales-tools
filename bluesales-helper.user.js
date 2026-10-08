@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.26.0
+// @version      1.27.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1539,8 +1539,7 @@
         navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint('✓ Продажа сохранена, текст скопирован', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
-        const all = salesGet(), was = all.find(s => s.id === x.id);
-        if (was) { soldAdd(-was.share); sumAdd(-Math.round((+was.price || 0) * was.share)); salesSet(all.filter(s => s.id !== x.id)); }
+        saleDel(x.id);
         closeSale();
       }
     });
@@ -1548,6 +1547,16 @@
     paint();
   }
   // список продаж за сегодня – клик открывает продажу, чтобы дописать данные
+  function saleDel(id) {
+    const all = salesGet(), was = all.find(s => s.id === id);
+    if (was) { soldAdd(-was.share); sumAdd(-Math.round((+was.price || 0) * was.share)); salesSet(all.filter(s => s.id !== id)); }
+  }
+  // новая смена: обнуляем отчёт (продано, сумма, ссылки, правки текста) и список продаж
+  function newShift() {
+    jset(REP_KEY, { d: ddmm(new Date()) });
+    salesSet([]);
+    paintSold(); paintLinks();
+  }
   function openSales() {
     closeSale();
     const list = salesGet();
@@ -1556,13 +1565,23 @@
     wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') + '</div>').join('') + '</div>'
-        : '<div class="bs-tar-help">Сегодня продаж пока нет. Открой чат клиента и нажми «+ продажа».</div>') +
-      '</div>';
+        '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
+        : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
+      '<div class="bs-sales-foot"><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (ev.target.dataset.a === 'shift') {
+        if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
+        newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
+      }
       const row = ev.target.closest('.bs-sales-row');
+      if (row && ev.target.matches('.bs-sales-del')) {
+        const x = salesGet().find(s => s.id === row.dataset.id);
+        if (!x || !confirm('Удалить продажу «' + (x.who || x.name) + '»? Доля и сумма уйдут из отчёта смены.')) return;
+        saleDel(x.id); return openSales();
+      }
       if (row) openSale(row.dataset.id);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
@@ -1589,10 +1608,15 @@
       '.bs-sale-note{font-size:11.5px;color:var(--bs-muted,#888)}' +
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
-      '.bs-sales-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
+      '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
-      '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}';
+      '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
+      '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
+      '.bs-sales-foot{display:flex;justify-content:flex-end;margin-top:12px}' +
+      '.bs-sales-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer}' +
+      '.bs-sales-foot button:hover{border-color:#e04848;color:#e04848}';
     document.head.appendChild(st);
   }
   document.addEventListener('DOMContentLoaded', salesInit);
