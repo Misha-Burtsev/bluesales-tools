@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.2
+// @version      1.28.3
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -934,6 +934,10 @@
   const CL_URL = '/app/Customers/CustomersList.aspx', CF = 'ctl00$ContentPlaceHolder1$tabs$ucCustomersFilter$';
   // третье поле – женский род: «Работу завершила»
   const MANAGERS = [['62503', 'Миша'], ['62451', 'Ксюша', 1], ['62434', 'Даша', 1], ['62713', 'Бес']];
+  // «кто я»: раньше брался из отчёта (bsRepManager) – переносим один раз
+  const ME_KEY = 'bsMe';
+  try { if (!localStorage.getItem(ME_KEY) && localStorage.getItem('bsRepManager')) localStorage.setItem(ME_KEY, localStorage.getItem('bsRepManager')); localStorage.removeItem('bsRepManager'); } catch (e) {}
+  const meId = () => { const v = localStorage.getItem(ME_KEY); return MANAGERS.some(m => m[0] === v) ? v : MANAGERS[0][0]; };
   // Поинтересовался, Презентация, Возражения, Ждём оплату, Бронь, Апсейл, Заказ оплачен, Отказ, Блок
   //  + Перестал отвечать (331182)
   const ST_ALL = '330640,331235,331253,331180,331532,334485,330646,330650,331531,331182', ST_BLOCK = '331531';
@@ -1003,7 +1007,7 @@
     const saved = repSaved();
     for (const k in inputs) if (saved[k] != null) inputs[k].value = saved[k];
     if (saved.rem == null) inputs.rem.value = 0;
-    let manager = localStorage.getItem('bsRepManager') || MANAGERS[0][0];
+    let manager = meId();   // переключение ниже – только посмотреть чужие цифры, «кто я» не меняет
     // дата по умолчанию – сегодня; value у input[type=date] в виде гггг-мм-дд
     const dateInp = box.querySelector('.bs-rep-date');
     dateInp.value = ddmm(new Date()).split('.').reverse().join('-');
@@ -1059,7 +1063,7 @@
     box.addEventListener('click', ev => {
       const r = ev.target.dataset.m, a = ev.target.dataset.a;
       if (ev.target.tagName === 'I') closeReport();
-      else if (r) { manager = r; try { localStorage.setItem('bsRepManager', r); } catch (e) {} paintRange(); load(true); }
+      else if (r) { manager = r; paintRange(); load(true); }
       else if (a === 'reload') load(true);
       else if (a === 'rebuild') { edited = false; update(); }
       else if (a === 'copy') {
@@ -1480,8 +1484,8 @@
     ].filter(Boolean).join('\n\n');
   }
   const saleDone = x => !!((x.email || '').trim() && (x.fio || '').trim());
-  // «я» – менеджер, выбранный в отчёте смены; продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
-  const meName = () => (MANAGERS.find(m => m[0] === (localStorage.getItem('bsRepManager') || MANAGERS[0][0])) || [])[1];
+  // «я» – выбирается один раз при первом заходе (bsMe); продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
+  const meName = () => (MANAGERS.find(m => m[0] === meId()) || [])[1];
   const saleMine = x => !x.mops.length || x.mops.includes(meName());
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
@@ -1529,7 +1533,7 @@
       box.querySelector('.bs-sale-share').hidden = !mine;
       box.querySelector('[data-a="save"]').hidden = !mine;
       box.querySelector('[data-a="copy"]').textContent = mine ? 'Сохранить и скопировать' : 'Скопировать';
-      if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – в «Продано» и сумму не пойдёт, только текст для ТГ. Кто ты – выбирается в отчёте смены.' + (old ? ' Из твоих продаж она уберётся.' : ''));
+      if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – в «Продано» и сумму не пойдёт, только текст для ТГ. Сменить себя – в «Продажах за смену».' + (old ? ' Из твоих продаж она уберётся.' : ''));
       const part = Math.round((+x.price || 0) * x.share);
       note.textContent = 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
@@ -1603,10 +1607,11 @@
         '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
+      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + esc(meName()) + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (ev.target.dataset.a === 'me') return askMe();
       if (ev.target.dataset.a === 'shift') {
         if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
         newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
@@ -1621,7 +1626,27 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
+  // при первом заходе – спросить, кто ты; потом сменить можно в «Продажах за смену»
+  function askMe() {
+    closeSale();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    const cur = localStorage.getItem(ME_KEY);
+    wrap.innerHTML = '<div id="bsSale" class="bs-me"><div class="bs-rep-head"><b>Кто ты?</b>' + (cur ? '<i title="Закрыть">×</i>' : '') + '</div>' +
+      '<div class="bs-tar-help">Выбери себя – на тебя будут считаться продажи и отчёт смены. Поменять можно потом в «Продажах за смену».</div>' +
+      '<div class="bs-chips">' + MANAGERS.map(m => '<em data-v="' + m[0] + '"' + (m[0] === cur ? ' class="bs-on"' : '') + '>' + m[1] + '</em>').join('') + '</div></div>';
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', ev => {
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      const em = ev.target.closest('.bs-chips em');
+      if (!em) return;
+      try { localStorage.setItem(ME_KEY, em.dataset.v); } catch (e) {}
+      closeSale();
+      tarHint('✓ Привет, ' + em.textContent + '! Продажи и отчёт считаются на тебя', true);
+    });
+  }
   function salesInit() {
+    if (!localStorage.getItem(ME_KEY) && /\/app\/messenger/i.test(location.pathname)) setTimeout(askMe, 1500);
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeSale(); });
     const st = document.createElement('style');
     st.textContent =
@@ -1649,9 +1674,11 @@
       '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
       '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
       '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
-      '.bs-sales-foot{display:flex;justify-content:flex-end;margin-top:12px}' +
+      '.bs-sales-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}' +
+      '#bsSale.bs-me{width:360px}#bsSale.bs-me .bs-tar-help{margin:6px 0 12px}#bsSale.bs-me .bs-chips em{padding:6px 14px;font-size:13.5px}' +
       '.bs-sales-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer}' +
-      '.bs-sales-foot button:hover{border-color:#e04848;color:#e04848}';
+      '.bs-sales-foot button:hover{border-color:#e04848;color:#e04848}' +
+      '.bs-sales-foot .bs-me-btn{margin-right:auto}.bs-sales-foot .bs-me-btn:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}';
     document.head.appendChild(st);
   }
   document.addEventListener('DOMContentLoaded', salesInit);
