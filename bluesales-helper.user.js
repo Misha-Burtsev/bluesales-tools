@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.29.0
+// @version      1.29.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1969,7 +1969,11 @@
       '#bsAc{max-height:260px}#bsAc>div{display:flex;align-items:baseline;gap:8px}' +
       '#bsAc b{flex:none;font-weight:700}#bsAc s{flex:none;text-decoration:none;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:6px;background:var(--bs-accent-soft,#e8f0fe);color:var(--bs-accent,#3b82f6)}' +
       '#bsAc span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:400;color:var(--bs-muted,#888)}' +
-      '#remindersContentInner .bs-rem-cur{background:var(--bs-accent-soft,#e8f0fe)!important;box-shadow:inset 3px 0 0 var(--bs-accent,#3b82f6)!important;border-radius:8px!important}';
+      '#remindersContentInner .bs-rem-cur{background:none!important;box-shadow:none!important}' +
+      '#remindersContentInner .bs-rem-cur>*{background:var(--bs-accent-soft,#e8f0fe)!important}' +
+      '#remindersContentInner .bs-rem-cur>:first-child{border-radius:6px 0 0 6px!important;color:var(--bs-accent,#3b82f6)!important;font-weight:600!important}' +
+      '#remindersContentInner .bs-rem-cur>:last-child{border-radius:0 6px 6px 0!important}' +
+      '#remindersContentInner .bs-rem-cur>:only-child{border-radius:6px!important}';
     document.head.appendChild(st);
   });
 })();

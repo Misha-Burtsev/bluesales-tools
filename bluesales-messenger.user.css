@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.17.0
+@version        1.17.1
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -1105,4 +1105,11 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body.slide-panel-right-open .slide-panel-right { max-height: 100vh !important; overflow-y: auto !important; overflow-x: hidden !important }
   html body .slide-panel-right .slide-panel-content { height: auto !important; min-height: 100vh !important }
   html body .slide-panel-right .slide-panel-content > tbody { padding-bottom: var(--bs-stack, 10px) !important }
+
+  /* 1.17.1: фильтр тегов в напоминаниях – компактное поле, список в потоке (не обрезается), мелкие таблетки */
+  html :is(body, #bsU) #remindersPlace .selectize-control .selectize-input { display: flex !important; flex-wrap: wrap !important; align-items: center !important; gap: 3px !important; min-height: 28px !important; height: auto !important; padding: 3px 8px !important; box-sizing: border-box !important }
+  html :is(body, #bsU) #remindersPlace .selectize-control .selectize-input > input { flex: 1 1 30px !important }
+  html :is(body, #bsU) #remindersPlace .selectize-dropdown { position: static !important; top: auto !important; left: auto !important; width: 100% !important; height: auto !important; margin: 4px 0 0 !important; box-shadow: 0 4px 14px rgba(16, 24, 40, .1) !important }
+  html :is(body, #bsU) #remindersPlace .selectize-dropdown-content { max-height: 220px !important; overflow-y: auto !important }
+  html :is(body, #bsU) #remindersPlace .selectize-dropdown:has(.tag-selectize-option[style*="background"]) .selectize-dropdown-content > div > * { display: inline-block !important; font-size: 10.5px !important; font-weight: 600 !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
 }
