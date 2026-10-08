@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.7
+// @version      1.29.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -444,7 +444,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint,#bsSaleWrap';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -1174,6 +1174,9 @@
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
     const sold = document.getElementById('bsSold');
     if (sold) sold.style.bottom = (innerHeight - b.getBoundingClientRect().top + 6) + 'px';
+    // карточка клиента прокручивается под плашками – снизу у неё отступ на их высоту
+    const top = (sold && sold.offsetHeight ? sold : b).getBoundingClientRect().top;
+    document.body.style.setProperty('--bs-stack', Math.max(10, Math.round(innerHeight - top + 10)) + 'px');
     if (open && tog) {
       tog.style.display = 'flex';
       // вся верхняя полоса панели – кнопка сворачивания, стрелка справа
@@ -1223,7 +1226,7 @@
     document.getElementById('bsEmoLabel')?.addEventListener('click', () => setTimeout(placeLinks));
     addEventListener('resize', placeLinks);
     // панель смайликов сворачивается и появляется – просто переставляем раз в секунду, это дёшево
-    setInterval(() => { placeLinks(); paintLinks(); paintSold(); homeInit(); }, 1000);
+    setInterval(() => { placeLinks(); paintLinks(); paintSold(); homeInit(); remMark(); }, 1000);
   }
   document.addEventListener('DOMContentLoaded', linksInit);
 
@@ -1720,7 +1723,7 @@
     fc.querySelectorAll('p[id^="content_"]').forEach(p => {
       let found = 0;
       p.querySelectorAll('a').forEach(a => {
-        const ok = !q || norm(a.textContent + ' ' + a.title).includes(q);
+        const ok = !q || norm(a.textContent + ' ' + (a.title || a.dataset.bsTip || '')).includes(q);
         a.classList.toggle('bs-faq-hide', !ok);
         const br = a.nextElementSibling;
         if (br && br.tagName === 'BR') br.classList.toggle('bs-faq-hide', !ok);
@@ -1766,5 +1769,207 @@
   document.addEventListener('DOMContentLoaded', () => {
     faqInit();
     faqObs.observe(document.body, { childList: true, subtree: true });
+  });
+
+  // ---------- Подсказка с текстом быстрой фразы ----------
+  // Системный title заменяем своей карточкой. Перед кликом title возвращаем – вдруг сайт берёт текст из него.
+  function tipHide() { const t = document.getElementById('bsTip'); if (t) t.style.display = 'none'; }
+  function tipShow(a) {
+    let t = document.getElementById('bsTip');
+    if (!t) { t = document.createElement('div'); t.id = 'bsTip'; document.body.appendChild(t); }
+    t.textContent = a.dataset.bsTip;
+    t.style.display = 'block';
+    const r = a.getBoundingClientRect(), w = t.offsetWidth, h = t.offsetHeight;
+    // с той стороны от фразы, где больше места
+    const x = r.left > innerWidth - r.right ? r.left - w - 10 : r.right + 10;
+    t.style.left = Math.max(8, Math.min(innerWidth - w - 8, x)) + 'px';
+    t.style.top = Math.max(8, Math.min(innerHeight - h - 8, r.top + r.height / 2 - h / 2)) + 'px';
+  }
+  const tipLink = ev => ev.target.closest && ev.target.closest('#faqContent a[title], #faqContent a[data-bs-tip]');
+  document.addEventListener('mouseover', ev => {
+    const a = tipLink(ev);
+    if (!a) return;
+    if (a.title) { a.dataset.bsTip = a.title; a.removeAttribute('title'); }
+    if (a.dataset.bsTip.trim()) tipShow(a);
+  });
+  document.addEventListener('mouseout', ev => {
+    const a = tipLink(ev);
+    if (!a || (ev.relatedTarget && a.contains(ev.relatedTarget))) return;
+    tipHide();
+    if (a.dataset.bsTip && !a.title) a.title = a.dataset.bsTip;
+  });
+  document.addEventListener('mousedown', ev => {
+    tipHide();
+    const a = tipLink(ev);
+    if (a && a.dataset.bsTip && !a.title) a.title = a.dataset.bsTip;
+  }, true);
+  document.addEventListener('click', ev => {
+    const a = tipLink(ev);
+    if (a) setTimeout(() => { if (a.matches(':hover') && a.title) a.removeAttribute('title'); });
+  });
+  addEventListener('scroll', tipHide, true);
+
+  // ---------- Выпадашки вместо системных select (CRM-статус, менеджер в напоминаниях…) ----------
+  function selClose() { const p = document.getElementById('bsSelPop'); if (p) p.remove(); }
+  function selOpen(sel) {
+    selClose();
+    const p = document.createElement('div');
+    p.id = 'bsSelPop';
+    p._sel = sel;
+    [...sel.options].forEach((o, i) => {
+      if (o.hidden) return;
+      const d = document.createElement('div');
+      d.textContent = o.text.trim() || '–';
+      if (i === sel.selectedIndex) d.className = 'bs-on';
+      if (o.disabled) d.classList.add('bs-off');
+      d.addEventListener('mousedown', e => e.preventDefault());
+      d.addEventListener('click', () => {
+        if (o.disabled) return;
+        selClose();
+        if (sel.selectedIndex === i) return;
+        sel.selectedIndex = i;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      p.appendChild(d);
+    });
+    document.body.appendChild(p);
+    const r = sel.getBoundingClientRect(), below = innerHeight - r.bottom - 10, above = r.top - 10;
+    p.style.minWidth = Math.max(160, r.width) + 'px';
+    p.style.left = Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8)) + 'px';
+    if (p.offsetHeight > below && above > below) { p.style.bottom = (innerHeight - r.top + 4) + 'px'; p.style.maxHeight = Math.min(320, above) + 'px'; }
+    else { p.style.top = (r.bottom + 4) + 'px'; p.style.maxHeight = Math.min(320, below) + 'px'; }
+    const on = p.querySelector('.bs-on');
+    if (on) on.scrollIntoView({ block: 'nearest' });
+  }
+  document.addEventListener('mousedown', ev => {
+    if (ev.target.closest && ev.target.closest('#bsSelPop')) return;
+    const s = ev.target.closest && ev.target.closest('select');
+    const open = document.getElementById('bsSelPop');
+    if (!s || s.multiple || s.size > 1 || s.disabled) { if (open) selClose(); return; }
+    ev.preventDefault();
+    s.focus();
+    if (open && open._sel === s) selClose(); else selOpen(s);
+  }, true);
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') selClose(); }, true);
+  addEventListener('scroll', ev => { if (!(ev.target.closest && ev.target.closest('#bsSelPop'))) selClose(); }, true);
+  addEventListener('resize', selClose);
+
+  // ---------- Напоминания: подсвечиваем строку открытого чата ----------
+  // Строка – предок с самым большим числом одинаковых соседей (при равенстве – внешний).
+  function remRow(e, box) {
+    let best = null, n = 1;
+    for (; e && e !== box; e = e.parentElement) {
+      const p = e.parentElement;
+      if (!p) break;
+      const sig = x => x.tagName + (x.getAttribute('class') || '').replace('bs-rem-cur', '').trim();
+      const same = [...p.children].filter(x => sig(x) === sig(e)).length;
+      if (same > 1 && same >= n) { best = e; n = same; }
+    }
+    return best;
+  }
+  function remMark() {
+    const box = document.getElementById('remindersContentInner');
+    if (!box) return;
+    const id = curDialog(), nm = norm((document.querySelector('.dialog_header .person_name') || {}).textContent || '').trim();
+    let row = null;
+    if (id || nm) for (const e of box.querySelectorAll('*')) {
+      if (e.closest('#remindersTabs,#reminderFiltersAdditional')) continue;
+      const hit = (id && [...e.attributes].some(a => a.name !== 'class' && a.value.includes(id))) ||
+        (nm && !e.children.length && norm(e.textContent).trim() === nm);
+      if (hit && (row = remRow(e, box))) break;
+    }
+    box.querySelectorAll('.bs-rem-cur').forEach(x => { if (x !== row) x.classList.remove('bs-rem-cur'); });
+    if (row && !row.classList.contains('bs-rem-cur')) row.classList.add('bs-rem-cur');
+  }
+
+  // ---------- Подсказки при вводе {…}: свои фразы и тарифы ----------
+  let acList = [], acI = 0;
+  function acClose() { const p = document.getElementById('bsAc'); if (p) p.remove(); acList = []; }
+  function acFind(q) {
+    const words = norm(q).split(/[\s,.;]+/).filter(Boolean);
+    const fit = k => { const own = norm(k).split(/[\s,.;:+/|]+/).filter(Boolean); return words.every(w => own.some(x => x.startsWith(w))); };
+    return [...jget(SNIP_KEY, []).filter(x => x.k && fit(x.k)).map(x => ({ k: x.k, v: x.v, d: x.v, kind: 'фраза' })),
+      ...jget(TAR_KEY, []).filter(x => x.k && x.u && fit(x.k)).map(x => ({ k: x.k, v: x.u, d: x.p ? x.p + ' ₽' : x.u, kind: 'ссылка' }))].slice(0, 8);
+  }
+  function acPaint(ta) {
+    let p = document.getElementById('bsAc');
+    if (!acList.length) return acClose();
+    if (!p) {
+      p = document.createElement('div');
+      p.id = 'bsAc';
+      p.addEventListener('mousedown', e => e.preventDefault());
+      p.addEventListener('click', e => { const d = e.target.closest('[data-i]'); if (d) acPick(ta, +d.dataset.i); });
+      document.body.appendChild(p);
+    }
+    p.innerHTML = '';
+    acList.forEach((x, i) => {
+      const d = document.createElement('div');
+      d.dataset.i = i;
+      if (i === acI) d.className = 'bs-on';
+      d.innerHTML = '<b></b><s></s><span></span>';
+      d.children[0].textContent = x.k;
+      d.children[1].textContent = x.kind;
+      d.children[2].textContent = x.d.replace(/\s+/g, ' ');
+      p.appendChild(d);
+    });
+    const box = document.querySelector('.send_message_box') || ta, r = box.getBoundingClientRect();
+    p.style.left = r.left + 'px';
+    p.style.width = Math.min(520, r.width) + 'px';
+    p.style.bottom = (innerHeight - r.top + 6) + 'px';
+  }
+  function acPick(ta, i) {
+    const x = acList[i], end = ta.selectionStart, m = /\{([^{}\n]*)$/.exec(ta.value.slice(0, end));
+    acClose();
+    if (!x || !m) return;
+    let after = ta.value.slice(end);
+    // если закрывающая скобка уже стоит сразу после курсора – её тоже убираем
+    const close = /^[^{}\n]*\}/.exec(after);
+    if (close) after = after.slice(close[0].length);
+    ta.value = ta.value.slice(0, m.index) + x.v + after;
+    const pos = m.index + x.v.length;
+    ta.focus();
+    ta.setSelectionRange(pos, pos);
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
+    tarHint('✓ ' + x.kind + ': ' + x.k, true);
+  }
+  document.addEventListener('input', ev => {
+    const ta = ev.target;
+    if (!ta.matches || !ta.matches('textarea.send_message_textarea')) return;
+    const m = /\{([^{}\n]*)$/.exec(ta.value.slice(0, ta.selectionStart));
+    if (!m) return acClose();
+    acList = acFind(m[1]);
+    acI = 0;
+    acPaint(ta);
+  });
+  document.addEventListener('keydown', ev => {
+    const ta = ev.target;
+    if (!acList.length || !ta.matches || !ta.matches('textarea.send_message_textarea')) return;
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') acI = (acI + (ev.key === 'ArrowDown' ? 1 : acList.length - 1)) % acList.length, acPaint(ta);
+    else if ((ev.key === 'Enter' && !ev.shiftKey) || ev.key === 'Tab') acPick(ta, acI);
+    else if (ev.key === 'Escape') acClose();
+    else return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('mousedown', ev => { if (!(ev.target.closest && ev.target.closest('#bsAc'))) acClose(); }, true);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsTip{position:fixed;z-index:3200;display:none;max-width:340px;max-height:60vh;overflow:hidden;box-sizing:border-box;padding:9px 12px;border-radius:10px;' +
+      'font-size:12.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#e3e7ec);box-shadow:0 10px 30px rgba(16,24,40,.16)}' +
+      '#bsSelPop,#bsAc{position:fixed;z-index:3200;box-sizing:border-box;overflow-y:auto;padding:4px;border-radius:10px;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#e3e7ec);box-shadow:0 10px 30px rgba(16,24,40,.14)}' +
+      '#bsSelPop{max-width:340px}' +
+      '#bsSelPop>div,#bsAc>div{padding:5px 9px;border-radius:6px;font-size:12px;line-height:1.3;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#bsSelPop>div:hover,#bsAc>div:hover,#bsAc>div.bs-on{background:var(--bs-hover,#f3f4f6)}' +
+      '#bsSelPop>div.bs-on{color:var(--bs-accent,#3b82f6)}#bsSelPop>div.bs-off{opacity:.45;cursor:default}' +
+      '#bsAc{max-height:260px}#bsAc>div{display:flex;align-items:baseline;gap:8px}' +
+      '#bsAc b{flex:none;font-weight:700}#bsAc s{flex:none;text-decoration:none;font-size:10.5px;font-weight:600;padding:0 6px;border-radius:6px;background:var(--bs-accent-soft,#e8f0fe);color:var(--bs-accent,#3b82f6)}' +
+      '#bsAc span{min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:400;color:var(--bs-muted,#888)}' +
+      '#remindersContentInner .bs-rem-cur{background:var(--bs-accent-soft,#e8f0fe)!important;box-shadow:inset 3px 0 0 var(--bs-accent,#3b82f6)!important;border-radius:8px!important}';
+    document.head.appendChild(st);
   });
 })();

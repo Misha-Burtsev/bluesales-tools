@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.16.3
+@version        1.17.0
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -706,7 +706,7 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   .selectize-dropdown .option:has(.tag-selectize-option) { padding: 3px 8px !important; }
 
   /* фильтры напоминаний */
-  #remindersPlace .hybrid-control-edit:not(.selectized), #remindersPlace select {
+  #remindersPlace .hybrid-control-edit:not(.selectized):not(.selectize-control), #remindersPlace select {
     width: 100% !important; height: 30px !important; border: 1px solid var(--bs-border) !important; border-radius: 8px !important; background: var(--bs-hover) !important; font-size: 12.5px !important; padding: 0 6px !important;
   }
 
@@ -1068,17 +1068,17 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body #customer-data .selectize-dropdown-content > div { display: inline-block !important; flex: none !important; width: auto !important; padding: 0 !important; max-width: 100% !important }
   html body #customer-data .selectize-dropdown-content > div > .tag-selectize-option { display: inline-block !important; width: auto !important; font-size: 10.5px !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important }
   /* 1.16.3: выбранные значения в фильтрах (менеджер, статус, тег) – аккуратная таблетка, крестик не налезает на текст */
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item { position: relative !important; display: inline-flex !important; align-items: center !important; max-width: 100% !important; height: auto !important; margin: 1px 3px 1px 0 !important; box-shadow: none !important; border: 0 !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item:not(.tag-selectize-item):has(> .tag-selectize-item) { padding: 0 !important; background: none !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item.tag-selectize-item,
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item > .tag-selectize-item,
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)) { box-sizing: border-box !important; display: inline-block !important; max-width: 100% !important; font-size: 10.5px !important; font-weight: 600 !important; line-height: 16px !important; padding: 1px 7px !important; border-radius: 6px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)) { background: var(--bs-panel) !important; color: var(--bs-text) !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item.tag-selectize-item:has(.remove),
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item:has(.remove) > .tag-selectize-item,
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)):has(.remove) { padding-right: 20px !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item .remove { position: absolute !important; right: 5px !important; left: auto !important; top: 50% !important; transform: translateY(-50%) !important; width: 12px !important; height: 12px !important; margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; display: flex !important; align-items: center !important; justify-content: center !important; font-size: 12px !important; line-height: 1 !important; text-decoration: none !important; opacity: .7 !important }
-  html body :is(.more_filters, #remindersPlace) .selectize-input > .item .remove:hover { opacity: 1 !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item { position: relative !important; display: inline-flex !important; align-items: center !important; max-width: 100% !important; height: auto !important; margin: 1px 3px 1px 0 !important; box-shadow: none !important; border: 0 !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item:not(.tag-selectize-item):has(> .tag-selectize-item) { padding: 0 !important; background: none !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item.tag-selectize-item,
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item > .tag-selectize-item,
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)) { box-sizing: border-box !important; display: inline-block !important; max-width: 100% !important; font-size: 10.5px !important; font-weight: 600 !important; line-height: 16px !important; padding: 1px 7px !important; border-radius: 6px !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)) { background: var(--bs-panel) !important; color: var(--bs-text) !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item.tag-selectize-item:has(.remove),
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item:has(.remove) > .tag-selectize-item,
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item:not(.tag-selectize-item):not(:has(> .tag-selectize-item)):has(.remove) { padding-right: 20px !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item .remove { position: absolute !important; right: 5px !important; left: auto !important; top: 50% !important; transform: translateY(-50%) !important; width: 12px !important; height: 12px !important; margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; display: flex !important; align-items: center !important; justify-content: center !important; font-size: 12px !important; line-height: 1 !important; text-decoration: none !important; opacity: .7 !important }
+  html body :is(.more_filters, #remindersPlace, #customer-data, body) .selectize-input > .item .remove:hover { opacity: 1 !important }
   /* 1.16.3: фильтр тегов в «Напоминаниях» – поле без второй рамки, выпадашка поверх списка, теги компактные */
   html body #remindersPlace .selectize-control { position: relative !important; z-index: 30 !important }
   html body #remindersPlace .selectize-control .selectize-input { min-height: 30px !important; padding: 3px 8px !important; border-radius: 8px !important; font-size: 12.5px !important }
@@ -1087,4 +1087,22 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body #remindersPlace .selectize-dropdown-content { display: flex !important; flex-wrap: wrap !important; align-content: flex-start !important; gap: 3px !important; padding: 6px !important; max-height: 250px !important }
   html body #remindersPlace .selectize-dropdown-content > div { padding: 0 !important; margin: 0 !important; background: none !important; max-width: 100% !important }
   html body #remindersPlace .selectize-dropdown-content .tag-selectize-option { display: inline-block !important; font-size: 10.5px !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important }
+
+  /* ===== 1.17.0: все выпадашки-списки как фильтр «Менеджеры» ===== */
+  /* обычный список (без цветных тегов): столбик, жирные 12px, подсветка при наведении */
+  html :is(body, #bsU) .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) { width: max-content !important; min-width: 100% !important; max-width: 340px !important; box-sizing: border-box !important }
+  html :is(body, #bsU) #customer-data .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) { width: auto !important; max-width: none !important }
+  html :is(body, #bsU) .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content { display: flex !important; flex-direction: column !important; flex-wrap: nowrap !important; gap: 1px !important; padding: 4px !important; max-height: 280px !important; overflow-x: hidden !important }
+  html :is(body, #bsU) .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div { display: block !important; flex: none !important; width: auto !important; max-width: none !important; margin: 0 !important; padding: 5px 9px !important; border: 0 !important; border-radius: 6px !important; outline: none !important; box-shadow: none !important; background: none !important; color: var(--bs-text) !important; font: 600 12px/1.3 var(--bs-font) !important; white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; cursor: pointer !important }
+  html :is(body, #bsU) .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div * { display: inline !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; outline: none !important; box-shadow: none !important; filter: none !important; background: none !important; color: inherit !important; font: inherit !important; max-width: none !important; overflow: visible !important }
+  html :is(body, #bsU) .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div:is(.active, :hover) { background: var(--bs-hover) !important }
+  html :is(body, #bsU) .selectize-dropdown :is(.option, .selectize-dropdown-content > div):focus { outline: none !important }
+
+  /* фильтры напоминаний: обёртка selectize не должна выглядеть вторым полем */
+  html body #remindersPlace .selectize-control.hybrid-control-edit { height: auto !important; border: 0 !important; background: none !important; padding: 0 !important }
+
+  /* карточка клиента прокручивается, снизу отступ на высоту плашек «Продано», «Ссылки», смайликов */
+  html body.slide-panel-right-open .slide-panel-right { max-height: 100vh !important; overflow-y: auto !important; overflow-x: hidden !important }
+  html body .slide-panel-right .slide-panel-content { height: auto !important; min-height: 100vh !important }
+  html body .slide-panel-right .slide-panel-content > tbody { padding-bottom: var(--bs-stack, 10px) !important }
 }
