@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.30.0
+// @version      1.30.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1638,31 +1638,54 @@
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   // ---------- Импорт продаж других менеджеров из текста для Telegram ----------
-  // Текст продажи (saleText) начинается со ссылки на чат – по ней режем вставку на продажи.
+  // Отчёт о продаже всегда начинается со ссылки на чат – по ней режем вставку на продажи.
+  // Дальше порядок и вид строк могут быть любыми (набрано руками или нашим окном продажи):
+  //  сумма – первая строка с числом от 100 и «р/руб/₽/к» или словом «сумма» («45 000 рублей», «45000р», «45к»);
+  //  МОП – строка «МОП:/Менеджер:», иначе строка только из имён менеджеров («Даша и Миша», «Даша, Бес»);
+  //  тариф – первая строка после ссылки, которая не сумма и не МОП.
+  const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес' };
+  const mopRe = n => new RegExp('(^|[^а-яё])(' + (MOP_FORMS[n] || norm(n)) + ')(?![а-яё])', 'i');
+  const mopsIn = line => MANAGERS.map(m => m[1]).filter(n => mopRe(n).test(norm(line)));
+  // строка только из имён менеджеров и связок – пустая строка после вычёркивания
+  const onlyMops = line => mopsIn(line).length ? MANAGERS.map(m => m[1]).reduce((t, n) => t.replace(new RegExp(MOP_FORMS[n] || norm(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
+  function sumIn(line) {
+    const l = norm(line);
+    if (/@|https?:/.test(l)) return 0;
+    const m = /(\d[\d\s .,]*)\s*(к(?![а-яa-z])|тыс\S*)?\s*(р(?![а-яa-z])|р\.|руб\S*|₽)?/.exec(l);
+    if (!m || !(m[2] || m[3] || /сумм|итог|оплат/.test(l) || /^[\d\s .,]+$/.test(l))) return 0;
+    let v = parseFloat(m[1].replace(/[\s ]/g, '').replace(',', '.'));
+    if (m[2]) v *= 1000;
+    return v >= 100 ? Math.round(v) : 0;
+  }
   function parseSales(text) {
-    const parts = text.split(/(?=https?:\/\/bluesales\.ru\/app\/messenger\/\?dialogId=\d+)/i).filter(p => /^https?:/i.test(p));
+    const parts = text.split(/(?=https?:\/\/(?:www\.)?bluesales\.ru\/\S*?dialogId=\d+)/i).filter(p => /^https?:/i.test(p));
     return parts.map(part => {
       const lines = part.split('\n').map(l => l.trim()).filter(Boolean);
       const x = { dlg: (/dialogId=(\d+)/i.exec(lines[0]) || [])[1], name: '', price: '', disc: '', mops: [], email: '', fio: '', nick: '', src: '', quote: '' };
-      const iSum = lines.findIndex(l => /^[\d\s ]+рубл/i.test(l));
-      const iMop = lines.findIndex(l => /^моп\s*:/i.test(l));
-      const iSrc = lines.findIndex(l => /^источник\s*:/i.test(l));
-      x.name = lines.slice(1, iSum > 0 ? iSum : 2).join(' ');
-      if (iSum > 0) {
-        const total = +lines[iSum].replace(/рубл.*$/i, '').replace(/\D/g, '');
-        const d = /скидка\s*([\d\s ]+)/i.exec(lines[iSum]);
+      // остаток первой строки после ссылки тоже может быть текстом
+      lines[0] = lines[0].replace(/^\S+/, '').trim();
+      const iSum = lines.findIndex(l => sumIn(l) && !/^скидк/i.test(norm(l)));
+      let iMop = lines.findIndex(l => /^(моп\S*|менеджер\S*)\s*[:-]/i.test(norm(l)));
+      if (iMop < 0) iMop = lines.findIndex((l, i) => i !== iSum && onlyMops(l) === '');
+      if (iSum >= 0) {
+        const d = /скидк\S*\s*[:-]?\s*(\d[\d\s ]*)/i.exec(lines[iSum]);
         x.disc = d ? String(+d[1].replace(/\D/g, '')) : '';
-        x.price = String(total + (+x.disc || 0));
+        x.price = String(sumIn(lines[iSum]) + (+x.disc || 0));
       }
-      if (iMop >= 0) x.mops = MANAGERS.map(m => m[1]).filter(n => new RegExp('(^|[\\s,:])' + n + '($|[\\s,])', 'i').test(lines[iMop]));
+      if (iMop >= 0) x.mops = mopsIn(lines[iMop]);
+      const iSrc = lines.findIndex(l => /^источник\s*:/i.test(l));
       if (iSrc >= 0) x.src = lines[iSrc].replace(/^источник\s*:\s*/i, '');
-      lines.slice(iMop >= 0 ? iMop + 1 : lines.length, iSrc >= 0 ? iSrc : lines.length).forEach(l => {
-        if (/^\S+@\S+\.\S+$/.test(l)) x.email = l; else if (/^@/.test(l)) x.nick = l; else x.fio = x.fio ? x.fio + ' ' + l : l;
-      });
+      const iName = lines.findIndex((l, i) => l && i !== iSum && i !== iMop && i !== iSrc && !/^\S+@\S+\.\S+$|^@\w/.test(l));
+      if (iName >= 0 && (iSrc < 0 || iName < iSrc)) x.name = lines[iName];
+      lines.forEach(l => { if (/^\S+@\S+\.\S+$/.test(l)) x.email = l; else if (/^@\w/.test(l)) x.nick = l; });
+      // ФИО – только в нашем формате: строки между МОП и «Источник»
+      if (iMop >= 0 && iSrc > iMop) x.fio = lines.slice(iMop + 1, iSrc).filter(l => l !== x.email && l !== x.nick).join(' ');
       // цитата – в кавычках; после неё может идти шапка следующего сообщения из ТГ («Имя, [дата]»), её отбрасываем
       if (iSrc >= 0) { const q = lines.slice(iSrc + 1).join('\n'), m = /^["«“]([\s\S]*?)["»”]/.exec(q); x.quote = m ? m[1] : (lines[iSrc + 1] || ''); }
+      if (!x.name) x.name = 'Продажа (тариф не указан)';
+      x.bad = !x.price ? 'не нашёл сумму' : !x.mops.length ? 'не нашёл менеджера' : '';
       return x;
-    }).filter(x => x.dlg && x.name);
+    }).filter(x => x.dlg);
   }
   function openImport() {
     closeSale();
@@ -1670,7 +1693,7 @@
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-imp"><div class="bs-rep-head"><b>Импорт продаж из Telegram</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-tar-help">Скопируй из ТГ сообщения о продажах за день (можно все разом) и вставь сюда. Добавятся только те, где в МОП есть ' + esc(meName()) + ', – с твоей долей.</div>' +
+      '<div class="bs-tar-help">Скопируй из ТГ отчёты о продажах за день (можно все разом) и вставь сюда. Каждый отчёт – со ссылки на чат, дальше в любом порядке тариф, сумма («45 000», «45000р», «45к») и менеджеры. Добавятся только те, где есть ' + esc(meName()) + ', – с твоей долей.</div>' +
       '<textarea class="bs-imp-in" spellcheck="false" placeholder="https://bluesales.ru/app/messenger/?dialogId=…"></textarea>' +
       '<div class="bs-imp-list"></div>' +
       '<div class="bs-rep-btns"><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="add" class="bs-main" disabled>Добавить</button></div></div>';
@@ -1680,14 +1703,14 @@
     const paint = () => {
       const have = salesGet(), me = meName();
       found = parseSales(ta.value).map(x => Object.assign(x, {
-        mine: x.mops.includes(me),
+        mine: !x.bad && x.mops.includes(me),
         dup: have.some(s => s.dlg === x.dlg && norm(s.name) === norm(x.name)),
       }));
       const ok = found.filter(x => x.mine && !x.dup);
       out.innerHTML = found.length ? found.map(x =>
         '<div class="bs-imp-row' + (x.mine && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
-        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u>' + (x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – пропущу') + '</u></div>').join('')
+        '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
+        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – пропущу') + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
       btn.disabled = !ok.length;
       btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · ' + rub(ok.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
