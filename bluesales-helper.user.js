@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.22.2
+// @version      1.23.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -422,7 +422,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint,#bsSaleWrap';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -1206,20 +1206,17 @@
     if (document.getElementById('bsSold')) return;
     const b = document.createElement('div');
     b.id = 'bsSold';
-    b.innerHTML = '<span>Продано</span><b></b>' +
-      [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [1, '1']].map(([v, t]) => '<i data-v="' + v + '" title="+' + String(v).replace('.', ',') + ' курса">' + t + '</i>').join('') +
-      '<i data-v="0" class="bs-undo" title="Отменить последнее"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/></svg></i>';
-    b.addEventListener('click', ev => { const i = ev.target.closest('i'), v = i && i.dataset.v; if (v != null) soldAdd(+v); });
+    b.innerHTML = '<span>Продано</span><b></b><i data-a="list" title="Продажи за смену">☰</i><i data-a="new" class="bs-plus" title="Добавить продажу в этом чате">+ продажа</i>';
+    b.addEventListener('click', ev => { const a = ev.target.dataset.a; if (a === 'list') openSales(); else if (a === 'new') openSale(); });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
-      '#bsSold{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;display:none;align-items:center;gap:3px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
+      '#bsSold{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;display:none;align-items:center;gap:4px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
       'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '#bsSold span{flex:1;white-space:nowrap}#bsSold b{min-width:28px;margin-right:4px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
-      '#bsSold i{font-style:normal;width:24px;height:24px;flex:none;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:13px;' +
-      'background:var(--bs-accent-soft,rgba(59,130,246,.12));color:var(--bs-accent,#3b82f6);font-weight:600}' +
-      '#bsSold i:hover{background:var(--bs-accent,#3b82f6);color:#fff}' +
-      '#bsSold i.bs-undo{width:22px;background:none;color:var(--bs-muted,#888)}#bsSold i.bs-undo:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}';
+      '#bsSold span{white-space:nowrap}#bsSold b{flex:1;color:var(--bs-text,#222);font-size:13.5px}' +
+      '#bsSold i{font-style:normal;min-width:22px;height:24px;padding:0 4px;flex:none;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:13px}' +
+      '#bsSold i:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
+      '#bsSold i.bs-plus{padding:0 9px;background:var(--bs-accent,#3b82f6);color:#fff;font-weight:600;font-size:12.5px}#bsSold i.bs-plus:hover{filter:brightness(1.1)}';
     document.head.appendChild(st);
     paintSold();
   }
@@ -1249,9 +1246,9 @@
   }
   function tarParse(text) {
     return text.split('\n').map(l => l.split('|').map(x => x.trim())).filter(c => c.length >= 2 && /^https?:\/\//.test(c[1]))
-      .map(([k, u, p]) => ({ k, u, p: p || '' }));
+      .map(([k, u, p, ...n]) => ({ k, u, p: p || '', n: n.join(' | ') }));
   }
-  const tarText = list => list.map(t => t.k + ' | ' + t.u + (t.p ? ' | ' + t.p : '')).join('\n');
+  const tarText = list => list.map(t => t.k + ' | ' + t.u + (t.p || t.n ? ' | ' + t.p : '') + (t.n ? ' | ' + t.n : '')).join('\n');
   function tarFind(query) {
     const { tags, unknown } = tarTags(query);
     if (unknown.length) return { err: 'Не понял: ' + unknown.join(', ') };
@@ -1303,7 +1300,7 @@
     wrap.id = 'bsTarWrap';
     wrap.innerHTML =
       '<div id="bsTar"><div class="bs-rep-head"><b>Тарифы</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-tar-help">Строка: <code>слова | ссылка | цена</code>. В сообщении пиши сокращение в фигурных скобках – после «}» оно станет ссылкой.<br>' +
+      '<div class="bs-tar-help">Строка: <code>слова | ссылка | цена | название для отчёта</code> (название можно не писать – соберётся само). В сообщении пиши сокращение в фигурных скобках – после «}» оно станет ссылкой.<br>' +
       'Слова: мат (проф), баз, рус, комбо (или мат+рус) · бронь (месяц) / год · кур / сам (без кур). Порядок любой, например <code>{рус сам год}</code>.<br>' +
       'Хранится только в этом браузере.</div>' +
       '<textarea spellcheck="false" placeholder="мат бронь сам | https://… | 4990"></textarea>' +
@@ -1340,6 +1337,194 @@
     document.head.appendChild(st);
   }
   document.addEventListener('DOMContentLoaded', tariffsInit);
+
+  // ---------- Продажи за смену: окно продажи и текст для Telegram ----------
+  // Продажа хранится за день (bsSales); доля и «цена × доля» сразу идут в отчёт («Продано», «Сумма продаж»).
+  const SALES_KEY = 'bsSales';
+  const MONTHS = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+  const SHARES = [[1, '1'], [0.5, '½'], [0.33, '⅓'], [0.25, '¼']];
+  const shareFor = n => n >= 4 ? 0.25 : n === 3 ? 0.33 : n === 2 ? 0.5 : 1;
+  const rub = n => String(Math.round(+n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  function salesGet() { const r = jget(SALES_KEY, {}); return r.d === ddmm(new Date()) ? r.list || [] : []; }
+  function salesSet(list) { jset(SALES_KEY, { d: ddmm(new Date()), list }); }
+  function sumAdd(x) {
+    if (!x) return;
+    const r = repSaved();
+    jset(REP_KEY, Object.assign(r, { sum: Math.max(0, Math.round((+r.sum || 0) + x)) }));
+    const i = document.querySelector('#bsRep input[data-k="sum"]');
+    if (i) { i.value = +repSaved().sum || 0; i.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  // название тарифа для отчёта: своё из 4-го столбца или собранное из слов; у брони – месяц покупки
+  function tarName(t) {
+    const tags = tarTags(t.k).tags;
+    const subj = tags.has('комбо') ? 'Математика + Русский язык' : tags.has('баз') ? 'Базовая математика' : tags.has('рус') ? 'Русский язык' : tags.has('мат') ? 'Математика' : '';
+    const cur = tags.has('сам') ? ' (самоподготовка)' : tags.has('кур') ? ' (с куратором)' : '';
+    const name = t.n || ('Годовой курс ЕГЭ' + (subj ? ' | ' + subj + cur : ''));
+    return name + (tags.has('бронь') ? ' | ' + MONTHS[new Date().getMonth()] : '');
+  }
+  // теги клиента из карточки справа (запасной вариант – теги активного чата в списке)
+  function clientTags() {
+    let items = [...document.querySelectorAll('#customer-data .tag-selectize-item')];
+    if (!items.length) items = [...document.querySelectorAll('.dialogs_list_item.active .tags span')];
+    return items.map(e => { const c = e.cloneNode(true); c.querySelectorAll('a,.remove').forEach(x => x.remove()); return c.textContent.replace(/×/g, '').trim(); }).filter(Boolean);
+  }
+  const joinMops = m => m.length < 3 ? m.join(' и ') : m.join(', ');
+  function saleText(x) {
+    const who = [x.email, x.fio, x.nick].map(v => (v || '').trim()).filter(Boolean);
+    return [
+      'https://bluesales.ru/app/messenger/?dialogId=' + x.dlg,
+      x.name,
+      rub(x.price) + ' рублей',
+      'МОП: ' + joinMops(x.mops),
+      who.join('\n'),
+      'Источник: ' + (x.src || ''),
+      '"' + (x.quote || '').trim() + '"',
+    ].filter(Boolean).join('\n\n');
+  }
+  const saleDone = x => !!((x.email || '').trim() && (x.fio || '').trim());
+  function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
+  // id – открыть сохранённую продажу; без id – новая в текущем чате
+  function openSale(id) {
+    closeSale();
+    const list = salesGet(), old = id ? list.find(x => x.id === id) : null;
+    const dlg = old ? old.dlg : curDialog();
+    if (!dlg) return tarHint('Сначала открой чат клиента');
+    const tars = jget(TAR_KEY, []);
+    const tags = clientTags();
+    const x = old ? Object.assign({}, old) : {
+      id: Date.now().toString(36), dlg, t: Date.now(), tar: '', name: '', price: '',
+      mops: MANAGERS.map(m => m[1]).filter(n => tags.some(t => norm(t) === norm(n))),
+      email: '', fio: '', nick: '',
+      src: tags.filter(t => /^источник\s*:/i.test(t)).map(t => t.replace(/^источник\s*:\s*/i, '')).join(', '),
+      quote: '',
+      who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
+    };
+    if (!old) x.share = shareFor(x.mops.length);
+    let shareTouched = !!old;
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
+    wrap.innerHTML =
+      '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-sale-cols"><div class="bs-sale-form">' +
+      '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
+      field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') +
+      '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      '<label><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+      field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
+      field('src', 'Источник', 'из тегов или вручную') + field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta') +
+      '</div><div class="bs-sale-prev"><span>Текст для Telegram</span><textarea readonly spellcheck="false"></textarea><div class="bs-sale-note"></div></div></div>' +
+      '<div class="bs-rep-btns">' + (old ? '<button data-a="del" class="bs-sale-del">Удалить</button>' : '') + '<span class="bs-tar-st"></span><button data-a="save">Сохранить</button><button data-a="copy" class="bs-main">Сохранить и скопировать</button></div></div>';
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('#bsSale'), prev = box.querySelector('.bs-sale-prev textarea'), note = box.querySelector('.bs-sale-note');
+    const inp = k => box.querySelector('[data-k="' + k + '"]');
+    ['name', 'price', 'email', 'fio', 'nick', 'src', 'quote'].forEach(k => { inp(k).value = x[k] == null ? '' : x[k]; });
+    inp('tar').value = x.tar;
+    const paint = () => {
+      box.querySelectorAll('[data-g="mops"] em').forEach(e => e.classList.toggle('bs-on', x.mops.includes(e.dataset.v)));
+      box.querySelectorAll('[data-g="share"] em').forEach(e => e.classList.toggle('bs-on', +e.dataset.v === x.share));
+      prev.value = saleText(x);
+      const part = Math.round((+x.price || 0) * x.share);
+      note.textContent = 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
+    };
+    box.addEventListener('input', ev => {
+      const k = ev.target.dataset.k;
+      if (!k || k === 'tar') return;
+      x[k] = ev.target.value;
+      paint();
+    });
+    inp('tar').addEventListener('change', ev => {
+      x.tar = ev.target.value;
+      const t = tars[+x.tar];
+      if (t && x.tar !== 'own') { x.name = tarName(t); x.price = t.p; inp('name').value = x.name; inp('price').value = x.price; }
+      else if (x.tar === 'own') inp('name').focus();
+      paint();
+    });
+    const save = () => {
+      const all = salesGet(), i = all.findIndex(s => s.id === x.id), was = i >= 0 ? all[i] : null;
+      const part = s => s ? Math.round((+s.price || 0) * s.share) : 0;
+      const dShare = r2(x.share - (was ? was.share : 0));
+      if (dShare) soldAdd(dShare);
+      sumAdd(part(x) - part(was));
+      if (i >= 0) all[i] = x; else all.push(x);
+      salesSet(all);
+      box.querySelector('.bs-tar-st').textContent = 'Сохранено';
+    };
+    box.addEventListener('click', ev => {
+      const em = ev.target.closest('em'), a = ev.target.dataset.a;
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (em) {
+        const g = em.parentNode.dataset.g, v = em.dataset.v;
+        if (g === 'mops') {
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          if (!shareTouched) x.share = shareFor(x.mops.length);
+        } else { x.share = +v; shareTouched = true; }
+        paint();
+      } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); }
+      else if (a === 'copy') {
+        if (!x.name) return inp('tar').focus();
+        save();
+        navigator.clipboard.writeText(prev.value).then(() => { ev.target.textContent = 'Скопировано ✓'; setTimeout(() => { ev.target.textContent = 'Сохранить и скопировать'; }, 1500); });
+      } else if (a === 'del') {
+        if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
+        const all = salesGet(), was = all.find(s => s.id === x.id);
+        if (was) { soldAdd(-was.share); sumAdd(-Math.round((+was.price || 0) * was.share)); salesSet(all.filter(s => s.id !== x.id)); }
+        closeSale();
+      }
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+    paint();
+  }
+  // список продаж за сегодня – клик открывает продажу, чтобы дописать данные
+  function openSales() {
+    closeSale();
+    const list = salesGet();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
+      (list.length ? '<div class="bs-sales-list">' + list.map(x =>
+        '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + '</b><span>' + esc(x.name) + '</span>' +
+        '<em>' + rub(x.price) + ' ₽ · ' + String(x.share).replace('.', ',') + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') + '</div>').join('') + '</div>'
+        : '<div class="bs-tar-help">Сегодня продаж пока нет. Открой чат клиента и нажми «+ продажа».</div>') +
+      '</div>';
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', ev => {
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      const row = ev.target.closest('.bs-sales-row');
+      if (row) openSale(row.dataset.id);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  function salesInit() {
+    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeSale(); });
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsSaleWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
+      '#bsSale{width:760px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
+      'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
+      '#bsSale.bs-sales{width:520px}' +
+      '.bs-sale-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:700px){.bs-sale-cols{grid-template-columns:1fr}}' +
+      '.bs-sale-form{display:flex;flex-direction:column;gap:7px}' +
+      '#bsSale label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '#bsSale input,#bsSale select,.bs-sale-form textarea{padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:transparent;color:var(--bs-text,#222);font:13px inherit;outline:none;resize:vertical;color-scheme:light dark}' +
+      '#bsSale select option{background:var(--bs-panel,#fff);color:var(--bs-text,#222)}' +
+      '#bsSale input:focus,#bsSale select:focus,.bs-sale-form textarea:focus{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-chips{display:flex;flex-wrap:wrap;gap:5px}' +
+      '.bs-chips em{font-style:normal;padding:4px 11px;border-radius:8px;border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-text,#222);font-size:12.5px;cursor:pointer;user-select:none}' +
+      '.bs-chips em.bs-on{background:var(--bs-accent,#3b82f6);border-color:var(--bs-accent,#3b82f6);color:#fff}' +
+      '.bs-sale-prev{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-sale-prev textarea{flex:1;min-height:300px;padding:9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12.5px/1.45 inherit;resize:none}' +
+      '.bs-sale-note{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
+      '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
+      '.bs-sales-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
+      '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
+      '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}';
+    document.head.appendChild(st);
+  }
+  document.addEventListener('DOMContentLoaded', salesInit);
 
   // ---------- Кнопка BlueSales над аккаунтом – на главную CRM ----------
   function homeInit() {
