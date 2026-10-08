@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.35.2
+// @version      1.35.3
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1847,7 +1847,8 @@
       if (!d) return;
       const [f0, t0] = histRange();
       let f = r === 'from' ? d : f0, to2 = r === 'to' ? d : t0;
-      if (f && to2 && f > to2) [f, to2] = [to2, f];
+      // «с» позже «по» – подтягиваем вторую границу к введённой дате, а не меняем местами
+      if (f && to2 && f > to2) { if (r === 'from') to2 = f; else f = to2; }
       Object.assign(histPer, { p: 'custom', from: f, to: to2 });
       paintPer(); paintBody();
     };
