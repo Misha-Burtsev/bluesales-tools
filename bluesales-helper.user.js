@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.1
+// @version      1.28.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -145,7 +145,19 @@
       }
       sel.prepend(label, box);
     }
+    paintFavBar();
     emoFilter();
+  }
+  // первые 5 избранных – в плашке, когда смайлики свёрнуты
+  function paintFavBar() {
+    const b = document.getElementById('bsEmoFav');
+    if (!b) return;
+    b.innerHTML = '';
+    load(FAV_KEY).slice(0, 5).forEach(em => {
+      const sp = document.createElement('span');
+      sp.textContent = em;
+      b.appendChild(sp);
+    });
   }
 
   // клики по смайликам – в фазе перехвата, чтобы видеть и родные, и наши
@@ -255,6 +267,10 @@
     const label = document.createElement('span');
     label.id = 'bsEmoLabel'; label.textContent = 'Смайлики';
     label.addEventListener('click', () => flip('bsEmoClosed'));
+    const favBar = document.createElement('span');
+    favBar.id = 'bsEmoFav';
+    favBar.addEventListener('mousedown', ev => ev.preventDefault());
+    favBar.addEventListener('click', ev => { if (ev.target.parentNode === favBar) insertEmoji(ev.target.textContent); });
     const theme = btn('bsThemeBtn', '');
     theme.addEventListener('click', () => {
       const light = localStorage.getItem('bsTheme') !== 'light';
@@ -285,7 +301,7 @@
     // поиск смайликов / «Смайлики ▴» – своя плашка между ссылками и кнопками
     const bar = document.createElement('div');
     bar.id = 'bsEmoBar';
-    bar.append(inp, label);
+    bar.append(inp, favBar, label);
     // кнопка сворачивания – в правом верхнем углу панели смайликов (ставит placeLinks); свёрнутые открываются по «Смайлики» в панели
     document.body.append(dock, bar, tog);
 
@@ -303,6 +319,11 @@
       '#bsEmoLabel{display:none;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--bs-muted,#888);font-size:12.5px;padding-left:6px}',
       'body.bs-emo-closed #bsEmoSearch{display:none}',
       'body.bs-emo-closed #bsEmoLabel{display:block}',
+      '#bsEmoFav{display:none;flex:none;gap:1px}',
+      'body.bs-emo-closed #bsEmoFav{display:flex}',
+      '#bsEmoFav span{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;font-size:17px;cursor:pointer}',
+      '#bsEmoFav span:hover{background:var(--bs-hover,#f3f4f6)}',
+      'body.bs-emo-closed #bsEmoFav:not(:empty)+#bsEmoLabel{text-align:right;padding:0 4px 0 0}',
       '#bsEmoToggle{position:fixed;z-index:2002;display:none;height:34px;justify-content:flex-end;padding:6px 12px 0 0;outline:none!important;box-shadow:none!important;border:0!important;box-sizing:border-box;border-radius:11px 11px 0 0;background:none!important}',
       '#bsEmoToggle:hover{color:var(--bs-text,#222)}',
       '#bsEmoToggle:focus,#bsEmoToggle:focus-visible,#bsEmoToggle:active{outline:none!important;box-shadow:none!important}',
@@ -324,7 +345,7 @@
       'html:root body .emoji_selector .bs-pop,html:root body .emoji_selector .bs-hide{display:none!important}',
     ].join('');
     document.head.appendChild(st);
-    paintDock();
+    paintDock(); paintFavBar();
   }
 
   // .emoji_selector создаётся скриптом сайта – ждём его появления
@@ -1407,7 +1428,7 @@
       '.bs-tar-add:hover{background:var(--bs-hover,#f5f7fa)}' +
       '.bs-tar-foot{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:11.5px}.bs-tar-note{color:var(--bs-muted,#888)}' +
       '.bs-tar-st{margin-left:auto;font-size:12px;color:#1f9d55}.bs-tar-st.bs-warn{color:#e04848}' +
-      '.bs-tar-tabs{margin-bottom:10px}.bs-tar-pane[hidden]{display:none}' +
+      '.bs-tar-tabs{margin-bottom:10px}.bs-sale-share[hidden],#bsSale button[hidden]{display:none!important}.bs-tar-pane[hidden]{display:none}' +
       '#bsTarHint{position:fixed;z-index:2500;display:none;max-width:520px;padding:6px 10px;border-radius:9px;font-size:12.5px;background:rgba(229,62,62,.95);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}' +
       '#bsTarHint.bs-ok{background:rgba(34,165,90,.95)}';
     document.head.appendChild(st);
@@ -1459,6 +1480,9 @@
     ].filter(Boolean).join('\n\n');
   }
   const saleDone = x => !!((x.email || '').trim() && (x.fio || '').trim());
+  // «я» – менеджер, выбранный в отчёте смены; продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
+  const meName = () => (MANAGERS.find(m => m[0] === (localStorage.getItem('bsRepManager') || MANAGERS[0][0])) || [])[1];
+  const saleMine = x => !x.mops.length || x.mops.includes(meName());
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   function openSale(id) {
@@ -1487,7 +1511,7 @@
       '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
       field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') +
       '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
-      '<label><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+      '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
       field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
       field('src', 'Источник', 'из тегов или вручную') + field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta') +
       '</div><div class="bs-sale-prev"><span>Текст для Telegram</span><textarea readonly spellcheck="false"></textarea><div class="bs-sale-note"></div></div></div>' +
@@ -1501,6 +1525,11 @@
       box.querySelectorAll('[data-g="mops"] em').forEach(e => e.classList.toggle('bs-on', x.mops.includes(e.dataset.v)));
       box.querySelectorAll('[data-g="share"] em').forEach(e => e.classList.toggle('bs-on', +e.dataset.v === x.share));
       prev.value = saleText(x);
+      const mine = saleMine(x);
+      box.querySelector('.bs-sale-share').hidden = !mine;
+      box.querySelector('[data-a="save"]').hidden = !mine;
+      box.querySelector('[data-a="copy"]').textContent = mine ? 'Сохранить и скопировать' : 'Скопировать';
+      if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – в «Продано» и сумму не пойдёт, только текст для ТГ. Кто ты – выбирается в отчёте смены.' + (old ? ' Из твоих продаж она уберётся.' : ''));
       const part = Math.round((+x.price || 0) * x.share);
       note.textContent = 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
@@ -1540,8 +1569,9 @@
       } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
-        save();
-        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint('✓ Продажа сохранена, текст скопирован', true); });
+        const mine = saleMine(x);
+        if (mine) save(); else if (old) saleDel(x.id);
+        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(mine ? '✓ Продажа сохранена, текст скопирован' : '✓ Текст скопирован, в смену не добавлено', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
