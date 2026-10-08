@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.29.1
+// @version      1.30.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1617,11 +1617,12 @@
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
+      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (ev.target.dataset.a === 'me') return askMe();
+      if (ev.target.dataset.a === 'imp') return openImport();
       if (ev.target.dataset.a === 'shift') {
         if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
         newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
@@ -1636,6 +1637,84 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
+  // ---------- Импорт продаж других менеджеров из текста для Telegram ----------
+  // Текст продажи (saleText) начинается со ссылки на чат – по ней режем вставку на продажи.
+  function parseSales(text) {
+    const parts = text.split(/(?=https?:\/\/bluesales\.ru\/app\/messenger\/\?dialogId=\d+)/i).slice(1);
+    return parts.map(part => {
+      const lines = part.split('\n').map(l => l.trim()).filter(Boolean);
+      const x = { dlg: (/dialogId=(\d+)/i.exec(lines[0]) || [])[1], name: '', price: '', disc: '', mops: [], email: '', fio: '', nick: '', src: '', quote: '' };
+      const iSum = lines.findIndex(l => /^[\d\s ]+рубл/i.test(l));
+      const iMop = lines.findIndex(l => /^моп\s*:/i.test(l));
+      const iSrc = lines.findIndex(l => /^источник\s*:/i.test(l));
+      x.name = lines.slice(1, iSum > 0 ? iSum : 2).join(' ');
+      if (iSum > 0) {
+        const total = +lines[iSum].replace(/рубл.*$/i, '').replace(/\D/g, '');
+        const d = /скидка\s*([\d\s ]+)/i.exec(lines[iSum]);
+        x.disc = d ? String(+d[1].replace(/\D/g, '')) : '';
+        x.price = String(total + (+x.disc || 0));
+      }
+      if (iMop >= 0) x.mops = MANAGERS.map(m => m[1]).filter(n => new RegExp('(^|[\\s,:])' + n + '($|[\\s,])', 'i').test(lines[iMop]));
+      if (iSrc >= 0) x.src = lines[iSrc].replace(/^источник\s*:\s*/i, '');
+      lines.slice(iMop >= 0 ? iMop + 1 : lines.length, iSrc >= 0 ? iSrc : lines.length).forEach(l => {
+        if (/^\S+@\S+\.\S+$/.test(l)) x.email = l; else if (/^@/.test(l)) x.nick = l; else x.fio = x.fio ? x.fio + ' ' + l : l;
+      });
+      // цитата – в кавычках; после неё может идти шапка следующего сообщения из ТГ («Имя, [дата]»), её отбрасываем
+      if (iSrc >= 0) { const q = lines.slice(iSrc + 1).join('\n'), m = /^["«“]([\s\S]*?)["»”]/.exec(q); x.quote = m ? m[1] : (lines[iSrc + 1] || ''); }
+      return x;
+    }).filter(x => x.dlg && x.name);
+  }
+  function openImport() {
+    closeSale();
+    if (!meSet()) return askMe();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-imp"><div class="bs-rep-head"><b>Импорт продаж из Telegram</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-tar-help">Скопируй из ТГ сообщения о продажах за день (можно все разом) и вставь сюда. Добавятся только те, где в МОП есть ' + esc(meName()) + ', – с твоей долей.</div>' +
+      '<textarea class="bs-imp-in" spellcheck="false" placeholder="https://bluesales.ru/app/messenger/?dialogId=…"></textarea>' +
+      '<div class="bs-imp-list"></div>' +
+      '<div class="bs-rep-btns"><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="add" class="bs-main" disabled>Добавить</button></div></div>';
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('#bsSale'), ta = box.querySelector('.bs-imp-in'), out = box.querySelector('.bs-imp-list'), btn = box.querySelector('[data-a="add"]');
+    let found = [];
+    const paint = () => {
+      const have = salesGet(), me = meName();
+      found = parseSales(ta.value).map(x => Object.assign(x, {
+        mine: x.mops.includes(me),
+        dup: have.some(s => s.dlg === x.dlg && norm(s.name) === norm(x.name)),
+      }));
+      const ok = found.filter(x => x.mine && !x.dup);
+      out.innerHTML = found.length ? found.map(x =>
+        '<div class="bs-imp-row' + (x.mine && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
+        '<u>' + (x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – пропущу') + '</u></div>').join('')
+        : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
+      btn.disabled = !ok.length;
+      btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · ' + rub(ok.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
+    };
+    ta.addEventListener('input', paint);
+    box.addEventListener('click', ev => {
+      const a = ev.target.dataset.a;
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (a === 'back') return openSales();
+      if (a !== 'add') return;
+      const all = salesGet();
+      let n = 0;
+      found.filter(x => x.mine && !x.dup).forEach(f => {
+        const x = { id: Date.now().toString(36) + (n++), dlg: f.dlg, t: Date.now(), tar: 'own', name: f.name, price: f.price, disc: f.disc,
+          mops: f.mops, share: shareFor(f.mops.length), email: f.email, fio: f.fio, nick: f.nick, src: f.src, quote: f.quote, who: f.fio, imp: 1, cnt: true };
+        soldAdd(x.share);
+        sumAdd(salePart(x));
+        all.push(x);
+      });
+      salesSet(all);
+      openSales();
+      tarHint('✓ Добавлено продаж: ' + n, true);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+    ta.focus();
+  }
+
   // «кто я» выбирается кнопкой «Я: …» в «Продажах за смену»
   function askMe() {
     closeSale();
@@ -1690,6 +1769,12 @@
       '#bsSale.bs-me{width:360px}#bsSale.bs-me .bs-tar-help{margin:6px 0 12px}#bsSale.bs-me .bs-chips em{padding:6px 14px;font-size:13.5px}' +
       '.bs-sales-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer}' +
       '.bs-sales-foot button:hover{border-color:#e04848;color:#e04848}' +
+      '#bsSale.bs-imp{width:560px}.bs-imp-in{width:100%;box-sizing:border-box;min-height:140px;margin:8px 0;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:transparent;color:var(--bs-text,#222);font:12px/1.4 inherit;resize:vertical;outline:none}' +
+      '.bs-imp-in:focus{border-color:var(--bs-accent,#3b82f6)}.bs-imp-list{display:flex;flex-direction:column;gap:5px;max-height:40vh;overflow:auto}' +
+      '.bs-imp-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px}.bs-imp-row.bs-off{opacity:.5}' +
+      '.bs-imp-row span{font-size:12px;color:var(--bs-muted,#888)}.bs-imp-row em{font-style:normal;font-weight:600;text-align:right}.bs-imp-row u{text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '#bsSale button:disabled{opacity:.5;cursor:default}' +
+      '.bs-sales-foot .bs-imp-btn:hover{border-color:var(--bs-accent,#3b82f6)!important;color:var(--bs-accent,#3b82f6)!important}' +
       '.bs-sales-foot .bs-me-btn{margin-right:auto}.bs-sales-foot .bs-me-btn:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}';
     document.head.appendChild(st);
   }
