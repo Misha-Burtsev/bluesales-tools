@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.34.0
+// @version      1.34.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1692,7 +1692,7 @@
     closeSale();
     per = per || 7;
     const now = Date.now(), cur = repSaved(), curSales = salesGet();
-    const all = histGet().slice().reverse();
+    const all = histGet().map((e, hi) => Object.assign({ hi }, e)).reverse();
     if (repHas(cur) || curSales.length) all.unshift({ d: ddmm(new Date()), now: true, rep: histRep(cur), sales: curSales });
     const list = per === 'all' ? all : all.filter(e => now - dmyDate(e.d) < per * 864e5);
     const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
@@ -1707,6 +1707,7 @@
         const dt = dmyDate(e.d);
         return '<div class="bs-hist-row" data-i="' + i + '"><b>' + e.d.slice(0, 5) + ' <span>' + WD[dt.getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
           '<em>' + String(+e.rep.bought || 0).replace('.', ',') + ' прод. · ' + rub(e.rep.sum) + ' ₽ · ' + (+e.rep.links || 0) + ' ссыл.</em>' +
+          (e.now ? '<s></s>' : '<i class="bs-hist-del" data-hi="' + e.hi + '" data-end="' + e.end + '" title="Удалить смену из истории">×</i>') +
           '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map(x =>
             '<div' + (x.cnt === false ? ' class="bs-hist-other"' : '') + '><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : String(x.share).replace('.', ',')) + '</span></div>').join('') : '<div><span>Список продаж не вёлся</span></div>') + '</div></div>';
       }).join('') + '</div>' : '<div class="bs-tar-help">За этот период смен нет. История копится с версии 1.34: каждая закрытая смена (кнопкой «Начать новую смену» или со сменой даты) попадает сюда.</div>') +
@@ -1717,6 +1718,13 @@
       if (t.matches('.bs-rep-head i')) return closeSale();
       if (t.dataset.a === 'back') return openSales();
       if (t.dataset.p) return openHistory(t.dataset.p === 'all' ? 'all' : +t.dataset.p);
+      if (t.matches('.bs-hist-del')) {
+        const h = histGet(), i = +t.dataset.hi;
+        if (!h[i] || String(h[i].end) !== t.dataset.end) return openHistory(per);
+        if (!confirm('Удалить смену ' + h[i].d + ' из истории? Отчёт и список продаж за сегодня это не трогает.')) return;
+        h.splice(i, 1); jset(HIST_KEY, h);
+        return openHistory(per);
+      }
       const row = t.closest('.bs-hist-row');
       if (row) row.classList.toggle('open');
     });
@@ -1978,11 +1986,12 @@
       '.bs-hist-sum{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px}.bs-hist-sum div{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px}' +
       '.bs-hist-sum span{font-size:11px;color:var(--bs-muted,#888)}.bs-hist-sum b{font-size:16px;font-variant-numeric:tabular-nums}' +
       '.bs-hist-list{display:flex;flex-direction:column;gap:6px}' +
-      '.bs-hist-row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-row{display:grid;grid-template-columns:1fr auto 22px;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-row>b span{font-weight:400;color:var(--bs-muted,#888)}.bs-hist-row em{font-style:normal;font-variant-numeric:tabular-nums}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px}.bs-hist-row.open .bs-hist-sales{display:flex}' +
       '.bs-hist-sales div{display:flex;justify-content:space-between;gap:10px}.bs-hist-sales div span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span:last-child{flex:none;font-variant-numeric:tabular-nums}' +
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
+      '.bs-hist-del{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer}.bs-hist-del:hover{color:#e04848;background:var(--bs-hover,rgba(0,0,0,.06))}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
