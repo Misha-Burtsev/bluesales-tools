@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.5
+// @version      1.28.6
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1604,8 +1604,8 @@
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
-        '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(x.price) + ' ₽ · ' + (x.cnt === false ? 'не моя' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
+        '<em>' + rub(x.price) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
       '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
@@ -1671,6 +1671,8 @@
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
+      '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
       '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
       '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
