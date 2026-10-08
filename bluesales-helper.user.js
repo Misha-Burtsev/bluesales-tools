@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.33.0
+// @version      1.35.3
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -968,7 +968,8 @@
   }
 
   function repSaved() {
-    const r = jget(REP_KEY, {});
+    let r = jget(REP_KEY, {});
+    if (r.d && r.d !== ddmm(new Date()) && histRoll()) r = jget(REP_KEY, {});
     return r.d === ddmm(new Date()) ? r : { d: ddmm(new Date()) };
   }
   function repText(v, fem) {
@@ -1450,7 +1451,46 @@
   const shareFor = n => n >= 4 ? 0.25 : n === 3 ? 0.33 : n === 2 ? 0.5 : 1;
   const rub = n => String(Math.round(+n || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  function salesGet() { const r = jget(SALES_KEY, {}); return r.d === ddmm(new Date()) ? r.list || [] : []; }
+  function salesGet() {
+    let r = jget(SALES_KEY, {});
+    if (r.d && r.d !== ddmm(new Date()) && histRoll()) r = jget(SALES_KEY, {});
+    return r.d === ddmm(new Date()) ? r.list || [] : [];
+  }
+  // ---------- История смен: закрытая смена (кнопкой или сменой даты) уходит в архив bsHistory ----------
+  const HIST_KEY = 'bsHistory', HIST_MAX = 180;
+  const histGet = () => jget(HIST_KEY, []);
+  const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
+  // в архив – только то, что нужно для статистики, без лишних полей
+  const histSale = x => ({ dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who });
+  const histRep = r => { const o = {}; ['leads', 'blocks', 'chats', 'links', 'bought', 'sum', 'rem'].forEach(k => { if (r[k] != null && r[k] !== '') o[k] = +r[k] || 0; }); return o; };
+  // true – если запись получилась (если место в браузере кончилось – выкидываем самые старые смены)
+  function histPush(e) {
+    const h = histGet();
+    h.push(e);
+    while (h.length > HIST_MAX) h.shift();
+    for (;;) {
+      try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; } catch (err) { if (h.length <= 1) return false; h.shift(); }
+    }
+  }
+  // данные за прошлые даты (или текущая смена при «Начать новую смену») – в архив, потом очищаем
+  function histRoll(all) {
+    const today = ddmm(new Date());
+    const r = jget(REP_KEY, {}), sl = jget(SALES_KEY, {});
+    const rOld = r.d && (all || r.d !== today) && repHas(r), sOld = sl.d && (all || sl.d !== today) && (sl.list || []).length;
+    if (!rOld && !sOld) {
+      if (r.d && r.d !== today) jset(REP_KEY, { d: today });
+      if (sl.d && sl.d !== today) jset(SALES_KEY, { d: today, list: [] });
+      return false;
+    }
+    const days = [...new Set([rOld && r.d, sOld && sl.d].filter(Boolean))];
+    for (const d of days) {
+      const ok = histPush({ d, end: Date.now(), rep: rOld && r.d === d ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [] });
+      if (!ok) return false;   // не влезло – ничего не стираем
+    }
+    if (rOld || r.d !== today) jset(REP_KEY, { d: today });
+    if (sOld || sl.d !== today) jset(SALES_KEY, { d: today, list: [] });
+    return true;
+  }
   function salesSet(list) { jset(SALES_KEY, { d: ddmm(new Date()), list }); }
   function sumAdd(x) {
     if (!x) return;
@@ -1608,39 +1648,280 @@
   }
   // новая смена: обнуляем отчёт (продано, сумма, ссылки, правки текста) и список продаж
   function newShift() {
+    histRoll(true);
     jset(REP_KEY, { d: ddmm(new Date()) });
     salesSet([]);
     paintSold(); paintLinks();
   }
-  function openSales() {
+  // ---------- Окно «Продажи»: вкладки «Смена» (сегодня) и «История» (архив смен) ----------
+  const dmyDate = d => { const [a, b, c] = String(d).split('.'); return new Date(+c, b - 1, +a); };
+  const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  const fromIso = s => { const [y, m, d] = String(s).split('-'); return y && m && d ? new Date(+y, m - 1, +d) : null; };
+  const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const r2s = n => String(Math.round((+n || 0) * 100) / 100).replace('.', ',');
+  // период истории помнится, пока открыта страница
+  const histPer = { p: '7', from: null, to: null };
+  function histRange() {
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    const back = n => new Date(t.getFullYear(), t.getMonth(), t.getDate() - n);
+    if (histPer.p === '7') return [back(6), t];
+    if (histPer.p === '30') return [back(29), t];
+    if (histPer.p === 'month') return [new Date(t.getFullYear(), t.getMonth(), 1), t];
+    if (histPer.p === 'all') return [null, null];
+    return [histPer.from, histPer.to];
+  }
+  // все смены (архив + текущая), новые сверху
+  function histAll() {
+    const cur = repSaved(), curSales = salesGet();
+    const all = histGet().map((e, hi) => Object.assign({ hi }, e));
+    if (repHas(cur) || curSales.length) all.push({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales });
+    return all.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
+  }
+  function histSave(h) {
+    try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; } catch (e) { alert('Не хватило места в браузере – скачай резервную копию и удали старые смены.'); return false; }
+  }
+  // продажи за прошлую дату – в смену этой даты в архиве (если её нет – создаём)
+  function histAddDay(d, xs) {
+    const h = histGet();
+    let e = h.filter(x => x.d === d).pop();
+    if (!e) { e = { d, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }; h.push(e); }
+    xs.forEach(x => {
+      e.sales.push(histSale(x));
+      e.rep.bought = Math.round(((+e.rep.bought || 0) + saleShare(x)) * 100) / 100;
+      e.rep.sum = (+e.rep.sum || 0) + salePart(x);
+    });
+    return histSave(h);
+  }
+  const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
+  function openSales(tab) {
     closeSale();
-    const list = salesGet();
+    tab = tab === 'hist' ? 'hist' : 'shift';
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
-    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи</b>' +
+      '<span class="bs-seg"><em data-tab="shift"' + (tab === 'shift' ? ' class="on"' : '') + '>Смена</em><em data-tab="hist"' + (tab === 'hist' ? ' class="on"' : '') + '>История</em></span>' +
+      '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('.bs-tab');
+    (tab === 'hist' ? paintHist : paintShift)(box);
+    wrap.addEventListener('click', ev => {
+      const t = ev.target;
+      if (t.matches('.bs-rep-head i')) return closeSale();
+      if (t.dataset.tab && t.dataset.tab !== tab) return openSales(t.dataset.tab);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  function paintShift(box) {
+    const list = salesGet(), r = repSaved(), now = new Date();
+    box.innerHTML =
+      statsHtml([['Сегодня', ddmm(now).slice(0, 5) + ', ' + WD[now.getDay()]], ['Продано', r2s(r.bought)], ['Сумма', rub(+r.sum || 0) + ' ₽'], ['Ссылки', +r.links || 0]]) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
-        : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="bak" class="bs-imp-btn" title="Сохранить все данные помощника в файл или загрузить из файла">Копия</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
-    document.body.appendChild(wrap);
-    wrap.addEventListener('click', ev => {
-      if (ev.target.matches('.bs-rep-head i')) return closeSale();
-      if (ev.target.dataset.a === 'me') return askMe();
-      if (ev.target.dataset.a === 'imp') return openImport();
-      if (ev.target.dataset.a === 'bak') return openBackup();
-      if (ev.target.dataset.a === 'shift') {
-        if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
-        newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
+        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
+      '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button><span></span>' +
+      '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
+      '<button data-a="shift" class="bs-main" title="Смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
+    box.onclick = ev => {
+      const t = ev.target, a = t.dataset.a;
+      if (a === 'me') return askMe();
+      if (a === 'imp') return openImport();
+      if (a === 'shift') {
+        if (!confirm('Закрыть смену? Она сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
+        newShift(); openSales('hist'); return tarHint('✓ Смена закрыта и сохранена в истории', true);
       }
-      const row = ev.target.closest('.bs-sales-row');
-      if (row && ev.target.matches('.bs-sales-del')) {
+      const row = t.closest('.bs-sales-row');
+      if (row && t.matches('.bs-sales-del')) {
         const x = salesGet().find(s => s.id === row.dataset.id);
         if (!x || !confirm('Удалить продажу «' + (x.who || x.name) + '»? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id); return openSales();
       }
       if (row) openSale(row.dataset.id, true);
+    };
+  }
+  // перенос смены на другую дату; если в истории уже есть смена этой даты – сливаем в неё
+  function histMove(h, i, d) {
+    const e = h[i], j = h.findIndex((x, k) => k !== i && x.d === d);
+    if (j < 0) { e.d = d; return; }
+    const t = h[j];
+    Object.keys(Object.assign({}, t.rep, e.rep)).forEach(k => { t.rep[k] = Math.round(((+t.rep[k] || 0) + (+e.rep[k] || 0)) * 100) / 100; });
+    t.sales = (t.sales || []).concat(e.sales || []);
+    h.splice(i, 1);
+  }
+  // дата из поля ввода – только целиком набранная (пока год печатается, там 0002, 0020…)
+  const dateOk = s => { const d = fromIso(s); return d && d.getFullYear() >= 2000 && d <= new Date() ? d : null; };
+  function paintHist(box) {
+    const today = isoOf(new Date());
+    // шапка с периодом рисуется один раз – иначе поле даты теряет ввод посреди набора года
+    box.innerHTML =
+      '<div class="bs-hist-per"><span class="bs-seg">' + [['7', '7 дней'], ['30', '30 дней'], ['month', 'Месяц'], ['all', 'Всё']]
+        .map(([v, t]) => '<em data-p="' + v + '">' + t + '</em>').join('') + '</span>' +
+      '<span class="bs-range"><input type="date" data-r="from" max="' + today + '"><span>–</span><input type="date" data-r="to" max="' + today + '"></span></div>' +
+      '<div class="bs-hist-body"></div>' +
+      '<div class="bs-foot"><button data-a="bak" class="bs-ghost" title="Сохранить все данные помощника в файл или загрузить из файла">💾 Резервная копия</button><span></span>' +
+      '<button data-a="add" class="bs-main" title="Вставить отчёты из Telegram за прошлый день – они попадут в историю">+ Продажи за дату</button></div>';
+    const body = box.querySelector('.bs-hist-body'), fromInp = box.querySelector('[data-r=from]'), toInp = box.querySelector('[data-r=to]');
+    const paintPer = () => {
+      const [from, to] = histRange();
+      box.querySelectorAll('.bs-hist-per em').forEach(em => em.classList.toggle('on', em.dataset.p === histPer.p));
+      box.querySelector('.bs-range').classList.toggle('on', histPer.p === 'custom');
+      if (document.activeElement !== fromInp) fromInp.value = from ? isoOf(from) : '';
+      if (document.activeElement !== toInp) toInp.value = to ? isoOf(to) : '';
+    };
+    const paintBody = () => {
+      const [from, to] = histRange();
+      const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
+      const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
+      const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
+      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+      if (histKeep) { open.add(histKeep); histKeep = null; }
+      body.innerHTML =
+        statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
+        (list.length ? '<div class="bs-hist-list">' + list.map(e => {
+          const k = e.now ? 'now' : e.hi + ':' + e.end;
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
+            '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
+            (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
+            '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
+              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
+              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
+            (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
+            '</div></div>';
+        }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
+    };
+    const repaint = () => { paintPer(); paintBody(); };
+    repaint();
+    const find = row => { const [hi, end] = row.dataset.k.split(':'), h = histGet(); return h[+hi] && String(h[+hi].end) === end ? { h, i: +hi } : null; };
+    box.onclick = ev => {
+      const t = ev.target, a = t.dataset.a;
+      if (a === 'bak') return openBackup();
+      if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
+      if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
+      const row = t.closest('.bs-hist-row');
+      if (!row) return;
+      if (a === 'move' || t.matches('.bs-hist-del,.bs-hist-sdel')) {
+        const f = find(row);
+        if (!f) return paintBody();
+        const e = f.h[f.i];
+        if (a === 'move') {
+          const d = dateOk(row.querySelector('.bs-hist-move input').value);
+          if (!d) return alert('Дата не подходит – нужна полная дата не позже сегодня.');
+          const nd = ddmm(d);
+          if (nd === e.d) return;
+          const twin = f.h.some((x, k) => k !== f.i && x.d === nd);
+          if (!confirm(twin ? 'За ' + nd + ' в истории уже есть смена. Объединить смену ' + e.d + ' с ней? Продажи и цифры сложатся.' : 'Перенести смену ' + e.d + ' на ' + nd + '?')) return;
+          histMove(f.h, f.i, nd);
+          // чтобы смена была видна после переноса, расширяем период до новой даты
+          const [from, to] = histRange();
+          if ((from && d < from) || (to && d > to)) Object.assign(histPer, { p: 'custom', from: from && d < from ? d : from, to: to && d > to ? d : to });
+          if (histSave(f.h)) tarHint(twin ? '✓ Смены объединены' : '✓ Смена перенесена на ' + nd, true);
+          return repaint();
+        }
+        if (t.matches('.bs-hist-del')) {
+          if (!confirm('Удалить смену ' + e.d + ' из истории? Отчёт и продажи за сегодня это не трогает.')) return;
+          f.h.splice(f.i, 1);
+        } else {
+          const x = e.sales[+t.dataset.si];
+          if (!x || !confirm('Удалить из смены ' + e.d + ' продажу «' + (x.who || x.fio || x.name) + '»? Продано и сумма этой смены уменьшатся.')) return;
+          e.sales.splice(+t.dataset.si, 1);
+          e.rep.bought = Math.max(0, Math.round(((+e.rep.bought || 0) - saleShare(x)) * 100) / 100);
+          e.rep.sum = Math.max(0, (+e.rep.sum || 0) - salePart(x));
+        }
+        histSave(f.h);
+        return paintBody();
+      }
+      const sd = t.closest('.bs-hist-s');
+      if (sd) {
+        if (sd.dataset.id) return openSale(sd.dataset.id, true);
+        const f = find(row);
+        return f ? openHistSale(f.i, f.h[f.i].end, +sd.dataset.si) : paintBody();
+      }
+      if (!t.closest('.bs-hist-sales')) row.classList.toggle('open');
+    };
+    // период «с–по»: пересчитываем только список, поля ввода не трогаем
+    const onRange = ev => {
+      const r = ev.target.dataset.r;
+      if (!r) return;
+      const d = dateOk(ev.target.value);
+      if (!d) return;
+      const [f0, t0] = histRange();
+      let f = r === 'from' ? d : f0, to2 = r === 'to' ? d : t0;
+      // «с» позже «по» – подтягиваем вторую границу к введённой дате, а не меняем местами
+      if (f && to2 && f > to2) { if (r === 'from') to2 = f; else f = to2; }
+      Object.assign(histPer, { p: 'custom', from: f, to: to2 });
+      paintPer(); paintBody();
+    };
+    box.oninput = onRange;
+    box.onchange = onRange;
+    fromInp.onblur = toInp.onblur = paintPer;
+  }
+  // правка продажи из прошлой смены: цифры смены пересчитываются на разницу
+  let histKeep = null;   // какую смену оставить раскрытой после возврата в «Историю»
+  function openHistSale(hi, end, si) {
+    const h = histGet(), e = h[hi];
+    if (!e || String(e.end) !== String(end) || !e.sales[si]) return openSales('hist');
+    histKeep = hi + ':' + end;
+    closeSale();
+    const old = e.sales[si], x = Object.assign({}, old, { mops: (old.mops || []).slice() });
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    const field = (k, t, ph) => '<label><span>' + t + '</span><input data-k="' + k + '" placeholder="' + (ph || '') + '"></label>';
+    wrap.innerHTML = '<div id="bsSale" class="bs-hedit"><div class="bs-rep-head"><b>Продажа за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-sale-form">' + field('fio', 'Имя и фамилия') + field('name', 'Тариф') +
+      '<div class="bs-hedit-2">' + field('price', 'Цена, ₽') + field('disc', 'Скидка', '₽ или 10%') + '</div>' +
+      '<label><span>Менеджеры</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+      '<div class="bs-sale-note"></div>' +
+      (x.dlg ? '<a class="bs-hedit-chat" href="/app/messenger/?dialogId=' + encodeURIComponent(x.dlg) + '" target="_blank">Открыть чат ↗</a>' : '') + '</div>' +
+      '<div class="bs-rep-btns"><button data-a="del" class="bs-sale-del">Удалить</button><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="save" class="bs-main">Сохранить</button></div></div>';
+    document.body.appendChild(wrap);
+    const box = wrap.querySelector('#bsSale'), note = box.querySelector('.bs-sale-note');
+    ['fio', 'name', 'price', 'disc'].forEach(k => { box.querySelector('[data-k="' + k + '"]').value = x[k] == null ? '' : x[k]; });
+    const paint = () => {
+      // «моя» – если я среди менеджеров (как при импорте)
+      x.cnt = !meSet() || x.mops.includes(meName());
+      box.querySelectorAll('[data-g="mops"] em').forEach(m => m.classList.toggle('bs-on', x.mops.includes(m.dataset.v)));
+      box.querySelectorAll('[data-g="share"] em').forEach(m => m.classList.toggle('bs-on', +m.dataset.v === +x.share));
+      box.querySelector('.bs-sale-share').hidden = !x.cnt;
+      const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
+      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
+        (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '');
+    };
+    paint();
+    box.addEventListener('input', ev => { const k = ev.target.dataset.k; if (k) { x[k] = ev.target.value; paint(); } });
+    // в истории могли что-то поменять в другой вкладке – перечитываем и сверяем перед записью
+    const fresh = () => { const h2 = histGet(), e2 = h2[hi]; return e2 && String(e2.end) === String(end) && e2.sales[si] ? { h2, e2 } : null; };
+    box.addEventListener('click', ev => {
+      const em = ev.target.closest('.bs-chips em'), a = ev.target.dataset.a;
+      if (ev.target.matches('.bs-rep-head i')) return closeSale();
+      if (em) {
+        const v = em.dataset.v;
+        if (em.parentNode.dataset.g === 'mops') {
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.share = shareFor(x.mops.length);
+        } else x.share = +v;
+        return paint();
+      }
+      if (a === 'back') return openSales('hist');
+      if (a !== 'save' && a !== 'del') return;
+      const f = fresh();
+      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales('hist'); }
+      const r = f.e2.rep;
+      if (a === 'del') {
+        if (!confirm('Удалить продажу из смены ' + e.d + '? Продано и сумма этой смены уменьшатся.')) return;
+        f.e2.sales.splice(si, 1);
+        x.cnt = false; x.price = 0;   // новая «продажа» – пустая, разница = минус старая
+      } else {
+        x.price = String(x.price).replace(/\s/g, '');
+        x.who = x.fio || x.who;
+        f.e2.sales[si] = histSale(x);
+      }
+      r.bought = Math.max(0, Math.round(((+r.bought || 0) + saleShare(x) - saleShare(old)) * 100) / 100);
+      r.sum = Math.max(0, (+r.sum || 0) + salePart(x) - salePart(old));
+      if (!histSave(f.h2)) return;
+      openSales('hist');
+      tarHint(a === 'del' ? '✓ Продажа удалена из смены ' + e.d : '✓ Продажа за ' + e.d + ' сохранена', true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
@@ -1679,7 +1960,7 @@
     wrap.addEventListener('click', ev => {
       const a = ev.target.dataset.a;
       if (ev.target.matches('.bs-rep-head i')) closeSale();
-      else if (a === 'back') openSales();
+      else if (a === 'back') openSales('hist');
       else if (a === 'load') inp.click();
       else if (a === 'save') { backupSave(); tarHint('✓ Копия скачана', true); }
     });
@@ -1800,12 +2081,14 @@
     res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.dlg === x.dlg && y.price === x.price)) x.bad = 'повтор ниже'; });
     return res;
   }
-  function openImport() {
+  // day – 'ГГГГ-ММ-ДД': продажи за прошлый день уходят в «Историю», за сегодня – в текущую смену
+  function openImport(day) {
     closeSale();
     if (!meSet()) return askMe();
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-imp"><div class="bs-rep-head"><b>Импорт продаж из Telegram</b><i title="Закрыть">×</i></div>' +
+      '<label class="bs-imp-day"><span>Продажи за</span><input type="date" value="' + (day || isoOf(new Date())) + '" max="' + isoOf(new Date()) + '"><u></u></label>' +
       '<div class="bs-tar-help">Скопируй из ТГ отчёты о продажах за день (можно все разом) и вставь сюда. Каждый отчёт – со ссылки на чат, дальше в любом порядке тариф, сумма («45 000», «45000р», «45к») и менеджеры. Добавятся все продажи, но в «Продано» и сумму пойдут только те, где есть ' + esc(meName()) + ', – с твоей долей.</div>' +
       '<textarea class="bs-imp-in" spellcheck="false" placeholder="https://bluesales.ru/app/messenger/?dialogId=…"></textarea>' +
       '<div class="bs-imp-list"></div>' +
@@ -1813,8 +2096,12 @@
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), ta = box.querySelector('.bs-imp-in'), out = box.querySelector('.bs-imp-list'), btn = box.querySelector('[data-a="add"]');
     let found = [];
+    const dayInp = box.querySelector('.bs-imp-day input');
+    const target = () => { const d = fromIso(dayInp.value); return d && ddmm(d) !== ddmm(new Date()) ? ddmm(d) : ''; };
     const paint = () => {
-      const have = salesGet(), me = meName();
+      const td = target(), me = meName();
+      box.querySelector('.bs-imp-day u').textContent = td ? 'прошлый день – продажи уйдут в «Историю»' : 'сегодня – в текущую смену';
+      const have = td ? histGet().filter(e => e.d === td).flatMap(e => e.sales) : salesGet();
       found = parseSales(ta.value).map(x => Object.assign(x, {
         mine: !x.bad && x.mops.includes(me),
         dup: have.some(s => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price)),
@@ -1829,11 +2116,20 @@
       btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
     };
     ta.addEventListener('input', paint);
+    dayInp.addEventListener('change', paint);
+    paint();
     box.addEventListener('click', ev => {
       const a = ev.target.dataset.a;
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
-      if (a === 'back') return openSales();
+      if (a === 'back') return openSales(target() ? 'hist' : 'shift');
       if (a !== 'add') return;
+      const td = target();
+      if (td) {
+        const xs = found.filter(x => !x.bad && !x.dup).map(f => ({ dlg: f.dlg, name: f.name, price: f.price, disc: f.disc, mops: f.mops, share: shareFor(f.mops.length), fio: f.fio, who: f.fio, cnt: f.mine }));
+        if (!histAddDay(td, xs)) return;
+        openSales('hist');
+        return tarHint('✓ В историю за ' + td + ' добавлено продаж: ' + xs.length, true);
+      }
       const all = salesGet();
       let n = 0;
       found.filter(x => !x.bad && !x.dup).forEach(f => {
@@ -1879,7 +2175,7 @@
       '#bsSaleWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
       '#bsSale{width:760px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
-      '#bsSale.bs-sales{width:520px}' +
+      '#bsSale.bs-sales{width:600px}' +
       '.bs-sale-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:700px){.bs-sale-cols{grid-template-columns:1fr}}' +
       '.bs-sale-form{display:flex;flex-direction:column;gap:7px}' +
       '#bsSale label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--bs-muted,#888)}' +
@@ -1895,6 +2191,37 @@
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
       '.bs-sale-dup{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:9px;background:rgba(245,158,11,.14);color:var(--bs-text,#222);font-size:12.5px;line-height:1.35}' +
       '.bs-sale-dup button{flex:none;padding:5px 12px;border:1px solid #f59e0b;border-radius:7px;background:none;color:inherit;font-size:12.5px;cursor:pointer}.bs-sale-dup button:hover{background:#f59e0b;color:#fff}' +
+      '#bsSale.bs-hist{width:560px}' +
+      '.bs-rep-head .bs-seg{margin-right:12px}' +
+      '.bs-seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--bs-hover,rgba(0,0,0,.06))}' +
+      '.bs-seg em{font-style:normal;padding:4px 12px;border-radius:7px;cursor:pointer;white-space:nowrap;font-size:12.5px;color:var(--bs-muted,#888)}.bs-seg em:hover{color:var(--bs-text,#222)}' +
+      '.bs-seg em.on{background:var(--bs-panel,#fff);color:var(--bs-text,#222);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.18)}' +
+      '.bs-hist-per{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}' +
+      '.bs-range{display:inline-flex;align-items:center;gap:5px;color:var(--bs-muted,#888)}#bsSale .bs-range input{padding:3px 6px;font-size:12.5px}#bsSale .bs-range.on input{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-stats{display:flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:10px;margin-bottom:10px}' +
+      '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 12px}' +
+      '.bs-stats div+div{border-left:1px solid var(--bs-border,#D9E0E7)}.bs-stats span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-stats b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+      '.bs-empty{padding:26px 10px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--bs-muted,#888)}' +
+      '.bs-foot{display:flex;align-items:center;gap:8px;margin-top:12px}.bs-foot>span{flex:1}' +
+      '.bs-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer;white-space:nowrap}.bs-foot button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-foot button.bs-main{background:var(--bs-accent,#3b82f6);border-color:var(--bs-accent,#3b82f6);color:#fff}.bs-foot button.bs-main:hover{color:#fff;filter:brightness(1.1)}' +
+      '.bs-foot button.bs-ghost{border-color:transparent;color:var(--bs-muted,#888);padding:6px 8px}.bs-foot button.bs-ghost:hover{border-color:transparent;color:var(--bs-text,#222);background:var(--bs-hover,rgba(0,0,0,.06))}' +
+      '.bs-hist-list{display:flex;flex-direction:column;gap:6px}' +
+      '.bs-hist-row{display:grid;grid-template-columns:1fr auto 22px;align-items:center;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-row>b span{margin-left:6px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
+      '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
+      '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-other{color:var(--bs-muted,#888)}' +
+      '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
+      '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
+      '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
+      '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
+      '.bs-hist-move{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}.bs-hist-move span{flex:1}' +
+      '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
