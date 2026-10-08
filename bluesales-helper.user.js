@@ -1640,7 +1640,7 @@
   // ---------- Импорт продаж других менеджеров из текста для Telegram ----------
   // Текст продажи (saleText) начинается со ссылки на чат – по ней режем вставку на продажи.
   function parseSales(text) {
-    const parts = text.split(/(?=https?:\/\/bluesales\.ru\/app\/messenger\/\?dialogId=\d+)/i).slice(1);
+    const parts = text.split(/(?=https?:\/\/bluesales\.ru\/app\/messenger\/\?dialogId=\d+)/i).filter(p => /^https?:/i.test(p));
     return parts.map(part => {
       const lines = part.split('\n').map(l => l.trim()).filter(Boolean);
       const x = { dlg: (/dialogId=(\d+)/i.exec(lines[0]) || [])[1], name: '', price: '', disc: '', mops: [], email: '', fio: '', nick: '', src: '', quote: '' };
