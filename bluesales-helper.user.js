@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.32.0
+// @version      1.32.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1503,7 +1503,8 @@
   const salePart = s => s ? Math.round(saleTotal(s) * saleShare(s)) : 0;
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
-  function openSale(id) {
+  // fromList – открыли из списка продаж: есть «Назад», после сохранения/удаления – обратно в список
+  function openSale(id, fromList) {
     closeSale();
     const list = salesGet(), old = id ? list.find(x => x.id === id) : null;
     const dlg = old ? old.dlg : curDialog();
@@ -1532,7 +1533,7 @@
       field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
       field('src', 'Источник', 'из тегов или вручную') + field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta') +
       '</div><div class="bs-sale-prev"><span>Текст для Telegram</span><textarea readonly spellcheck="false"></textarea><div class="bs-sale-note"></div></div></div>' +
-      '<div class="bs-rep-btns">' + (old ? '<button data-a="del" class="bs-sale-del">Удалить</button>' : '') + '<span class="bs-tar-st"></span><button data-a="save">Сохранить</button><button data-a="copy" class="bs-main">Сохранить и скопировать</button></div></div>';
+      '<div class="bs-rep-btns">' + (old ? '<button data-a="del" class="bs-sale-del">Удалить</button>' : '') + '<span class="bs-tar-st"></span>' + (fromList ? '<button data-a="back">Назад</button>' : '') + '<button data-a="save">Сохранить</button><button data-a="copy" class="bs-main">Сохранить и скопировать</button></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), prev = box.querySelector('.bs-sale-prev textarea'), note = box.querySelector('.bs-sale-note');
     const inp = k => box.querySelector('[data-k="' + k + '"]');
@@ -1581,7 +1582,8 @@
           x.share = shareFor(x.mops.length);   // доля – от числа МОП, потом можно поправить вручную
         } else x.share = +v;
         paint();
-      } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); closeSale(); tarHint('✓ Продажа сохранена', true); }
+      } else if (a === 'back') openSales();
+      else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); fromList ? openSales() : closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
         save();
@@ -1589,7 +1591,7 @@
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
-        closeSale();
+        fromList ? openSales() : closeSale();
       }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
@@ -1633,7 +1635,7 @@
         if (!x || !confirm('Удалить продажу «' + (x.who || x.name) + '»? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id); return openSales();
       }
-      if (row) openSale(row.dataset.id);
+      if (row) openSale(row.dataset.id, true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
