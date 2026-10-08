@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.31.0
+// @version      1.32.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1668,14 +1668,33 @@
   }
   const isSrc = l => /^(источник|ист)(?![а-яё])/i.test(norm(l));
   const isInfo = l => /^(откуда|почта|ник|имя|фио|телефон)(?![а-яё])|\S+@\S+\.\S+|^@\w|^\+?\d[\d\s()-]{9,}$/i.test(norm(l));
+  // слова, с которых не начинается имя: пометки менеджера, тарифы, рассказ «откуда узнал»
+  const NOT_NAME = /^((жду|нет|через|вас|мне|он|она|о|об|из|от|в|на|и|ну|да|тг|вк|ник|сам|год|рус|лид|мама|папа|сын|брат|дочь|дочка|тик|тикток|ранее|давно|курс|курсы|школа|школе|школу|данные|данных)$|(узна|почт|источ|откуд|остальн|наверн|дубл|смотр|подпис|месяц|матем|комбо|бронь|апсейл|допла|куратор|тариф|высш|привет|спасиб|клиент|ученик|ребен|сестр|знаком|сентяб|октяб|ноябр|декаб|январ|феврал|март|апрел|ютуб|инст|самост|самопод|самопров|русск|язык|оплат|разделен|продл|фамил|при$))/;
+  // ФИО из строки: убираем почту, ник, телефон, нумерацию «1.», подписи «Почта:», «ФИО ребенка», пометки в скобках
+  function fioIn(line) {
+    for (let seg of line.split(/[,;/|]|\s\.\s/)) {
+      if (/^\s*(почт|e-?mail|ник|тг|телеф)/i.test(seg)) continue;
+      seg = seg.replace(/\S*@.*$/, '').replace(/\+?\d[\d\s()-]{9,}/g, '').replace(/\([^)]*\)?/g, '')
+        .replace(/^\s*\d+\s*[.)]\s*/, '').replace(/^\s*(имя( и)? фамилия|имя|фамилия|фио( ребенка| ученика)?|почта|ник|тг)(?![а-яё])\s*[:-]?\s*/i, '')
+        .replace(/\s+и$/i, '').replace(/[\s.:!-]+$/, '').trim();
+      const w = seg.split(/\s+/);
+      if (!seg || w.length > 3 || w.some(x => !/^[а-яё]{2,}(-[а-яё]{2,})?$/i.test(x) || NOT_NAME.test(norm(x)))) continue;
+      if (w.length === 1 && !/^[А-ЯЁ]/.test(seg) || w.some(x => x.length > 2 && x === x.toUpperCase())) continue;
+      return w.map(x => x[0].toUpperCase() + x.slice(1)).join(' ');
+    }
+    return '';
+  }
   function parseSales(text) {
     const parts = [];
     let cur = null;
     text.split('\n').forEach(raw => {
       const t = raw.trim();
       // шапка пересланного сообщения из ТГ: «Имя, [6 окт. 2026 г., 21:48:07]:»
-      if (!t || /^[^\[\]]{1,60}, \[\d{1,2} [^\]]+\]:?$/.test(t)) return;
+      if (!t) return;
+      if (/^[^\[\]]{1,60}, \[\d{1,2} [^\]]+\]:?$/.test(t)) { cur = null; return; }
       const d = /bluesales\.ru\/\S*?dialogId=(\d+)/i.exec(t);
+      // вторая ссылка сразу за первой («… (папа дочки)») – тот же отчёт
+      if (d && cur && !cur.lines.length) return;
       if (d) {
         cur = { dlg: d[1], lines: [] };
         parts.push(cur);
@@ -1693,26 +1712,36 @@
       let iMop = lines.findIndex(l => /^(моп|менеджер)/i.test(norm(l)) && mopsIn(l).length);
       if (iMop < 0) iMop = lines.findIndex((l, i) => i !== iSum && onlyMops(l) === '');
       if (iSum >= 0) {
-        const d = /скидк\S*\s*[:-]?\s*(\d[\d\s ]*)/i.exec(lines[iSum]);
-        x.disc = d ? String(+d[1].replace(/\D/g, '')) : '';
+        const d = /скидк\S*\s*[:-]?\s*(\d[\d\s ]*)(?![\d\s ]*%)/i.exec(lines[iSum]);
+        x.disc = d && +d[1].replace(/\D/g, '') >= 100 ? String(+d[1].replace(/\D/g, '')) : '';
         x.price = String((sumIn(lines[iSum]) || sumIn(lines[iSum], true)) + (+x.disc || 0));
         // тариф в одной строке с суммой: «Апсейл русский с куратором 5 192 рубля»
         const rest = lines[iSum].replace(SUM_TAIL, '').replace(/[\s|–—=:-]+$/, '').trim();
         if (/[а-яёa-z]{3}/i.test(rest) && !/^(сумм|итог|оплат|цена|стоим)/i.test(norm(rest))) x.name = rest;
       }
       if (iMop >= 0) x.mops = mopsIn(lines[iMop]);
+      // строки внутри кавычек – рассказ клиента, имён там не ищем
+      let inQ = false;
+      const quoted = lines.map(l => { const was = inQ || /^["«“]/.test(l); inQ = was && !/["»”]$/.test(l.length > 1 || !inQ ? l : ''); return was; });
+      const skip = i => i === iSum || i === iMop || i === iSrc || quoted[i];
+      const iFio = x.name && fioIn(x.name) ? iSum : lines.findIndex((l, i) => !skip(i) && fioIn(l));
+      if (iFio >= 0) x.fio = iFio === iSum ? fioIn(x.name) : fioIn(lines[iFio]);
       if (iSrc >= 0) x.src = lines[iSrc].replace(/^(источник|ист)\S*\s*[:-]?\s*/i, '');
       if (!x.name) {
-        const iName = lines.findIndex((l, i) => i !== iSum && i !== iMop && (iSrc < 0 || i < iSrc) && !isInfo(l));
+        const iName = lines.findIndex((l, i) => i !== iSum && i !== iMop && i !== iFio && (iSrc < 0 || i < iSrc) && !isInfo(l));
         if (iName >= 0) x.name = lines[iName];
       }
-      lines.forEach(l => {
-        const e = /[^\s,;/()]+@[^\s,;/()]+\.[a-z]{2,}/i.exec(l), n = /(^|[\s/,])@(\w{3,})/.exec(l);
-        if (e && !x.email) x.email = e[0];
-        if (n && !x.nick) x.nick = '@' + n[2];
+      lines.forEach((l, i) => {
+        const e = /[^\s,;/()]+@\s?[^\s,;/()]+?\s?\.\s?[a-z]{2,}(?![a-z])/i.exec(l), n = /(^|[\s/,(-])@(\w{3,})/.exec(l);
+        if (e && !x.email) x.email = e[0].replace(/\s/g, '');
+        if (n && !x.nick && !quoted[i]) x.nick = '@' + n[2];
       });
-      // ФИО – только в нашем формате: строки между МОП и «Источник»
-      if (iMop >= 0 && iSrc > iMop) x.fio = lines.slice(iMop + 1, iSrc).filter(l => l !== x.email && l !== x.nick).join(' ');
+      // ник без «@»: одно латинское слово на строке («darisshkis», «Ник в тг – Scorpex», «cat_with_sunglasses ник в тг»)
+      if (!x.nick) lines.some((l, i) => {
+        const t = l.replace(/(^|\s)(ник|тг|телеграм\S*|юз)\S*(\s+в\s+\S+)?(\s*[:-])?/gi, ' ').trim();
+        if (skip(i) || !/^[a-z][\w.]{3,31}$/i.test(t) || /^(youtube|tiktok|telegram|vk|insta\w*|shorts)$/i.test(t)) return false;
+        return (x.nick = '@' + t);
+      });
       // цитата – в кавычках после «Источника»
       if (iSrc >= 0) { const q = lines.slice(iSrc + 1).join('\n'), m = /^["«“]([\s\S]*?)["»”]/.exec(q); x.quote = m ? m[1] : (lines[iSrc + 1] || ''); }
       if (!x.name) x.name = 'Продажа (тариф не указан)';
