@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.35.0
+// @version      1.35.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1740,41 +1740,83 @@
       if (row) openSale(row.dataset.id, true);
     };
   }
+  // перенос смены на другую дату; если в истории уже есть смена этой даты – сливаем в неё
+  function histMove(h, i, d) {
+    const e = h[i], j = h.findIndex((x, k) => k !== i && x.d === d);
+    if (j < 0) { e.d = d; return; }
+    const t = h[j];
+    Object.keys(Object.assign({}, t.rep, e.rep)).forEach(k => { t.rep[k] = Math.round(((+t.rep[k] || 0) + (+e.rep[k] || 0)) * 100) / 100; });
+    t.sales = (t.sales || []).concat(e.sales || []);
+    h.splice(i, 1);
+  }
+  // дата из поля ввода – только целиком набранная (пока год печатается, там 0002, 0020…)
+  const dateOk = s => { const d = fromIso(s); return d && d.getFullYear() >= 2000 && d <= new Date() ? d : null; };
   function paintHist(box) {
-    const [from, to] = histRange(), today = isoOf(new Date());
-    const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
-    const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
-    const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
-    const open = new Set([...box.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+    const today = isoOf(new Date());
+    // шапка с периодом рисуется один раз – иначе поле даты теряет ввод посреди набора года
     box.innerHTML =
       '<div class="bs-hist-per"><span class="bs-seg">' + [['7', '7 дней'], ['30', '30 дней'], ['month', 'Месяц'], ['all', 'Всё']]
-        .map(([v, t]) => '<em data-p="' + v + '"' + (histPer.p === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>' +
-      '<span class="bs-range' + (histPer.p === 'custom' ? ' on' : '') + '"><input type="date" data-r="from" value="' + (from ? isoOf(from) : '') + '" max="' + today + '"><span>–</span>' +
-      '<input type="date" data-r="to" value="' + (to ? isoOf(to) : '') + '" max="' + today + '"></span></div>' +
-      statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
-      (list.length ? '<div class="bs-hist-list">' + list.map(e => {
-        const k = e.now ? 'now' : e.hi + ':' + e.end;
-        return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
-          '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
-          (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
-          '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
-            '<div' + (x.cnt === false ? ' class="bs-hist-other"' : '') + '><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
-            (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') + '</div></div>';
-      }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>') +
+        .map(([v, t]) => '<em data-p="' + v + '">' + t + '</em>').join('') + '</span>' +
+      '<span class="bs-range"><input type="date" data-r="from" max="' + today + '"><span>–</span><input type="date" data-r="to" max="' + today + '"></span></div>' +
+      '<div class="bs-hist-body"></div>' +
       '<div class="bs-foot"><button data-a="bak" class="bs-ghost" title="Сохранить все данные помощника в файл или загрузить из файла">💾 Резервная копия</button><span></span>' +
       '<button data-a="add" class="bs-main" title="Вставить отчёты из Telegram за прошлый день – они попадут в историю">+ Продажи за дату</button></div>';
+    const body = box.querySelector('.bs-hist-body'), fromInp = box.querySelector('[data-r=from]'), toInp = box.querySelector('[data-r=to]');
+    const paintPer = () => {
+      const [from, to] = histRange();
+      box.querySelectorAll('.bs-hist-per em').forEach(em => em.classList.toggle('on', em.dataset.p === histPer.p));
+      box.querySelector('.bs-range').classList.toggle('on', histPer.p === 'custom');
+      if (document.activeElement !== fromInp) fromInp.value = from ? isoOf(from) : '';
+      if (document.activeElement !== toInp) toInp.value = to ? isoOf(to) : '';
+    };
+    const paintBody = () => {
+      const [from, to] = histRange();
+      const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
+      const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
+      const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
+      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+      body.innerHTML =
+        statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
+        (list.length ? '<div class="bs-hist-list">' + list.map(e => {
+          const k = e.now ? 'now' : e.hi + ':' + e.end;
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
+            '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
+            (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
+            '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
+              '<div' + (x.cnt === false ? ' class="bs-hist-other"' : '') + '><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
+              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
+            (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
+            '</div></div>';
+        }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
+    };
+    const repaint = () => { paintPer(); paintBody(); };
+    repaint();
     const find = row => { const [hi, end] = row.dataset.k.split(':'), h = histGet(); return h[+hi] && String(h[+hi].end) === end ? { h, i: +hi } : null; };
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'bak') return openBackup();
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
-      if (t.dataset.p) { histPer.p = t.dataset.p; return paintHist(box); }
+      if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
-      if (t.matches('.bs-hist-del,.bs-hist-sdel')) {
+      if (a === 'move' || t.matches('.bs-hist-del,.bs-hist-sdel')) {
         const f = find(row);
-        if (!f) return paintHist(box);
+        if (!f) return paintBody();
         const e = f.h[f.i];
+        if (a === 'move') {
+          const d = dateOk(row.querySelector('.bs-hist-move input').value);
+          if (!d) return alert('Дата не подходит – нужна полная дата не позже сегодня.');
+          const nd = ddmm(d);
+          if (nd === e.d) return;
+          const twin = f.h.some((x, k) => k !== f.i && x.d === nd);
+          if (!confirm(twin ? 'За ' + nd + ' в истории уже есть смена. Объединить смену ' + e.d + ' с ней? Продажи и цифры сложатся.' : 'Перенести смену ' + e.d + ' на ' + nd + '?')) return;
+          histMove(f.h, f.i, nd);
+          // чтобы смена была видна после переноса, расширяем период до новой даты
+          const [from, to] = histRange();
+          if ((from && d < from) || (to && d > to)) Object.assign(histPer, { p: 'custom', from: from && d < from ? d : from, to: to && d > to ? d : to });
+          if (histSave(f.h)) tarHint(twin ? '✓ Смены объединены' : '✓ Смена перенесена на ' + nd, true);
+          return repaint();
+        }
         if (t.matches('.bs-hist-del')) {
           if (!confirm('Удалить смену ' + e.d + ' из истории? Отчёт и продажи за сегодня это не трогает.')) return;
           f.h.splice(f.i, 1);
@@ -1786,19 +1828,25 @@
           e.rep.sum = Math.max(0, (+e.rep.sum || 0) - salePart(x));
         }
         histSave(f.h);
-        return paintHist(box);
+        return paintBody();
       }
       if (!t.closest('.bs-hist-sales')) row.classList.toggle('open');
     };
-    box.onchange = ev => {
+    // период «с–по»: пересчитываем только список, поля ввода не трогаем
+    const onRange = ev => {
       const r = ev.target.dataset.r;
       if (!r) return;
+      const d = dateOk(ev.target.value);
+      if (!d) return;
       const [f0, t0] = histRange();
-      let f = r === 'from' ? fromIso(ev.target.value) : f0, to2 = r === 'to' ? fromIso(ev.target.value) : t0;
+      let f = r === 'from' ? d : f0, to2 = r === 'to' ? d : t0;
       if (f && to2 && f > to2) [f, to2] = [to2, f];
       Object.assign(histPer, { p: 'custom', from: f, to: to2 });
-      paintHist(box);
+      paintPer(); paintBody();
     };
+    box.oninput = onRange;
+    box.onchange = onRange;
+    fromInp.onblur = toInp.onblur = paintPer;
   }
   // ---------- Резервная копия: все данные помощника (ключи bs* в localStorage) в файл и обратно ----------
   const bakKeys = () => Object.keys(localStorage).filter(k => /^bs[A-Z]/.test(k));
@@ -2092,6 +2140,8 @@
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
+      '.bs-hist-move{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}.bs-hist-move span{flex:1}' +
+      '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
