@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.30.2
+// @version      1.31.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1638,54 +1638,90 @@
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   // ---------- Импорт продаж других менеджеров из текста для Telegram ----------
-  // Отчёт о продаже всегда начинается со ссылки на чат – по ней режем вставку на продажи.
-  // Дальше порядок и вид строк могут быть любыми (набрано руками или нашим окном продажи):
-  //  сумма – первая строка с числом от 100 и «р/руб/₽/к» или словом «сумма» («45 000 рублей», «45000р», «45к»);
-  //  МОП – строка «МОП:/Менеджер:», иначе строка только из имён менеджеров («Даша и Миша», «Даша, Бес»);
-  //  тариф – первая строка после ссылки, которая не сумма и не МОП.
+  // Отчёт о продаже начинается со ссылки на чат (можно без https) – по ней режем вставку на продажи.
+  // Ссылка на другую систему тоже начинает отчёт, но такой отчёт пропускаем. Дальше порядок строк любой:
+  //  сумма – число с «р/руб/₽/к/тыс» («45 000 рублей», «45000р», «45к»), иначе число в конце строки
+  //    («матем мес – 4990», «= 6490», «7 990 (промо)») или после «сумма/итог/оплата»; может стоять в строке тарифа;
+  //  МОП – строка «МОП/Менеджер …», иначе строка только из имён менеджеров («Даша и Миша», «Даша, Бес»);
+  //  тариф – текст перед суммой в той же строке, иначе первая строка, которая не сумма, не МОП и не данные клиента.
   const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес' };
   const mopRe = n => new RegExp('(^|[^а-яё])(' + (MOP_FORMS[n] || norm(n)) + ')(?![а-яё])', 'i');
   const mopsIn = line => MANAGERS.map(m => m[1]).filter(n => mopRe(n).test(norm(line)));
   // строка только из имён менеджеров и связок – пустая строка после вычёркивания
   const onlyMops = line => mopsIn(line).length ? MANAGERS.map(m => m[1]).reduce((t, n) => t.replace(new RegExp(MOP_FORMS[n] || norm(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
-  function sumIn(line) {
+  const NUM = '(\\d{1,3}(?:[  ]\\d{3})+|\\d+)(?:[.,](\\d+))?';
+  const CUR = '\\s*(к(?![а-яa-z])|тыс\\S*)?\\s*(р(?![а-яa-z])|р\\.|руб\\S*|₽)?';
+  const numVal = m => { const d = m[1].replace(/\D/g, ''); return d.length > 7 ? 0 : parseFloat(d + (m[2] ? '.' + m[2] : '')) * (m[3] ? 1000 : 1); };
+  // хвост строки с суммой: «– 4 990 руб. (промо)», «= 6490»
+  const SUM_TAIL = new RegExp('[\\s–—=:-]*' + NUM + CUR + '\\s*(\\([^)]*\\))?\\s*$', 'i');
+  // strong – сумма с валютой/«к»/словом «сумма», иначе только число в конце строки
+  function sumIn(line, weak) {
     const l = norm(line);
-    if (/@|https?:/.test(l)) return 0;
-    const m = /(\d[\d\s .,]*)\s*(к(?![а-яa-z])|тыс\S*)?\s*(р(?![а-яa-z])|р\.|руб\S*|₽)?/.exec(l);
-    if (!m || !(m[2] || m[3] || /сумм|итог|оплат/.test(l) || /^[\d\s .,]+$/.test(l))) return 0;
-    let v = parseFloat(m[1].replace(/[\s ]/g, '').replace(',', '.'));
-    if (m[2]) v *= 1000;
-    return v >= 100 ? Math.round(v) : 0;
+    if (/@|https?:|www\.|^\+/.test(l) || /^скидк/.test(l)) return 0;
+    for (const m of l.matchAll(new RegExp(NUM + CUR, 'gi'))) {
+      const v = numVal(m);
+      if ((m[3] || m[4]) && v >= 100) return Math.round(v);
+    }
+    if (/сумм|итог|оплат|цена|стоим/.test(l)) { const m = new RegExp(NUM).exec(l.replace(/^\D*/, '')); if (m && numVal(m) >= 100) return Math.round(numVal(m)); }
+    if (weak) { const m = SUM_TAIL.exec(l); if (m && numVal(m) >= 100) return Math.round(numVal(m)); }
+    return 0;
   }
+  const isSrc = l => /^(источник|ист)(?![а-яё])/i.test(norm(l));
+  const isInfo = l => /^(откуда|почта|ник|имя|фио|телефон)(?![а-яё])|\S+@\S+\.\S+|^@\w|^\+?\d[\d\s()-]{9,}$/i.test(norm(l));
   function parseSales(text) {
-    const parts = text.split(/(?=https?:\/\/(?:www\.)?bluesales\.ru\/\S*?dialogId=\d+)/i).filter(p => /^https?:/i.test(p));
-    return parts.map(part => {
-      const lines = part.split('\n').map(l => l.trim()).filter(Boolean);
-      const x = { dlg: (/dialogId=(\d+)/i.exec(lines[0]) || [])[1], name: '', price: '', disc: '', mops: [], email: '', fio: '', nick: '', src: '', quote: '' };
-      // остаток первой строки после ссылки тоже может быть текстом
-      lines[0] = lines[0].replace(/^\S+/, '').trim();
-      const iSum = lines.findIndex(l => sumIn(l) && !/^скидк/i.test(norm(l)));
-      let iMop = lines.findIndex(l => /^(моп\S*|менеджер\S*)\s*[:-]/i.test(norm(l)));
+    const parts = [];
+    let cur = null;
+    text.split('\n').forEach(raw => {
+      const t = raw.trim();
+      // шапка пересланного сообщения из ТГ: «Имя, [6 окт. 2026 г., 21:48:07]:»
+      if (!t || /^[^\[\]]{1,60}, \[\d{1,2} [^\]]+\]:?$/.test(t)) return;
+      const d = /bluesales\.ru\/\S*?dialogId=(\d+)/i.exec(t);
+      if (d) {
+        cur = { dlg: d[1], lines: [] };
+        parts.push(cur);
+        const rest = t.replace(/\[[^\]]*\]\([^)]*\)|\S*dialogId=\d+\S*/gi, '').trim();
+        if (rest) cur.lines.push(rest);
+      } else if (/^(https?:\/\/|www\.)/i.test(t)) cur = null;
+      else if (cur) cur.lines.push(t);
+    });
+    const res = parts.map(({ dlg, lines }) => {
+      const x = { dlg, name: '', price: '', disc: '', mops: [], email: '', fio: '', nick: '', src: '', quote: '' };
+      const iSrc = lines.findIndex(isSrc);
+      // числа без валюты ищем только до «Источника» – дальше идут цитаты клиента
+      let iSum = lines.findIndex(l => sumIn(l));
+      if (iSum < 0) iSum = lines.findIndex((l, i) => (iSrc < 0 || i < iSrc) && !isInfo(l) && sumIn(l, true));
+      let iMop = lines.findIndex(l => /^(моп|менеджер)/i.test(norm(l)) && mopsIn(l).length);
       if (iMop < 0) iMop = lines.findIndex((l, i) => i !== iSum && onlyMops(l) === '');
       if (iSum >= 0) {
         const d = /скидк\S*\s*[:-]?\s*(\d[\d\s ]*)/i.exec(lines[iSum]);
         x.disc = d ? String(+d[1].replace(/\D/g, '')) : '';
-        x.price = String(sumIn(lines[iSum]) + (+x.disc || 0));
+        x.price = String((sumIn(lines[iSum]) || sumIn(lines[iSum], true)) + (+x.disc || 0));
+        // тариф в одной строке с суммой: «Апсейл русский с куратором 5 192 рубля»
+        const rest = lines[iSum].replace(SUM_TAIL, '').replace(/[\s|–—=:-]+$/, '').trim();
+        if (/[а-яёa-z]{3}/i.test(rest) && !/^(сумм|итог|оплат|цена|стоим)/i.test(norm(rest))) x.name = rest;
       }
       if (iMop >= 0) x.mops = mopsIn(lines[iMop]);
-      const iSrc = lines.findIndex(l => /^источник\s*:/i.test(l));
-      if (iSrc >= 0) x.src = lines[iSrc].replace(/^источник\s*:\s*/i, '');
-      const iName = lines.findIndex((l, i) => l && i !== iSum && i !== iMop && i !== iSrc && !/^\S+@\S+\.\S+$|^@\w/.test(l));
-      if (iName >= 0 && (iSrc < 0 || iName < iSrc)) x.name = lines[iName];
-      lines.forEach(l => { if (/^\S+@\S+\.\S+$/.test(l)) x.email = l; else if (/^@\w/.test(l)) x.nick = l; });
+      if (iSrc >= 0) x.src = lines[iSrc].replace(/^(источник|ист)\S*\s*[:-]?\s*/i, '');
+      if (!x.name) {
+        const iName = lines.findIndex((l, i) => i !== iSum && i !== iMop && (iSrc < 0 || i < iSrc) && !isInfo(l));
+        if (iName >= 0) x.name = lines[iName];
+      }
+      lines.forEach(l => {
+        const e = /[^\s,;/()]+@[^\s,;/()]+\.[a-z]{2,}/i.exec(l), n = /(^|[\s/,])@(\w{3,})/.exec(l);
+        if (e && !x.email) x.email = e[0];
+        if (n && !x.nick) x.nick = '@' + n[2];
+      });
       // ФИО – только в нашем формате: строки между МОП и «Источник»
       if (iMop >= 0 && iSrc > iMop) x.fio = lines.slice(iMop + 1, iSrc).filter(l => l !== x.email && l !== x.nick).join(' ');
-      // цитата – в кавычках; после неё может идти шапка следующего сообщения из ТГ («Имя, [дата]»), её отбрасываем
+      // цитата – в кавычках после «Источника»
       if (iSrc >= 0) { const q = lines.slice(iSrc + 1).join('\n'), m = /^["«“]([\s\S]*?)["»”]/.exec(q); x.quote = m ? m[1] : (lines[iSrc + 1] || ''); }
       if (!x.name) x.name = 'Продажа (тариф не указан)';
       x.bad = !x.price ? 'не нашёл сумму' : !x.mops.length ? 'не нашёл менеджера' : '';
       return x;
-    }).filter(x => x.dlg);
+    });
+    // одну продажу часто присылают дважды (исправленную или «докреплю») – берём нижнюю
+    res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.dlg === x.dlg && y.price === x.price)) x.bad = 'повтор ниже'; });
+    return res;
   }
   function openImport() {
     closeSale();
@@ -1704,7 +1740,7 @@
       const have = salesGet(), me = meName();
       found = parseSales(ta.value).map(x => Object.assign(x, {
         mine: !x.bad && x.mops.includes(me),
-        dup: have.some(s => s.dlg === x.dlg && norm(s.name) === norm(x.name)),
+        dup: have.some(s => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price)),
       }));
       const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine);
       out.innerHTML = found.length ? found.map(x =>
