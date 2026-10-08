@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.28.6
+// @version      1.28.7
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1476,7 +1476,7 @@
     return [
       'https://bluesales.ru/app/messenger/?dialogId=' + x.dlg,
       x.name,
-      rub(x.price) + ' рублей',
+      rub(saleTotal(x)) + ' рублей' + (saleDisc(x) ? ' (скидка ' + rub(saleDisc(x)) + ' ₽)' : ''),
       'МОП: ' + joinMops(x.mops),
       who.join('\n'),
       'Источник: ' + (x.src || ''),
@@ -1490,7 +1490,14 @@
   const saleMine = x => !meSet() || !x.mops.length || x.mops.includes(meName());
   // доля, которая идёт в отчёт: продажа не на меня (cnt === false) хранится в списке, но не считается
   const saleShare = s => s && s.cnt !== false ? s.share : 0;
-  const salePart = s => Math.round((s && +s.price || 0) * saleShare(s));
+  // скидка: число – в рублях, «10%» – процент от цены; итог = цена − скидка, от итога считается отчёт
+  function saleDisc(s) {
+    const p = +s.price || 0, d = String(s.disc || '').replace(',', '.').trim();
+    const v = /%$/.test(d) ? p * (parseFloat(d) || 0) / 100 : parseFloat(d) || 0;
+    return Math.round(Math.min(p, Math.max(0, v)));
+  }
+  const saleTotal = s => Math.max(0, (+s.price || 0) - saleDisc(s));
+  const salePart = s => s ? Math.round(saleTotal(s) * saleShare(s)) : 0;
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   function openSale(id) {
@@ -1509,7 +1516,6 @@
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
     if (!old) x.share = shareFor(x.mops.length);
-    let shareTouched = !!old;
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
@@ -1517,7 +1523,7 @@
       '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
       '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
-      field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') +
+      field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') + field('disc', 'Скидка', '0 – в рублях или 10%') +
       '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
       '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
       field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
@@ -1527,7 +1533,7 @@
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), prev = box.querySelector('.bs-sale-prev textarea'), note = box.querySelector('.bs-sale-note');
     const inp = k => box.querySelector('[data-k="' + k + '"]');
-    ['name', 'price', 'email', 'fio', 'nick', 'src', 'quote'].forEach(k => { inp(k).value = x[k] == null ? '' : x[k]; });
+    ['name', 'price', 'disc', 'email', 'fio', 'nick', 'src', 'quote'].forEach(k => { inp(k).value = x[k] == null ? '' : x[k]; });
     inp('tar').value = x.tar;
     const paint = () => {
       box.querySelectorAll('[data-g="mops"] em').forEach(e => e.classList.toggle('bs-on', x.mops.includes(e.dataset.v)));
@@ -1536,7 +1542,7 @@
       const mine = saleMine(x);
       box.querySelector('.bs-sale-share').hidden = !mine;
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
-      const part = Math.round((+x.price || 0) * x.share);
+      const part = Math.round(saleTotal(x) * x.share);
       note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
     box.addEventListener('input', ev => {
@@ -1569,8 +1575,8 @@
         const g = em.parentNode.dataset.g, v = em.dataset.v;
         if (g === 'mops') {
           x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
-          if (!shareTouched) x.share = shareFor(x.mops.length);
-        } else { x.share = +v; shareTouched = true; }
+          x.share = shareFor(x.mops.length);   // доля – от числа МОП, потом можно поправить вручную
+        } else x.share = +v;
         paint();
       } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
@@ -1605,7 +1611,7 @@
     wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи за смену</b><i title="Закрыть">×</i></div>' +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(x.price) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
       '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
