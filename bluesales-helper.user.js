@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.23.0
+// @version      1.24.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -395,7 +395,8 @@
       if (!time) return;
       const prev = it.querySelector('.dialogs_list_preview:not(.bs-draft)'), ptxt = prev ? prev.textContent : '';
       // заблокировал после нашего ответа – превью свежее данных dialogs.get
-      if (/запретил присылать/.test(ptxt)) info = null;
+      const crm = it.querySelector('.crm-status-name, .crm_status');
+      if (/запретил присылать/.test(ptxt) || (crm && /^\s*блок/i.test(crm.textContent))) info = null;
       // новые чаты сайт добавляет без dialogs.get – тогда бота узнаём по превью «Вы: Отлично! Куратор…»
       else if ((!info || !info.at) && BOT_RE.test(ptxt)) info = { at: listTime(time), bot: true };
       const isBot = !!(info && info.at && info.bot);
@@ -1164,18 +1165,20 @@
     if (document.getElementById('bsLinks')) return;
     const b = document.createElement('div');
     b.id = 'bsLinks';
-    b.innerHTML = '<span>Ссылок выставлено</span><i data-a="tar" title="Тарифы и сокращения {…}">☰</i><i data-d="-1" title="Убрать одну">−</i><b></b><i data-d="1" class="bs-plus" title="Выставил ссылку">+</i>';
-    b.addEventListener('click', ev => { const d = +ev.target.dataset.d; if (d) linksSet(linksGet() + d); else if (ev.target.dataset.a === 'tar') openTariffs(); });
+    b.className = 'bs-pill';
+    b.innerHTML = '<span>Ссылки</span><b></b><i data-a="tar" class="bs-ico" title="Тарифы и свои фразы {…}"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></i><i data-d="-1" class="bs-ico" title="Убрать одну">−</i><i data-d="1" class="bs-cta bs-sq" title="Выставил ссылку">+</i>';
+    b.addEventListener('click', ev => { const i = ev.target.closest('i'); if (!i) return; const d = +i.dataset.d; if (d) linksSet(linksGet() + d); else if (i.dataset.a === 'tar') openTariffs(); });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
-      '#bsLinks{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;align-items:center;gap:6px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
+      '.bs-pill{position:fixed;right:12px;width:230px;height:36px;box-sizing:border-box;z-index:2001;align-items:center;gap:2px;padding:0 5px 0 12px;border-radius:12px;font-size:12.5px;' +
       'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '#bsLinks span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}#bsLinks{gap:2px!important}#bsLinks b{min-width:18px;text-align:center;color:var(--bs-text,#222);font-size:13.5px}' +
-      '#bsLinks i{font-style:normal;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:15px}' +
-      '#bsLinks i:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
-      '#bsLinks i[data-a]{width:20px;font-size:13px;color:var(--bs-muted,#888)}' +
-      '#bsLinks i.bs-plus{background:var(--bs-accent,#3b82f6);color:#fff;font-size:17px}#bsLinks i.bs-plus:hover{filter:brightness(1.1)}';
+      '.bs-pill span{width:60px;flex:none;white-space:nowrap}' +
+      '.bs-pill b{flex:1;min-width:0;color:var(--bs-text,#222);font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}' +
+      '.bs-pill i{font-style:normal;flex:none;height:26px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;user-select:none}' +
+      '.bs-pill i.bs-ico{width:26px;font-size:16px;color:var(--bs-muted,#888)}.bs-pill i.bs-ico:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
+      '.bs-pill i.bs-cta{margin-left:2px;padding:0 10px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:12.5px;font-weight:600}.bs-pill i.bs-cta:hover{filter:brightness(1.1)}' +
+      '.bs-pill i.bs-sq{width:26px;padding:0;font-size:17px;font-weight:500}';
     document.head.appendChild(st);
     paintLinks(); placeLinks();
     document.getElementById('bsEmoToggle')?.addEventListener('click', () => setTimeout(placeLinks));
@@ -1206,18 +1209,11 @@
     if (document.getElementById('bsSold')) return;
     const b = document.createElement('div');
     b.id = 'bsSold';
-    b.innerHTML = '<span>Продано</span><b></b><i data-a="list" title="Продажи за смену">☰</i><i data-a="new" class="bs-plus" title="Добавить продажу в этом чате">+ продажа</i>';
-    b.addEventListener('click', ev => { const a = ev.target.dataset.a; if (a === 'list') openSales(); else if (a === 'new') openSale(); });
+    b.className = 'bs-pill';
+    b.style.display = 'none';
+    b.innerHTML = '<span>Продано</span><b></b><i data-a="list" class="bs-ico" title="Продажи за смену"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg></i><i data-a="new" class="bs-cta" title="Добавить продажу в этом чате">+ Продажа</i>';
+    b.addEventListener('click', ev => { const i = ev.target.closest('i'), a = i && i.dataset.a; if (a === 'list') openSales(); else if (a === 'new') openSale(); });
     document.body.appendChild(b);
-    const st = document.createElement('style');
-    st.textContent =
-      '#bsSold{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;display:none;align-items:center;gap:4px;padding:4px 4px 4px 10px;border-radius:10px;font-size:12.5px;' +
-      'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '#bsSold span{white-space:nowrap}#bsSold b{flex:1;color:var(--bs-text,#222);font-size:13.5px}' +
-      '#bsSold i{font-style:normal;min-width:22px;height:24px;padding:0 4px;flex:none;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:7px;cursor:pointer;user-select:none;font-size:13px}' +
-      '#bsSold i:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
-      '#bsSold i.bs-plus{padding:0 9px;background:var(--bs-accent,#3b82f6);color:#fff;font-weight:600;font-size:12.5px}#bsSold i.bs-plus:hover{filter:brightness(1.1)}';
-    document.head.appendChild(st);
     paintSold();
   }
   document.addEventListener('DOMContentLoaded', soldInit);
@@ -1273,18 +1269,32 @@
     clearTimeout(h._t);
     h._t = setTimeout(() => { h.style.display = 'none'; }, ok ? 2500 : 5000);
   }
+  // свои фразы: «## ключ» и под ним текст (можно в несколько строк); {ключ} – слова в любом порядке
+  const SNIP_KEY = 'bsSnippets';
+  const snipKey = t => norm(t).split(/[\s,.;]+/).filter(Boolean).sort().join(' ');
+  function snipParse(text) {
+    const out = [];
+    text.split('\n').forEach(l => {
+      const h = /^##\s*(.+)$/.exec(l);
+      if (h) out.push({ k: h[1].trim(), v: [] });
+      else if (out.length) out[out.length - 1].v.push(l);
+    });
+    return out.map(x => ({ k: x.k, v: x.v.join('\n').trim() })).filter(x => x.k && x.v);
+  }
+  const snipText = list => list.map(x => '## ' + x.k + '\n' + x.v).join('\n\n');
   function tarOnInput(ev) {
     const ta = ev.target;
     if (!ta.matches || !ta.matches('textarea.send_message_textarea')) return;
     const m = /\{([^{}\n]*)\}/.exec(ta.value);
     if (!m) return;
-    const res = tarFind(m[1]);
+    const sn = jget(SNIP_KEY, []).find(x => snipKey(x.k) === snipKey(m[1]));
+    const res = sn ? { t: { u: sn.v, k: sn.k, p: '' } } : tarFind(m[1]);
     if (!res.t) return tarHint(res.err);
     const pos = m.index + res.t.u.length;
     ta.value = ta.value.slice(0, m.index) + res.t.u + ta.value.slice(m.index + m[0].length);
     ta.setSelectionRange(pos, pos);
     ta.dispatchEvent(new Event('input', { bubbles: true }));
-    tarHint('✓ ' + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : ''), true);
+    tarHint('✓ ' + (sn ? 'фраза: ' : '') + res.t.k + (res.t.p ? ' – ' + res.t.p + ' ₽' : ''), true);
   }
   // сообщение ушло – сколько в нём ссылок из тарифов, столько +1 в «Ссылок выставлено»
   function tarSent(raw) {
@@ -1299,27 +1309,36 @@
     const wrap = document.createElement('div');
     wrap.id = 'bsTarWrap';
     wrap.innerHTML =
-      '<div id="bsTar"><div class="bs-rep-head"><b>Тарифы</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-tar-help">Строка: <code>слова | ссылка | цена | название для отчёта</code> (название можно не писать – соберётся само). В сообщении пиши сокращение в фигурных скобках – после «}» оно станет ссылкой.<br>' +
-      'Слова: мат (проф), баз, рус, комбо (или мат+рус) · бронь (месяц) / год · кур / сам (без кур). Порядок любой, например <code>{рус сам год}</code>.<br>' +
-      'Хранится только в этом браузере.</div>' +
-      '<textarea spellcheck="false" placeholder="мат бронь сам | https://… | 4990"></textarea>' +
-      '<div class="bs-rep-btns"><span class="bs-tar-st"></span><button data-a="save" class="bs-main">Сохранить</button></div></div>';
+      '<div id="bsTar"><div class="bs-rep-head"><b>Сокращения {…}</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-rep-range bs-tar-tabs"><span data-tab="tar" class="bs-on">Тарифы</span><span data-tab="snip">Свои фразы</span></div>' +
+      '<div class="bs-tar-pane" data-pane="tar"><div class="bs-tar-help">Строка: <code>слова | ссылка | цена | название для отчёта</code> (название можно не писать – соберётся само).<br>' +
+      'Слова: мат (проф), баз, рус, комбо (или мат+рус) · бронь (месяц) / год · кур / сам (без кур). Порядок любой, например <code>{рус сам год}</code>.</div>' +
+      '<textarea data-k="tar" spellcheck="false" placeholder="мат бронь сам | https://… | 4990"></textarea></div>' +
+      '<div class="bs-tar-pane" data-pane="snip" hidden><div class="bs-tar-help">Строка <code>## ключ</code>, под ней текст или ссылка – можно в несколько строк. В сообщении <code>{мат отзывы}</code> заменится на этот текст. Слова ключа – в любом порядке.</div>' +
+      '<textarea data-k="snip" spellcheck="false" placeholder="## мат отзывы&#10;Вот отзывы наших учеников: …&#10;&#10;## мат пробный&#10;https://…"></textarea></div>' +
+      '<div class="bs-rep-btns"><span class="bs-tar-note">Хранится только в этом браузере</span><span class="bs-tar-st"></span><button data-a="save" class="bs-main">Сохранить</button></div></div>';
     document.body.appendChild(wrap);
-    const ta = wrap.querySelector('textarea'), st = wrap.querySelector('.bs-tar-st');
-    ta.value = tarText(jget(TAR_KEY, []));
+    const taT = wrap.querySelector('[data-k="tar"]'), taS = wrap.querySelector('[data-k="snip"]'), st = wrap.querySelector('.bs-tar-st');
+    taT.value = tarText(jget(TAR_KEY, []));
+    taS.value = snipText(jget(SNIP_KEY, []));
     wrap.addEventListener('click', ev => {
-      if (ev.target.tagName === 'I') closeTariffs();
-      else if (ev.target.dataset.a === 'save') {
-        const list = tarParse(ta.value);
-        jset(TAR_KEY, list);
-        ta.value = tarText(list);
-        st.textContent = 'Сохранено: ' + list.length;
+      const tab = ev.target.dataset.tab;
+      if (ev.target.matches('.bs-rep-head i')) closeTariffs();
+      else if (tab) {
+        wrap.querySelectorAll('[data-tab]').forEach(e => e.classList.toggle('bs-on', e === ev.target));
+        wrap.querySelectorAll('[data-pane]').forEach(e => { e.hidden = e.dataset.pane !== tab; });
+        (tab === 'tar' ? taT : taS).focus();
+      } else if (ev.target.dataset.a === 'save') {
+        const list = tarParse(taT.value), sn = snipParse(taS.value);
+        jset(TAR_KEY, list); jset(SNIP_KEY, sn);
+        taT.value = tarText(list); taS.value = snipText(sn);
+        st.textContent = 'Сохранено: тарифов ' + list.length + ', фраз ' + sn.length;
       }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeTariffs(); });
-    ta.focus();
+    taT.focus();
   }
+
   function tariffsInit() {
     document.addEventListener('input', tarOnInput, true);
     document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeTariffs(); });
@@ -1331,7 +1350,8 @@
       '.bs-tar-help{font-size:12px;line-height:1.5;color:var(--bs-muted,#888);margin-bottom:8px}' +
       '.bs-tar-help code{padding:0 4px;border-radius:4px;background:var(--bs-hover,#f3f5f8);color:var(--bs-text,#222)}' +
       '#bsTar textarea{width:100%;box-sizing:border-box;height:300px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12px/1.5 ui-monospace,Menlo,monospace;white-space:pre;overflow-wrap:normal}' +
-      '.bs-tar-st{margin-right:auto;align-self:center;font-size:12px;color:#1f9d55}' +
+      '.bs-tar-st{margin-right:auto;align-self:center;font-size:12px;color:#1f9d55}.bs-tar-st:not(:empty)~*{}.bs-tar-note{align-self:center;font-size:11.5px;color:var(--bs-muted,#888)}.bs-tar-st:not(:empty){margin-left:8px}' +
+      '.bs-tar-tabs{margin-bottom:8px}.bs-tar-pane[hidden]{display:none}' +
       '#bsTarHint{position:fixed;z-index:2500;display:none;max-width:520px;padding:6px 10px;border-radius:9px;font-size:12.5px;background:rgba(229,62,62,.95);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}' +
       '#bsTarHint.bs-ok{background:rgba(34,165,90,.95)}';
     document.head.appendChild(st);
@@ -1461,11 +1481,11 @@
           if (!shareTouched) x.share = shareFor(x.mops.length);
         } else { x.share = +v; shareTouched = true; }
         paint();
-      } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); }
+      } else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
         save();
-        navigator.clipboard.writeText(prev.value).then(() => { ev.target.textContent = 'Скопировано ✓'; setTimeout(() => { ev.target.textContent = 'Сохранить и скопировать'; }, 1500); });
+        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint('✓ Продажа сохранена, текст скопирован', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         const all = salesGet(), was = all.find(s => s.id === x.id);
