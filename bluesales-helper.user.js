@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.32.1
+// @version      1.33.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1520,11 +1520,14 @@
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
     if (!old) x.share = shareFor(x.mops.length);
+    // по этому чату сегодня уже есть продажа – подсказываем, чтобы не посчитать дважды (доплата/бронь – это нормально, тогда просто заполняем дальше)
+    const twins = old ? [] : list.filter(s => s.dlg === dlg);
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
     wrap.innerHTML =
       '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
+      twins.map(s => '<div class="bs-sale-dup">По этому чату сегодня уже есть продажа: <b>' + esc(s.name || 'без тарифа') + ' · ' + rub(saleTotal(s)) + ' ₽</b>. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.<button data-a="twin" data-id="' + s.id + '">Открыть</button></div>').join('') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
       '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
       field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') + field('disc', 'Скидка', '0 – в рублях или 10%') +
@@ -1583,6 +1586,7 @@
         } else x.share = +v;
         paint();
       } else if (a === 'back') openSales();
+      else if (a === 'twin') openSale(ev.target.dataset.id, fromList);
       else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); fromList ? openSales() : closeSale(); tarHint('✓ Продажа сохранена', true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
@@ -1619,12 +1623,13 @@
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : String(x.share).replace('.', ',')) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-tar-help">Продаж пока нет. Открой чат клиента и нажми «+ Продажа».</div>') +
-      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
+      '<div class="bs-sales-foot"><button data-a="me" class="bs-me-btn" title="Кто ты – на тебя считаются продажи и отчёт">Я: ' + (meSet() ? esc(meName()) : 'не выбрано') + '</button><button data-a="bak" class="bs-imp-btn" title="Сохранить все данные помощника в файл или загрузить из файла">Копия</button><button data-a="imp" class="bs-imp-btn" title="Вставить тексты продаж других менеджеров из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button><button data-a="shift" title="Обнулить «Продано», сумму, ссылки и список продаж">Начать новую смену</button></div></div>';
     document.body.appendChild(wrap);
     wrap.addEventListener('click', ev => {
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (ev.target.dataset.a === 'me') return askMe();
       if (ev.target.dataset.a === 'imp') return openImport();
+      if (ev.target.dataset.a === 'bak') return openBackup();
       if (ev.target.dataset.a === 'shift') {
         if (!confirm('Начать новую смену? «Продано», сумма продаж, «Ссылки» и список продаж обнулятся.')) return;
         newShift(); closeSale(); return tarHint('✓ Новая смена началась', true);
@@ -1636,6 +1641,47 @@
         saleDel(x.id); return openSales();
       }
       if (row) openSale(row.dataset.id, true);
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Резервная копия: все данные помощника (ключи bs* в localStorage) в файл и обратно ----------
+  const bakKeys = () => Object.keys(localStorage).filter(k => /^bs[A-Z]/.test(k));
+  function backupSave() {
+    const data = {};
+    bakKeys().forEach(k => { data[k] = localStorage.getItem(k); });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'bluesales-helper', t: Date.now(), data }, null, 1)], { type: 'application/json' }));
+    a.download = 'bluesales-helper-' + ddmm(new Date()) + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function backupLoad(file) {
+    file.text().then(t => {
+      let j; try { j = JSON.parse(t); } catch (e) {}
+      if (!j || j.app !== 'bluesales-helper' || !j.data) return alert('Это не файл копии помощника.');
+      if (!confirm('Загрузить копию от ' + new Date(j.t).toLocaleString('ru-RU') + '? Текущие данные помощника (продажи, отчёт, черновики, напоминания, шаблоны) заменятся данными из файла.')) return;
+      bakKeys().forEach(k => localStorage.removeItem(k));
+      Object.keys(j.data).forEach(k => { if (/^bs[A-Z]/.test(k)) localStorage.setItem(k, j.data[k]); });
+      location.reload();
+    });
+  }
+  function openBackup() {
+    closeSale();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-backup"><div class="bs-rep-head"><b>Резервная копия</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-tar-help">Данные помощника живут только в этом браузере: продажи и отчёт смены, черновики, закрепы, напоминания, тарифы, шаблоны, смайлики. Если почистить кэш или сесть за другой компьютер – их не будет. «Скачать» сохраняет всё в файл (в «Загрузки»), «Загрузить» – возвращает из файла.</div>' +
+      '<input type="file" accept=".json,application/json" hidden>' +
+      '<div class="bs-rep-btns"><button data-a="back">Назад</button><button data-a="load">Загрузить из файла</button><button data-a="save" class="bs-main">Скачать копию</button></div></div>';
+    document.body.appendChild(wrap);
+    const inp = wrap.querySelector('input[type=file]');
+    inp.addEventListener('change', () => { if (inp.files[0]) backupLoad(inp.files[0]); });
+    wrap.addEventListener('click', ev => {
+      const a = ev.target.dataset.a;
+      if (ev.target.matches('.bs-rep-head i')) closeSale();
+      else if (a === 'back') openSales();
+      else if (a === 'load') inp.click();
+      else if (a === 'save') { backupSave(); tarHint('✓ Копия скачана', true); }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
@@ -1847,6 +1893,9 @@
       '.bs-sale-prev textarea{flex:1;min-height:300px;padding:9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12.5px/1.45 inherit;resize:none}' +
       '.bs-sale-note{font-size:11.5px;color:var(--bs-muted,#888)}' +
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
+      '.bs-sale-dup{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:9px;background:rgba(245,158,11,.14);color:var(--bs-text,#222);font-size:12.5px;line-height:1.35}' +
+      '.bs-sale-dup button{flex:none;padding:5px 12px;border:1px solid #f59e0b;border-radius:7px;background:none;color:inherit;font-size:12.5px;cursor:pointer}.bs-sale-dup button:hover{background:#f59e0b;color:#fff}' +
+      '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
