@@ -1,7 +1,7 @@
 /* ==UserStyle==
 @name           BlueSales – новый мессенджер
 @namespace      bluesales-messenger
-@version        1.16.1
+@version        1.16.2
 @updateURL      https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-messenger.user.css
 @description    Современный вид мессенджера BlueSales: на всю ширину, крупный шрифт, карточки сообщений
 ==/UserStyle== */
@@ -1060,4 +1060,11 @@ td.dialog > .no_messages_label:not([style*="none"]) {
   html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div > span,
   html body .more_filters .selectize-dropdown:not(:has(.tag-selectize-option[style*="background"])) .selectize-dropdown-content > div.active > span { box-shadow: none !important; filter: none !important; outline: none !important; background: none !important }
   html body #customer-data .selectize-dropdown-content > div > .tag-selectize-option { overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important }
+  /* 1.16.2: выпадашка тегов в карточке – как в фильтре: компактные таблетки в строку; наведение без обводок */
+  html body .selectize-dropdown .selectize-dropdown-content > div:has(> .tag-selectize-option),
+  html body .selectize-dropdown .selectize-dropdown-content > div.active:has(> .tag-selectize-option) { background: none !important; border: 0 !important; outline: none !important; box-shadow: none !important }
+  html body .selectize-dropdown .selectize-dropdown-content > div.active > .tag-selectize-option[style*="background"] { outline: none !important; box-shadow: none !important; filter: brightness(.88) !important }
+  html body #customer-data .selectize-dropdown-content { gap: 3px !important; padding: 6px !important; align-content: flex-start !important }
+  html body #customer-data .selectize-dropdown-content > div { display: inline-block !important; flex: none !important; width: auto !important; padding: 0 !important; max-width: 100% !important }
+  html body #customer-data .selectize-dropdown-content > div > .tag-selectize-option { display: inline-block !important; width: auto !important; font-size: 10.5px !important; line-height: 16px !important; padding: 0 7px !important; border-radius: 6px !important; max-width: 100% !important }
 }
