@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.37.0
+// @version      1.38.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -77,6 +77,7 @@
 
   // ---------- Отправка: звук сразу при отправке, при ошибке – низкий сигнал ----------
   const failTone = () => { tone(330, 0, 0.18, 'triangle', 0.6); tone(220, 0.18, 0.3, 'triangle', 0.6); };
+  let bsOwnCall = false;   // наш запрос через API сайта – не путать с открытием чата
   const send = XMLHttpRequest.prototype.send, open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (m, url) { this._bsUrl = String(url || ''); return open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (body) {
@@ -86,6 +87,10 @@
       playSent();
       this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) { onSent(id); tarSent(text); } else failTone(); });
       this.addEventListener('error', failTone);
+    } else if (/dialogs\.getMessages/.test(this._bsUrl)) {
+      // сайт открыл чат (из списка, левых напоминаний или по ссылке); свой предпросмотр не считаем
+      const m = /"dialogId"\s*:\s*"?(\d+)/.exec(typeof body === 'string' ? body : '');
+      if (m && !bsOwnCall && !/1970-01-01/.test(body)) onOpened(m[1]);
     } else if (/dialogs\.get(?!LastUpdated|Channels)/.test(this._bsUrl)) {
       this.addEventListener('load', () => { try { onDialogs(JSON.parse(this.responseText)); } catch (e) {} });
     }
@@ -574,7 +579,7 @@
   const PIN_KEY = 'bsPinned', REM_KEY = 'bsRemind';
   const jget = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) || def; } catch (e) { return def; } };
   const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const itemById = id => document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]');
+  const itemById = id => document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]:not(#bsGhostChat)') || document.querySelector('#bsGhostChat[data-dialog-id="' + id + '"]');
   // чат есть в списке – кликаем; нет (не подгружен, другой канал, фильтр) – открываем по ссылке, сайт сам найдёт канал
   function openChat(id) {
     const it = itemById(id);
@@ -593,6 +598,41 @@
     it.scrollIntoView({ block: 'nearest' });
     return true;
   }
+  // чат открыт не из списка (левые напоминания сайта) и в загруженном списке его нет –
+  // показываем его строкой-заглушкой сверху, чтобы было видно, какой чат открыт, и продажа ушла в нужный
+  let openedId = '';
+  function onOpened(id) { openedId = String(id); setTimeout(syncOpened, 300); }
+  function syncOpened() {
+    const id = openedId, ghost = document.getElementById('bsGhostChat');
+    if (!id) return;
+    const real = document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]:not(#bsGhostChat)');
+    if (real) { if (ghost) ghost.remove(); markActive(id); return; }
+    const list = document.querySelector('.dialogs_list');
+    if (!list) return;
+    const g = ghost || document.createElement('div');
+    if (!ghost) {
+      g.id = 'bsGhostChat';
+      g.title = 'Этого чата нет в загруженном списке – он открыт из напоминаний';
+      g.innerHTML = '<div class="dialogs_list_item_content"><div class="dialogs_list_summary"><div class="dialogs_list_person_name_and_post"><span class="dialogs_list_person_name"></span></div><div class="dialogs_list_preview">Открыт из напоминаний, в списке не загружен</div></div></div>';
+      // чат уже открыт – клик по заглушке сайту не отдаём (у неё нет его данных)
+      g.addEventListener('click', ev => ev.stopPropagation());
+    }
+    g.className = 'dialogs_list_item active';
+    g.dataset.dialogId = id;
+    const nm = ((document.querySelector('.dialog_header .person_name') || {}).textContent || '').trim();
+    const el = g.querySelector('.dialogs_list_person_name');
+    if (nm && el.textContent !== nm) el.textContent = nm;
+    else if (!el.textContent) el.textContent = 'Чат';
+    document.querySelectorAll('.dialogs_list_item.active').forEach(e => { if (e !== g) e.classList.remove('active'); });
+    if (list.firstElementChild !== g) { list.prepend(g); list.scrollTop = 0; }
+  }
+  // сайт перерисовывает список (фильтры, обновление) – заглушка пропадает, возвращаем; имя из шапки подтягиваем
+  setInterval(() => {
+    if (!openedId) return;
+    const g = document.getElementById('bsGhostChat');
+    if (document.querySelector('.dialogs_list_item[data-dialog-id="' + openedId + '"]:not(#bsGhostChat)')) { if (g) syncOpened(); return; }
+    if (!g || g.querySelector('.dialogs_list_person_name').textContent === 'Чат') syncOpened();
+  }, 1000);
   // открыли страницу по ссылке ?dialogId= – ждём, пока подгрузится список, и выделяем этот чат
   (() => {
     const id = new URLSearchParams(location.search).get('dialogId');
@@ -728,9 +768,10 @@
       }).then(r => r.json()).then(r => r && r.response);
     return new Promise((ok, fail) => {
       try {
+        bsOwnCall = true;
         new window.blueSales.blueSalesApi().callApi(method, params, { version: 1 })
           .done(r => ok(r && r.response)).fail(e => fail(e));
-      } catch (e) { fail(e); }
+      } catch (e) { fail(e); } finally { bsOwnCall = false; }
     });
   }
   const getDialog = id => bsApi('dialogs.get', { dialogId: +id, startRowNumber: 1, pageSize: 1 }).then(r => (r || [])[0]);
@@ -2588,7 +2629,8 @@
       '#remindersContentInner .bs-rem-cur>*{background:var(--bs-accent-soft,#e8f0fe)!important}' +
       '#remindersContentInner .bs-rem-cur>:first-child{border-radius:6px 0 0 6px!important;color:var(--bs-accent,#3b82f6)!important;font-weight:600!important}' +
       '#remindersContentInner .bs-rem-cur>:last-child{border-radius:0 6px 6px 0!important}' +
-      '#remindersContentInner .bs-rem-cur>:only-child{border-radius:6px!important}';
+      '#remindersContentInner .bs-rem-cur>:only-child{border-radius:6px!important}' +
+      '#bsGhostChat .dialogs_list_item_content{padding:8px 12px!important}#bsGhostChat .dialogs_list_preview{font-style:italic;opacity:.75}';
     document.head.appendChild(st);
   });
 })();
