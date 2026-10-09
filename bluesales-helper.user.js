@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.38.1
+// @version      1.38.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -640,9 +640,18 @@
     }
     return seen[id] || (meta && meta.name) || (jget(REM_KEY, {})[id] || {}).name || 'Чат';
   }
+  // сменили канал или закрыли чат – справа «Выберите диалог…», заглушка открытого чата больше не нужна
+  function dialogClosed() {
+    const h = document.querySelector('.dialog_header .person_name');
+    if (!h || !h.offsetParent || !h.textContent.trim()) return true;
+    const e = document.evaluate("//*[normalize-space(text())='Выберите диалог, чтобы увидеть сообщения']", document, null, 9, null).singleNodeValue;
+    return !!(e && e.offsetParent);
+  }
   function renderGhosts() {
     const list = document.querySelector('.dialogs_list');
     if (!list) return;
+    // сразу после открытия шапка может быть ещё не готова – даём сайту 5 секунд
+    if (openedId && Date.now() - (opened.at || 0) > 5000 && dialogClosed()) { openedId = ''; opened = {}; }
     const pins = jget(PIN_KEY, []), meta = jget(PIN_META, {});
     const want = pins.filter(id => !realById(id));
     if (openedId && !realById(openedId) && !want.includes(openedId)) want.unshift(openedId);
