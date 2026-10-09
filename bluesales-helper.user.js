@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.36.1
+// @version      1.37.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -578,9 +578,28 @@
   // чат есть в списке – кликаем; нет (не подгружен, другой канал, фильтр) – открываем по ссылке, сайт сам найдёт канал
   function openChat(id) {
     const it = itemById(id);
-    if (it) it.click();
-    else location.assign(location.origin + '/app/Messenger/?dialogId=' + encodeURIComponent(id));
+    if (!it) return location.assign(location.origin + '/app/Messenger/?dialogId=' + encodeURIComponent(id));
+    (it.querySelector('.dialogs_list_item_content') || it).click();
+    setTimeout(() => markActive(id), 300);
   }
+  // сайт не всегда выделяет чат, открытый не кликом по списку, – выделяем сами и прокручиваем к нему
+  function markActive(id) {
+    const it = itemById(id);
+    if (!it) return false;
+    if (!it.classList.contains('active')) {
+      document.querySelectorAll('.dialogs_list_item.active').forEach(e => e.classList.remove('active'));
+      it.classList.add('active');
+    }
+    it.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+  // открыли страницу по ссылке ?dialogId= – ждём, пока подгрузится список, и выделяем этот чат
+  (() => {
+    const id = new URLSearchParams(location.search).get('dialogId');
+    if (!id) return;
+    let n = 0;
+    const t = setInterval(() => { if (document.querySelector('.dialogs_list_item.active') || markActive(id) || ++n > 40) clearInterval(t); }, 500);
+  })();
   const nameOf = it => { const n = it && it.querySelector('.dialogs_list_person_name'); return n ? n.textContent.trim() : ''; };
 
   function togglePin(id) {
@@ -729,7 +748,7 @@
     p.style.left = Math.min(r.right + 8, innerWidth - p.offsetWidth - 8) + 'px';
     p.style.top = Math.max(8, Math.min(y - 40, innerHeight - p.offsetHeight - 8)) + 'px';
     p.querySelector('.bs-pk-x').onclick = closePeek;
-    p.querySelector('button').onclick = () => { closePeek(); it.click(); };
+    p.querySelector('button').onclick = () => { closePeek(); openChat(id); };
     const body = p.querySelector('.bs-pk-body'), info = t => { body.innerHTML = '<div class="bs-pk-info"></div>'; body.firstChild.textContent = t; };
     try {
       const d = await getDialog(id);
