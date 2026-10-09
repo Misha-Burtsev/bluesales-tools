@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.36.1
+// @version      1.38.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -77,6 +77,7 @@
 
   // ---------- Отправка: звук сразу при отправке, при ошибке – низкий сигнал ----------
   const failTone = () => { tone(330, 0, 0.18, 'triangle', 0.6); tone(220, 0.18, 0.3, 'triangle', 0.6); };
+  let bsOwnCall = false;   // наш запрос через API сайта – не путать с открытием чата
   const send = XMLHttpRequest.prototype.send, open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function (m, url) { this._bsUrl = String(url || ''); return open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (body) {
@@ -86,6 +87,10 @@
       playSent();
       this.addEventListener('load', () => { if (this.status >= 200 && this.status < 300) { onSent(id); tarSent(text); } else failTone(); });
       this.addEventListener('error', failTone);
+    } else if (/dialogs\.getMessages/.test(this._bsUrl)) {
+      // сайт открыл чат (из списка, левых напоминаний или по ссылке); свой предпросмотр не считаем
+      const m = /"dialogId"\s*:\s*"?(\d+)/.exec(typeof body === 'string' ? body : '');
+      if (m && !bsOwnCall && !/1970-01-01/.test(body)) onOpened(m[1]);
     } else if (/dialogs\.get(?!LastUpdated|Channels)/.test(this._bsUrl)) {
       this.addEventListener('load', () => { try { onDialogs(JSON.parse(this.responseText)); } catch (e) {} });
     }
@@ -574,23 +579,128 @@
   const PIN_KEY = 'bsPinned', REM_KEY = 'bsRemind';
   const jget = (k, def) => { try { return JSON.parse(localStorage.getItem(k)) || def; } catch (e) { return def; } };
   const jset = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
-  const itemById = id => document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]');
-  // чат есть в списке – кликаем; нет (не подгружен, другой канал, фильтр) – открываем по ссылке, сайт сам найдёт канал
-  function openChat(id) {
-    const it = itemById(id);
-    if (it) it.click();
-    else location.assign(location.origin + '/app/Messenger/?dialogId=' + encodeURIComponent(id));
+  const PIN_META = 'bsPinMeta';   // {id: {name, sid}} – чтобы закреплённый чат был виден и открывался, даже если его нет в списке
+  const realById = id => document.querySelector('.dialogs_list_item[data-dialog-id="' + id + '"]:not(.bs-ghost)');
+  const itemById = id => realById(id) || document.querySelector('.bs-ghost[data-dialog-id="' + id + '"]');
+  const reqName = () => ((document.querySelector('.dialog_header .person_name') || {}).textContent || '').trim();
+  // открыть чат, которого нет в списке: как левые напоминания сайта – по socialId, без перезагрузки
+  function openBySid(id, sid) {
+    const link = sid && document.querySelector('#remindersContentInner a.openDialogLink[data-social-id="' + sid + '"]');
+    if (link) return link.click();
+    if (sid) return window.postMessage({ type: 'openDialog', socialId: sid, alertIfDialogNotFound: true }, '*');
+    location.assign(location.origin + '/app/Messenger/?dialogId=' + encodeURIComponent(id));
   }
+  // чат есть в списке – кликаем; нет – открываем по socialId или по ссылке
+  function openChat(id) {
+    const it = realById(id);
+    if (!it) {
+      const meta = jget(PIN_META, {})[id] || {}, r = jget(REM_KEY, {})[id] || {}, g = itemById(id);
+      return openBySid(id, meta.sid || r.sid || (g && g.dataset.socialId));
+    }
+    (it.querySelector('.dialogs_list_item_content') || it).click();
+    setTimeout(() => markActive(id), 300);
+  }
+  // сайт не всегда выделяет чат, открытый не кликом по списку, – выделяем сами и прокручиваем к нему
+  function markActive(id) {
+    const it = itemById(id);
+    if (!it) return false;
+    if (!it.classList.contains('active')) {
+      document.querySelectorAll('.dialogs_list_item.active').forEach(e => e.classList.remove('active'));
+      it.classList.add('active');
+    }
+    it.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+  // Чаты, которых нет в загруженном списке, показываем строками-заглушками сверху:
+  // открытый из левых напоминаний (чтобы было видно, какой открыт, и продажа ушла в нужный) и закреплённые.
+  let openedId = '', opened = {};   // opened: {at, head – шапка до открытия, name, sid}
+  let remClick = null;              // последний клик по левым напоминаниям: {sid, name, at}
+  const seen = {};                  // имена чатов, уже открывавшихся в этой вкладке
+  document.addEventListener('click', ev => {
+    const a = ev.target.closest && ev.target.closest('#remindersContentInner a.openDialogLink');
+    if (a) { remClick = { sid: a.dataset.socialId || '', name: a.textContent.trim(), at: Date.now() }; return; }
+    // клик по настоящей строке – заглушка больше не открытый чат
+    const it = ev.target.closest && ev.target.closest('.dialogs_list_item[data-dialog-id]:not(.bs-ghost)');
+    if (it) { openedId = it.dataset.dialogId; opened = {}; document.querySelectorAll('.bs-ghost.active').forEach(g => g.classList.remove('active')); }
+  }, true);
+  function onOpened(id) {
+    id = String(id);
+    const rc = remClick && Date.now() - remClick.at < 5000 ? remClick : null;
+    remClick = null;
+    openedId = id;
+    opened = { at: Date.now(), head: reqName(), name: rc ? rc.name : '', sid: rc ? rc.sid : '' };
+    setTimeout(() => { renderGhosts(); if (realById(id)) markActive(id); }, 300);
+  }
+  function ghostName(id, meta) {
+    if (id === openedId) {
+      // шапка обновляется не сразу после запроса – пока она старая, ей не верим
+      const h = reqName();
+      if (h && (h !== opened.head || Date.now() - opened.at > 3000)) opened.name = h;
+      if (opened.name) return (seen[id] = opened.name);
+    }
+    return seen[id] || (meta && meta.name) || (jget(REM_KEY, {})[id] || {}).name || 'Чат';
+  }
+  function renderGhosts() {
+    const list = document.querySelector('.dialogs_list');
+    if (!list) return;
+    const pins = jget(PIN_KEY, []), meta = jget(PIN_META, {});
+    const want = pins.filter(id => !realById(id));
+    if (openedId && !realById(openedId) && !want.includes(openedId)) want.unshift(openedId);
+    list.querySelectorAll('.bs-ghost').forEach(g => { if (!want.includes(g.dataset.dialogId)) g.remove(); });
+    let metaChanged = false;
+    want.forEach(id => {
+      let g = list.querySelector('.bs-ghost[data-dialog-id="' + id + '"]');
+      if (!g) {
+        g = document.createElement('div');
+        g.className = 'dialogs_list_item bs-ghost';
+        g.dataset.dialogId = id;
+        g.innerHTML = '<div class="dialogs_list_item_content"><div class="dialogs_list_summary"><div class="dialogs_list_person_name_and_post"><span class="dialogs_list_person_name"></span></div><div class="dialogs_list_preview"></div></div></div>';
+        // у заглушки нет данных сайта – клик ему не отдаём, открываем сами
+        g.addEventListener('click', ev => {
+          ev.stopPropagation();
+          if (g.dataset.dialogId !== openedId || !g.classList.contains('active')) openChat(g.dataset.dialogId);
+        });
+        // новая – сразу после закреплённых (их порядок ставит paintMarks)
+        const after = [...list.children].filter(c => c.matches('.dialogs_list_item[data-dialog-id]') && pins.includes(c.dataset.dialogId)).pop();
+        if (after) after.after(g); else { list.prepend(g); list.scrollTop = 0; }
+      }
+      const pinned = pins.includes(id), m = meta[id] || {};
+      const nm = ghostName(id, m), sid = (id === openedId && opened.sid) || m.sid || '';
+      const el = g.querySelector('.dialogs_list_person_name'), pv = g.querySelector('.dialogs_list_preview');
+      const note = pinned ? 'Закреплён, в списке не загружен' : 'Открыт из напоминаний, в списке не загружен';
+      if (el.textContent !== nm) el.textContent = nm;
+      if (pv.textContent !== note) pv.textContent = note;
+      if (sid && g.dataset.socialId !== sid) g.dataset.socialId = sid;
+      if (pinned && nm !== 'Чат' && (m.name !== nm || (sid && m.sid !== sid))) { meta[id] = { name: nm, sid: sid || m.sid || '' }; metaChanged = true; }
+      if (id === openedId && !g.classList.contains('active') && !document.querySelector('.dialogs_list_item.active:not(.bs-ghost)[data-dialog-id="' + openedId + '"]')) {
+        document.querySelectorAll('.dialogs_list_item.active').forEach(e => e.classList.remove('active'));
+        g.classList.add('active');
+      }
+      if (id !== openedId && g.classList.contains('active')) g.classList.remove('active');
+    });
+    if (metaChanged) jset(PIN_META, meta);
+  }
+  // сайт перерисовывает список (фильтры, обновление) – заглушки возвращаем, имя из шапки подтягиваем
+  setInterval(renderGhosts, 1000);
+  // открыли страницу по ссылке ?dialogId= – ждём, пока подгрузится список, и выделяем этот чат
+  (() => {
+    const id = new URLSearchParams(location.search).get('dialogId');
+    if (!id) return;
+    let n = 0;
+    const t = setInterval(() => { if (document.querySelector('.dialogs_list_item.active') || markActive(id) || ++n > 40) clearInterval(t); }, 500);
+  })();
   const nameOf = it => { const n = it && it.querySelector('.dialogs_list_person_name'); return n ? n.textContent.trim() : ''; };
 
   function togglePin(id) {
     const p = jget(PIN_KEY, []), i = p.indexOf(id);
-    if (i >= 0) p.splice(i, 1); else p.push(id);
-    jset(PIN_KEY, p); paintMarks();
+    const meta = jget(PIN_META, {}), it = itemById(id);
+    if (i >= 0) { p.splice(i, 1); delete meta[id]; }
+    else { p.push(id); meta[id] = { name: nameOf(it) || (meta[id] && meta[id].name) || '', sid: (it && it.dataset.socialId) || '' }; }
+    jset(PIN_META, meta); jset(PIN_KEY, p); paintMarks();
   }
   function setRemind(id, hours, note) {
     const r = jget(REM_KEY, {});
-    if (hours > 0) r[id] = { at: Date.now() + Math.round(hours * 3600e3), name: nameOf(itemById(id)) || (r[id] && r[id].name) || '', note: (note || '').trim() };
+    if (hours > 0) r[id] = { at: Date.now() + Math.round(hours * 3600e3), name: nameOf(itemById(id)) || (r[id] && r[id].name) || '', note: (note || '').trim(), sid: (itemById(id) || { dataset: {} }).dataset.socialId || (r[id] && r[id].sid) || '' };
     else delete r[id];
     jset(REM_KEY, r); paintMarks();
   }
@@ -600,6 +710,7 @@
   }
   // значки 📌 и ⏰ у имени + закреплённые наверх списка
   function paintMarks() {
+    renderGhosts();
     const pins = jget(PIN_KEY, []), rem = jget(REM_KEY, {}), now = Date.now(), open = curDialog();
     // открыли чат после срабатывания – напоминание выполнено
     if (open && rem[open] && rem[open].fired) { delete rem[open]; jset(REM_KEY, rem); }
@@ -709,9 +820,10 @@
       }).then(r => r.json()).then(r => r && r.response);
     return new Promise((ok, fail) => {
       try {
+        bsOwnCall = true;
         new window.blueSales.blueSalesApi().callApi(method, params, { version: 1 })
           .done(r => ok(r && r.response)).fail(e => fail(e));
-      } catch (e) { fail(e); }
+      } catch (e) { fail(e); } finally { bsOwnCall = false; }
     });
   }
   const getDialog = id => bsApi('dialogs.get', { dialogId: +id, startRowNumber: 1, pageSize: 1 }).then(r => (r || [])[0]);
@@ -729,7 +841,7 @@
     p.style.left = Math.min(r.right + 8, innerWidth - p.offsetWidth - 8) + 'px';
     p.style.top = Math.max(8, Math.min(y - 40, innerHeight - p.offsetHeight - 8)) + 'px';
     p.querySelector('.bs-pk-x').onclick = closePeek;
-    p.querySelector('button').onclick = () => { closePeek(); it.click(); };
+    p.querySelector('button').onclick = () => { closePeek(); openChat(id); };
     const body = p.querySelector('.bs-pk-body'), info = t => { body.innerHTML = '<div class="bs-pk-info"></div>'; body.firstChild.textContent = t; };
     try {
       const d = await getDialog(id);
@@ -2569,7 +2681,8 @@
       '#remindersContentInner .bs-rem-cur>*{background:var(--bs-accent-soft,#e8f0fe)!important}' +
       '#remindersContentInner .bs-rem-cur>:first-child{border-radius:6px 0 0 6px!important;color:var(--bs-accent,#3b82f6)!important;font-weight:600!important}' +
       '#remindersContentInner .bs-rem-cur>:last-child{border-radius:0 6px 6px 0!important}' +
-      '#remindersContentInner .bs-rem-cur>:only-child{border-radius:6px!important}';
+      '#remindersContentInner .bs-rem-cur>:only-child{border-radius:6px!important}' +
+      '.bs-ghost .dialogs_list_item_content{padding:8px 12px!important}.bs-ghost .dialogs_list_preview{font-style:italic;opacity:.75}';
     document.head.appendChild(st);
   });
 })();
