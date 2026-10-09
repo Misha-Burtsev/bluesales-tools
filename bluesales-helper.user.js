@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.36.0
+// @version      1.36.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1410,6 +1410,7 @@
     };
     let tm;
     const save = () => {
+      if (!wrap.isConnected) return;
       const tar = [...lists.tar.children].filter(check).map(r => ({ k: val(r, 'k'), u: val(r, 'u'), p: val(r, 'p').replace(/\s/g, ''), n: val(r, 'n') }));
       const sn = [...lists.snip.children].filter(check).map(r => ({ k: val(r, 'k'), v: val(r, 'v') }));
       jset(TAR_KEY, tar); jset(SNIP_KEY, sn);
@@ -1420,11 +1421,12 @@
     jget(TAR_KEY, []).forEach(t => row('tar', t));
     jget(SNIP_KEY, []).forEach(t => row('snip', t));
     const file = wrap.querySelector('input[type=file]');
-    file.addEventListener('change', () => { const f = file.files[0]; file.value = ''; if (f) f.text().then(t => { if (tarImport(t)) { closeTariffs(); openTariffs(); } }); });
+    file.addEventListener('change', () => { clearTimeout(tm); const f = file.files[0]; file.value = ''; if (f) f.text().then(t => { if (tarImport(t)) { closeTariffs(); openTariffs(); } }); });
     if (!lists.tar.children.length) row('tar');
     if (!lists.snip.children.length) row('snip');
     requestAnimationFrame(() => wrap.querySelectorAll('textarea').forEach(grow));
     wrap.addEventListener('input', ev => {
+      if (ev.target === file) return;
       if (ev.target.matches('textarea')) grow(ev.target);
       const r = ev.target.closest('.bs-tr');
       if (r && r.classList.contains('bs-bad')) check(r);
