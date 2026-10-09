@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.35.3
+// @version      1.36.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1332,6 +1332,40 @@
     const n = jget(TAR_KEY, []).filter(x => t.includes(x.u)).length + deals.size;
     if (n) linksSet(linksGet() + n);
   }
+  // обмен тарифами и фразами: файл только с ними (без продаж, отчёта и прочего)
+  function tarExport() {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ app: 'bluesales-tariffs', t: Date.now(), tar: jget(TAR_KEY, []), snip: jget(SNIP_KEY, []) }, null, 1)], { type: 'application/json' }));
+    a.download = 'тарифы-' + ddmm(new Date()) + '.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  // слияние: совпало сокращение/ключ – берём из файла, остальное своё не трогаем
+  function tarImport(text) {
+    let j; try { j = JSON.parse(text); } catch (e) {}
+    // подходит и файл тарифов, и полная резервная копия помощника
+    if (j && j.app === 'bluesales-helper' && j.data) { const g = k => { try { return JSON.parse(j.data[k] || '[]'); } catch (e) { return []; } }; j = { app: 'bluesales-tariffs', tar: g(TAR_KEY), snip: g(SNIP_KEY) }; }
+    if (!j || j.app !== 'bluesales-tariffs') { alert('Это не файл тарифов помощника.'); return false; }
+    const str = v => typeof v === 'string' ? v.trim() : v == null ? '' : String(v).trim();
+    const inTar = (Array.isArray(j.tar) ? j.tar : []).map(x => ({ k: str(x && x.k), u: str(x && x.u), p: str(x && x.p).replace(/\s/g, ''), n: str(x && x.n) })).filter(x => x.k && /^https?:\/\/\S+$/.test(x.u));
+    const inSnip = (Array.isArray(j.snip) ? j.snip : []).map(x => ({ k: str(x && x.k), v: str(x && x.v) })).filter(x => x.k && x.v);
+    if (!inTar.length && !inSnip.length) { alert('В файле нет ни одного тарифа или фразы.'); return false; }
+    let added = 0, changed = 0;
+    const merge = (key, items, same) => {
+      const list = jget(key, []);
+      items.forEach(x => {
+        const i = list.findIndex(y => same(y.k) === same(x.k));
+        if (i < 0) { list.push(x); added++; } else if (JSON.stringify(list[i]) !== JSON.stringify(x)) { list[i] = x; changed++; }
+      });
+      return list;
+    };
+    const tar = merge(TAR_KEY, inTar, k => snipKey(k)), snip = merge(SNIP_KEY, inSnip, snipKey);
+    if (!added && !changed) { tarHint('✓ Всё из файла уже есть', true); return false; }
+    if (!confirm('Из файла: тарифов ' + inTar.length + ', фраз ' + inSnip.length + '.\nДобавится новых: ' + added + ', заменится с тем же сокращением: ' + changed + '.\nОстальные твои тарифы и фразы останутся. Загрузить?')) return false;
+    jset(TAR_KEY, tar); jset(SNIP_KEY, snip);
+    tarHint('✓ Загружено: новых ' + added + ', заменено ' + changed, true);
+    return true;
+  }
   function closeTariffs() { const o = document.getElementById('bsTarWrap'); if (o) o.remove(); }
   // редактор – табличка; сохраняется сам при каждом изменении
   function openTariffs() {
@@ -1348,7 +1382,10 @@
       '<div class="bs-tar-pane" data-pane="snip" hidden><div class="bs-tar-help">В сообщении пиши <code>{мат отзывы}</code> – подставится текст. Слова ключа – в любом порядке.</div>' +
       '<div class="bs-tr bs-sr bs-th"><span>Ключ</span><span>Текст или ссылка</span><span></span></div>' +
       '<div class="bs-tbody" data-list="snip"></div><button class="bs-tar-add" data-add="snip">+ Добавить фразу</button></div>' +
-      '<div class="bs-tar-foot"><span class="bs-tar-note">Сохраняется само · хранится только в этом браузере</span><span class="bs-tar-st"></span></div></div>';
+      '<div class="bs-tar-foot"><span class="bs-tar-note">Сохраняется само · хранится только в этом браузере</span><span class="bs-tar-st"></span>' +
+      '<button data-x="out" title="Скачать тарифы и фразы файлом – например, чтобы отдать коллеге">Выгрузить</button>' +
+      '<button data-x="in" title="Добавить тарифы и фразы из файла: с тем же сокращением – заменятся, остальные твои останутся">Загрузить</button>' +
+      '<input type="file" accept=".json,application/json" hidden></div></div>';
     document.body.appendChild(wrap);
     const lists = { tar: wrap.querySelector('[data-list="tar"]'), snip: wrap.querySelector('[data-list="snip"]') };
     const st = wrap.querySelector('.bs-tar-st');
@@ -1382,6 +1419,8 @@
     };
     jget(TAR_KEY, []).forEach(t => row('tar', t));
     jget(SNIP_KEY, []).forEach(t => row('snip', t));
+    const file = wrap.querySelector('input[type=file]');
+    file.addEventListener('change', () => { const f = file.files[0]; file.value = ''; if (f) f.text().then(t => { if (tarImport(t)) { closeTariffs(); openTariffs(); } }); });
     if (!lists.tar.children.length) row('tar');
     if (!lists.snip.children.length) row('snip');
     requestAnimationFrame(() => wrap.querySelectorAll('textarea').forEach(grow));
@@ -1393,6 +1432,7 @@
     });
     wrap.addEventListener('click', ev => {
       const t = ev.target, tab = t.dataset.tab, add = t.dataset.add;
+      if (t.dataset.x) { clearTimeout(tm); save(); return t.dataset.x === 'out' ? tarExport() : file.click(); }
       if (t.matches('.bs-rep-head i')) closeTariffs();
       else if (tab) {
         wrap.querySelectorAll('[data-tab]').forEach(e => e.classList.toggle('bs-on', e === t));
@@ -1436,6 +1476,8 @@
       '.bs-tar-add:hover{background:var(--bs-hover,#f5f7fa)}' +
       '.bs-tar-foot{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:11.5px}.bs-tar-note{color:var(--bs-muted,#888)}' +
       '.bs-tar-st{margin-left:auto;font-size:12px;color:#1f9d55}.bs-tar-st.bs-warn{color:#e04848}' +
+      '.bs-tar-foot button{padding:5px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font:inherit;font-size:12px;cursor:pointer}' +
+      '.bs-tar-foot button:hover{background:var(--bs-hover,#f5f7fa)}' +
       '.bs-tar-tabs{margin-bottom:10px}.bs-sale-share[hidden],#bsSale button[hidden]{display:none!important}.bs-tar-pane[hidden]{display:none}' +
       '#bsTarHint{position:fixed;z-index:2500;display:none;max-width:520px;padding:6px 10px;border-radius:9px;font-size:12.5px;background:rgba(229,62,62,.95);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.18)}' +
       '#bsTarHint.bs-ok{background:rgba(34,165,90,.95)}';
