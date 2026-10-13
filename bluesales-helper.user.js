@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.48.0
+// @version      1.49.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1979,14 +1979,18 @@
     try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; } catch (e) { alert('Не хватило места в браузере – скачай резервную копию и удали старые смены.'); return false; }
   }
   // продажи за прошлую дату – в смену этой даты в архиве (если её нет – создаём)
-  function histAddDay(d, xs) {
+  const histAddDay = (d, xs) => histAddDays([[d, xs]]);
+  // то же сразу за несколько дат: [[дата, продажи], …] – одним сохранением
+  function histAddDays(days) {
     const h = histGet();
-    let e = h.filter(x => x.d === d).pop();
-    if (!e) { e = { d, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }; h.push(e); }
-    xs.forEach(x => {
-      e.sales.push(histSale(x));
-      e.rep.bought = Math.round(((+e.rep.bought || 0) + saleShare(x)) * 100) / 100;
-      e.rep.sum = (+e.rep.sum || 0) + salePart(x);
+    days.forEach(([d, xs]) => {
+      let e = h.filter(x => x.d === d).pop();
+      if (!e) { e = { d, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }; h.push(e); }
+      xs.forEach(x => {
+        e.sales.push(histSale(x));
+        e.rep.bought = Math.round(((+e.rep.bought || 0) + saleShare(x)) * 100) / 100;
+        e.rep.sum = (+e.rep.sum || 0) + salePart(x);
+      });
     });
     return histSave(h);
   }
@@ -2099,7 +2103,8 @@
       Object.keys(onlyBy).forEach(d => { if (!seen.has(d)) list.push({ d, tab: 1, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }); });
       list.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
       // у дня: чего нет в таблице, что там записано по-другому, что есть только там; премия за день – у первой смены даты
-      const cnt = { miss: 0, bad: 0, only: 0 }, given = new Set();
+      // imp – сколько оплат «только в таблице» можно забрать (в идущую смену не добавляем)
+      const cnt = { miss: 0, bad: 0, only: 0, imp: 0 }, given = new Set();
       const info = list.map(e => {
         const first = !given.has(e.d);
         given.add(e.d);
@@ -2108,6 +2113,7 @@
         const o = { only, on, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
           miss: xs.filter(o => !tm.pair.has(o.k)).length, bad: xs.filter(o => tm.pair.has(o.k) && shBad(o.x)).length, any: xs.length + only.length };
         cnt.miss += o.miss; cnt.bad += o.bad; cnt.only += only.length;
+        if (!e.now) cnt.imp += only.length;
         return o;
       });
       const prem = tab ? Object.keys(tab.days).filter(inR).reduce((a, d) => a + tab.days[d], 0) : null;
@@ -2179,6 +2185,42 @@
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
       if (t.dataset.p) { histPer.p = t.dataset.p; repaint(); return autoCheck(); }
       if (a === 'tabsync') return autoCheck();
+      // за весь период: оплаты «только в таблице» – в историю по своим дням
+      if (a === 'tabimp') {
+        const [from, to] = histRange(), nowD = histAll().some(e => e.now) ? ddmm(new Date()) : null;
+        const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+        const rs = sheetTab && sheetTab.rows ? tabMatch().only.filter(r => r.d && r.d !== nowD && inR(r.d)) : [];
+        if (!rs.length) return paintBody();
+        const by = {};
+        rs.forEach(r => (by[r.d] = by[r.d] || []).push(r));
+        const ds = Object.keys(by).sort((a, b) => dmyDate(a) - dmyDate(b)), had = new Set(histGet().map(e => e.d));
+        const fresh = ds.filter(d => !had.has(d)).length;
+        if (!confirm('Забрать из таблицы ' + rs.length + ' ' + plural(rs.length, 'оплату', 'оплаты', 'оплат') + ' на ' + rub(rs.reduce((a, r) => a + r.sum, 0)) + ' ₽ за ' + ds.length + ' ' + plural(ds.length, 'день', 'дня', 'дней') +
+          ' (' + ds[0].slice(0, 5) + (ds.length > 1 ? ' – ' + ds[ds.length - 1].slice(0, 5) : '') + ')?\n\nКаждая встанет продажей в смену своего дня' +
+          (fresh ? ', ' + fresh + ' ' + plural(fresh, 'смена создастся', 'смены создадутся', 'смен создастся') + ' (отметь потом, твои ли они)' : '') + '. В таблице ничего не меняется.')) return;
+        if (histAddDays(ds.map(d => [d, by[d].map(tabSale)]))) tarHint('✓ Из таблицы в историю: ' + rs.length + ' за ' + ds.length + ' ' + plural(ds.length, 'день', 'дня', 'дней'), true);
+        return repaint();
+      }
+      // за весь период: продажи, которых нет в таблице, – туда, смена за сменой
+      if (a === 'tabexp') {
+        const [from, to] = histRange(), h = histGet();
+        const list = h.map((e, hi) => ({ hi, end: e.end, d: e.d, n: e.sales.filter(x => toSheet(x) && !x.sh).length }))
+          .filter(o => { const x = dmyDate(o.d); return o.n && (!from || x >= from) && (!to || x <= to); });
+        if (!list.length) return paintBody();
+        const n = list.reduce((a, o) => a + o.n, 0);
+        if (!confirm('Отправить в таблицу ' + n + ' ' + plural(n, 'продажу', 'продажи', 'продаж') + ' из ' + list.length + ' ' + plural(list.length, 'смены', 'смен', 'смен') + '?\n\nПовторы помощник не запишет, а если у человека в таблице уже есть оплата – спросит.')) return;
+        t.disabled = true;
+        const all = { add: 0, dup: 0, skip: 0, late: 0, err: [] };
+        return list.reduce((p, o, k) => p.then(() => {
+          t.textContent = 'Отправляю ' + (k + 1) + '/' + list.length + '…';
+          return sheetSend(o.hi, o.end).then(st => { ['add', 'dup', 'skip', 'late'].forEach(f => all[f] += st[f]); all.err.push(...st.err.map(m => o.d.slice(0, 5) + ': ' + m)); })
+            .catch(err => { all.err.push(o.d.slice(0, 5) + ': ' + err.message); });
+        }), Promise.resolve()).then(() => {
+          const ok = !all.err.length && !all.skip && !all.late;
+          tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(Object.assign({ n, rows: [] }, all)), ok);
+          autoCheck();
+        });
+      }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
       // оплата есть только в таблице – добавить её продажей в смену того дня (дня нет – создастся)
@@ -2189,9 +2231,7 @@
         const d = rs[0].d;
         if (!confirm((rs.length > 1 ? 'Добавить ' + rs.length + ' оплаты из таблицы' : 'Добавить оплату из таблицы (' + (rs[0].name || 'без продукта') + ', ' + rub(rs[0].sum) + ' ₽)') +
           ' в смену ' + d + '? Продано и сумма этой смены вырастут. ФИО и тариф потом можно поправить в продаже.')) return;
-        const xs = rs.map((r, n) => ({ id: Date.now().toString(36) + n, dlg: r.dlg, name: r.name, price: r.sum, disc: '', mops: [], share: shareFor(r.mops || 1), cnt: true,
-          fio: '', who: '', email: r.email, pay: PAYS.some(p => p[0] === r.pay) ? r.pay : undefined, sh: 1, shT: shTab(r) }));
-        if (histAddDay(d, xs)) tarHint('✓ Добавлено в смену ' + d + ': ' + xs.length, true);
+        if (histAddDay(d, rs.map(tabSale))) tarHint('✓ Добавлено в смену ' + d + ': ' + rs.length, true);
         return repaint();
       }
       if (a === 'sheet' || a === 'sheet1') {
@@ -2558,7 +2598,7 @@
   // строка над списком смен: премия за месяц (N1) и что не сходится с таблицей
   function tabLine(from, to, cnt) {
     if (!sheetUrl()) return '';
-    const wrap = (t, warn, btn) => '<div class="bs-hist-tab' + (warn ? ' bs-warn' : '') + '"><span>📊 ' + t + '</span>' + (btn ? '<button data-a="tabsync" title="Заново прочитать таблицу и сверить с историей">Сверить</button>' : '') + '</div>';
+    const wrap = (t, warn, btn, more) => '<div class="bs-hist-tab' + (warn ? ' bs-warn' : '') + '"><span>📊 ' + t + '</span>' + (more || '') + (btn ? '<button data-a="tabsync" title="Заново прочитать таблицу и сверить с историей">Сверить</button>' : '') + '</div>';
     if (sheetBusy) return wrap('Сверяю с таблицей…');
     if (!sheetTab) return '';
     if (sheetTab.old) return wrap('Обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом новая версия развёртывания) – тогда тут будет премия и сверка всех строк', true);
@@ -2567,8 +2607,13 @@
     const months = sheetTab.months.filter(m => m.y * 100 + m.m >= lo && m.y * 100 + m.m <= hi && (from || m.sheet));
     const bad = cnt.miss + cnt.bad + cnt.only;
     return wrap(months.map(m => m.sheet ? (m.prem != null ? 'премия за ' + MONTHS[m.m - 1] + ': <b>' + rub(m.prem) + ' ₽</b>' : '') : 'нет листа за ' + MONTHS[m.m - 1]).filter(Boolean)
-      .concat(bad ? '⚠ ' + [cnt.miss && 'нет в таблице ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean).join(', ') : 'с историей всё сходится ✓').join(' · '), bad, 1);
+      .concat(bad ? '⚠ ' + [cnt.miss && 'нет в таблице ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean).join(', ') : 'с историей всё сходится ✓').join(' · '), bad, 1,
+      (cnt.imp ? '<button data-a="tabimp" title="Все оплаты за период, которых нет в помощнике, – в историю, каждую в смену своего дня">⬇ Забрать ' + cnt.imp + '</button>' : '') +
+      (cnt.miss ? '<button data-a="tabexp" title="Все продажи за период, которых нет в таблице, – в таблицу">⬆ Отправить ' + cnt.miss + '</button>' : ''));
   }
+  // строка таблицы → продажа в историю (уже записана в таблице – сразу ✓). ФИО и тариф потом можно поправить
+  const tabSale = (r, n) => ({ id: Date.now().toString(36) + r.row + 'r' + (n || 0), dlg: r.dlg, name: r.name, price: r.sum, disc: '', mops: [], share: shareFor(r.mops || 1), cnt: true,
+    fio: '', who: '', email: r.email, pay: PAYS.some(p => p[0] === r.pay) ? r.pay : undefined, sh: 1, shT: shTab(r) });
   // оплаты дня, которые есть только в таблице
   function onlyHtml(e, rs) {
     if (!rs.length) return '';
@@ -2613,7 +2658,7 @@
     st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата – перепроверь',
     st.mops && '⚠ у ' + st.mops + ' продаж в таблице записано не то, что в помощнике (сумма, почта или менеджеры) – нажми «↻ табл.» или «Исправить»'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
-    [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
+    [st.add && 'добавлено ' + st.add + (st.rows.length ? ' (' + st.rows.join('; ') + ')' : ''), st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
   function sheetLine(e) {
     const xs = e.sales.filter(toSheet);
@@ -3008,7 +3053,7 @@
       '.bs-hist-row>b .bs-hist-mine.bs-warn{color:#d97706;background:rgba(245,158,11,.12)}' +
       '.bs-hist-tab{display:flex;align-items:center;gap:8px;margin:-2px 0 10px;padding:6px 10px;border-radius:9px;background:var(--bs-hover,#f5f7fa);font-size:12px;color:var(--bs-muted,#888)}.bs-hist-tab span{flex:1}.bs-hist-tab b{color:var(--bs-text,#222);font-variant-numeric:tabular-nums}' +
       '.bs-hist-tab.bs-warn{background:rgba(245,158,11,.1);color:#b45309}' +
-      '.bs-hist-tab button{padding:2px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer}.bs-hist-tab button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-tab button{padding:2px 10px;white-space:nowrap;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer}.bs-hist-tab button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-sales .bs-hist-onlyh{margin-top:4px;color:#d97706}.bs-hist-sales .bs-hist-only{cursor:default}.bs-hist-only small{color:var(--bs-muted,#888)}.bs-hist-sgap{flex:none;width:18px}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
       '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
