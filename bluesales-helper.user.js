@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.50.2
+// @version      1.51.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1751,6 +1751,10 @@
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
     if (!old) x.share = shareFor(x.mops.length);
+    // новую продажу можно отнести к прошлому дню – тогда она уйдёт в смену этого дня в истории, а не в текущую
+    const curD = repSaved().d || ddmm(new Date());
+    let day = curD;
+    const past = () => day !== curD;
     // по этому чату сегодня уже есть продажа – подсказываем, чтобы не посчитать дважды (доплата/бронь – это нормально, тогда просто заполняем дальше)
     const twins = old ? [] : list.filter(s => s.dlg === dlg);
     const wrap = document.createElement('div');
@@ -1760,6 +1764,7 @@
       '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
       twins.map(s => '<div class="bs-sale-dup">По этому чату сегодня уже есть продажа: <b>' + esc(s.name || 'без тарифа') + ' · ' + rub(saleTotal(s)) + ' ₽</b>. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.<button data-a="twin" data-id="' + s.id + '">Открыть</button></div>').join('') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
+      (old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
       '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
       field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') + field('disc', 'Скидка', '0 – в рублях или 10%') +
       '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
@@ -1782,11 +1787,17 @@
       payPaint(box, x, mine);
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
       const part = Math.round(saleTotal(x) * x.share);
-      note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
+      note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + (past() ? 'В смену ' + day.slice(0, 5) + ' в истории' : 'В отчёт смены') + ': продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
     box.addEventListener('input', ev => {
       const k = ev.target.dataset.k;
       if (!k || k === 'tar') return;
+      if (k === 'day') {
+        const v = ev.target.value && new Date(ev.target.value + 'T00:00');
+        day = v && !isNaN(v) && v <= new Date() ? ddmm(v) : curD;
+        box.querySelector('[data-a="copy"]').textContent = past() ? 'Добавить в ' + day.slice(0, 5) + ' и скопировать' : 'Сохранить и скопировать';
+        return paint();
+      }
       x[k] = ev.target.value;
       paint();
     });
@@ -1798,6 +1809,12 @@
       paint();
     });
     const save = () => {
+      if (past()) {
+        x.cnt = saleMine(x);
+        if (!histAddDay(day, [x])) return false;
+        box.querySelector('.bs-tar-st').textContent = 'Добавлено в ' + day.slice(0, 5);
+        return true;
+      }
       const all = salesGet(), i = all.findIndex(s => s.id === x.id), was = i >= 0 ? all[i] : null;
       x.cnt = saleMine(x);
       const dShare = r2(saleShare(x) - saleShare(was));
@@ -1806,7 +1823,9 @@
       if (i >= 0) all[i] = x; else all.push(x);
       salesSet(all);
       box.querySelector('.bs-tar-st').textContent = 'Сохранено';
+      return true;
     };
+    const saved = () => past() ? '✓ Продажа добавлена в смену ' + day.slice(0, 5) + ' (История)' : '✓ Продажа сохранена';
     box.addEventListener('click', ev => {
       const em = ev.target.closest('em'), a = ev.target.dataset.a;
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
@@ -1820,11 +1839,11 @@
         paint();
       } else if (a === 'back') openSales();
       else if (a === 'twin') openSale(ev.target.dataset.id, fromList);
-      else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); fromList ? openSales() : closeSale(); tarHint('✓ Продажа сохранена', true); }
+      else if (a === 'save') { if (!x.name) return inp('tar').focus(); if (!save()) return; fromList ? openSales() : closeSale(); tarHint(saved(), true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
-        save();
-        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(x.cnt ? '✓ Продажа сохранена, текст скопирован' : '✓ Сохранено без учёта в сумме, текст скопирован', true); });
+        if (!save()) return;
+        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(x.cnt ? saved() + ', текст скопирован' : '✓ Сохранено без учёта в сумме, текст скопирован', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
