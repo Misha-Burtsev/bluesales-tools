@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.41.1
+// @version      1.42.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2499,6 +2499,15 @@
     return res;
   }
   // day – 'ГГГГ-ММ-ДД': продажи за прошлый день уходят в «Историю», за сегодня – в текущую смену
+  // та же продажа уже есть в списке: тот же чат и тариф или цена – тогда дописываем пустые поля (почту, имя…) из отчёта
+  const impSame = (s, x) => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price);
+  const IMP_FILL = { email: 'почту', fio: 'имя', nick: 'ник', src: 'источник', quote: 'откуда узнал' };
+  // today – продажа текущей смены (там хранится всё), иначе из истории (только почта и имя); put – записать
+  function impFill(s, x, today, put) {
+    const ks = (today ? Object.keys(IMP_FILL) : ['email', 'fio']).filter(k => !String(s[k] || '').trim() && String(x[k] || '').trim());
+    if (put) ks.forEach(k => { s[k] = x[k]; if (k === 'fio' && !s.who) s.who = x.fio; });
+    return ks;
+  }
   function openImport(day) {
     closeSale();
     if (!meSet()) return askMe();
@@ -2519,18 +2528,19 @@
       const td = target(), me = meName();
       box.querySelector('.bs-imp-day u').textContent = td ? 'прошлый день – продажи уйдут в «Историю»' : 'сегодня – в текущую смену';
       const have = td ? histGet().filter(e => e.d === td).flatMap(e => e.sales) : salesGet();
-      found = parseSales(ta.value).map(x => Object.assign(x, {
-        mine: !x.bad && x.mops.includes(me),
-        dup: have.some(s => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price)),
-      }));
-      const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine);
+      found = parseSales(ta.value).map(x => {
+        const twin = x.bad ? null : have.find(s => impSame(s, x));
+        return Object.assign(x, { mine: !x.bad && x.mops.includes(me), dup: !!twin, fill: twin ? impFill(twin, x, !td) : [] });
+      });
+      const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine), fills = found.filter(x => x.fill.length);
       out.innerHTML = found.length ? found.map(x =>
         '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
         '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – без учёта в сумме') + '</u></div>').join('')
+        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – без учёта в сумме') + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
-      btn.disabled = !ok.length;
-      btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
+      btn.disabled = !ok.length && !fills.length;
+      btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить') +
+        (fills.length ? ' · дописать ' + fills.length : '');
     };
     ta.addEventListener('input', paint);
     dayInp.addEventListener('change', paint);
@@ -2540,14 +2550,21 @@
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (a === 'back') return openSales(target() ? 'hist' : 'shift');
       if (a !== 'add') return;
-      const td = target();
+      const td = target(), fills = found.filter(x => x.fill.length);
+      const done = n => '✓ ' + [n && 'добавлено продаж: ' + n, fills.length && 'дописано: ' + fills.length].filter(Boolean).join(', ');
       if (td) {
-        const xs = found.filter(x => !x.bad && !x.dup).map(f => ({ dlg: f.dlg, name: f.name, price: f.price, disc: f.disc, mops: f.mops, share: shareFor(f.mops.length), fio: f.fio, who: f.fio, cnt: f.mine }));
-        if (!histAddDay(td, xs)) return;
+        if (fills.length) {
+          const h = histGet();
+          h.filter(e => e.d === td).forEach(e => e.sales.forEach(sl => { const f = fills.find(x => impSame(sl, x)); if (f) impFill(sl, f, false, true); }));
+          if (!histSave(h)) return;
+        }
+        const xs = found.filter(x => !x.bad && !x.dup).map(f => ({ dlg: f.dlg, name: f.name, price: f.price, disc: f.disc, mops: f.mops, share: shareFor(f.mops.length), fio: f.fio, who: f.fio, email: f.email, cnt: f.mine }));
+        if (xs.length && !histAddDay(td, xs)) return;
         openSales('hist');
-        return tarHint('✓ В историю за ' + td + ' добавлено продаж: ' + xs.length, true);
+        return tarHint(done(xs.length) + ' (история за ' + td + ')', true);
       }
       const all = salesGet();
+      all.forEach(sl => { const f = fills.find(x => impSame(sl, x)); if (f) impFill(sl, f, true, true); });
       let n = 0;
       found.filter(x => !x.bad && !x.dup).forEach(f => {
         const x = { id: Date.now().toString(36) + (n++), dlg: f.dlg, t: Date.now(), tar: 'own', name: f.name, price: f.price, disc: f.disc,
@@ -2559,7 +2576,7 @@
       });
       salesSet(all);
       openSales();
-      tarHint('✓ Добавлено продаж: ' + n, true);
+      tarHint(done(n), true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
     ta.focus();
