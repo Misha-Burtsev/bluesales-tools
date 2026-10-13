@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.50.0
+// @version      1.50.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2244,11 +2244,12 @@
         });
       }
       // таблица отдела: «⬇ Смены» – дни с цифрами, которых нет в истории (лиды, чаты, ссылки; продажи – из своей таблицы);
-      // «⬆ В отдел» – продано и сумма (и пустые лиды, чаты, ссылки) из помощника, со списком перед записью
+      // «⬆ В отдел» – продано и сумма (и пустые лиды, чаты, ссылки) из помощника, со списком перед записью; в раскрытой смене – за один день
       if (a === 'teamimp' || a === 'teamexp') {
         const [from, to] = histRange(), h = histGet(), days = teamTab && teamTab.days || {};
         const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
-        const ds = Object.keys(days).filter(inR).sort((a, b) => dmyDate(a) - dmyDate(b));
+        // у кнопки в раскрытой смене – только её день
+        const one = t.dataset.d, ds = one ? (days[one] ? [one] : []) : Object.keys(days).filter(inR).sort((a, b) => dmyDate(a) - dmyDate(b));
         if (a === 'teamimp') {
           const add = ds.filter(d => typeof days[d].leads === 'number' && d !== ddmm(new Date()) && !h.some(e => e.d === d));
           if (!add.length) return paintBody();
@@ -2905,7 +2906,8 @@
     if (!t) return '';
     const bad = c.put.concat(c.over);
     return '<p class="bs-hist-move"><span>Отдел: ' + TEAM_K.filter(([k]) => k in t).map(([k, l]) => l + ' ' + (t[k] == null ? '–' : typeof t[k] === 'string' ? esc(t[k]) : k === 'sum' ? rub(t[k]) + ' ₽' : k === 'bought' ? frac(t[k]) : t[k])).join(' · ') +
-      (bad.length ? ' · <b class="bs-warn" title="' + esc(teamList(bad)) + '">⚠ ' + [c.put.length && 'дописать ' + c.put.map(x => teamLbl(x.k)).join(', '), c.over.length && 'у тебя ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.v)).join(', ')].filter(Boolean).join('; ') + '</b>' : '') + '</span></p>';
+      (bad.length ? ' · <b class="bs-warn" title="' + esc(teamList(bad)) + '">⚠ ' + [c.put.length && 'дописать ' + c.put.map(x => teamLbl(x.k)).join(', '), c.over.length && 'у тебя ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.v)).join(', ')].filter(Boolean).join('; ') + '</b>' : '') + '</span>' +
+      (bad.length ? '<button data-a="teamexp" data-d="' + d + '" title="Записать в таблицу отдела цифры этого дня – перед записью покажу список">⬆ В отдел</button>' : '') + '</p>';
   }
   // после «Закрыть смену»: цифры дня – в пустые клетки его столбца (и вместо «выходного», если были оплаты)
   async function teamCloseDay(d) {
