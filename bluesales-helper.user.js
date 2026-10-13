@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.50.1
+// @version      1.50.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2744,13 +2744,15 @@
       'При «Закрыть смену» цифры дня уходят в пустые клетки его столбца. Чужие блоки и формулы не трогаются. Работает через тот же скрипт: обнови его код и сделай новую версию развёртывания – Google заново спросит доступ, теперь к таблицам.</div>' +
       '<label><span>Ссылка на таблицу отдела</span><input data-k="turl" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label>' +
       '<label><span>Имя в таблице <small>(как в столбце A)</small></span><input data-k="tname" placeholder="Имя"></label>' +
+      '<label><span>Брать с <small>(пусто – с месяца первой смены в истории)</small></span><input data-k="tfrom" type="date"></label>' +
       '<div class="bs-sale-note bs-team-note"></div>' +
       '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span></span><button data-a="team">Проверить и сохранить</button></div></div></div>';
     document.body.appendChild(wrap);
     const inp = wrap.querySelector('[data-k=url]'), note = wrap.querySelector('.bs-sale-note');
     const tUrl = wrap.querySelector('[data-k=turl]'), tName = wrap.querySelector('[data-k=tname]'), tNote = wrap.querySelector('.bs-team-note');
     inp.value = sheetUrl();
-    tUrl.value = teamCfg().url || ''; tName.value = teamCfg().name || '';
+    const tFrom = wrap.querySelector('[data-k=tfrom]');
+    tUrl.value = teamCfg().url || ''; tName.value = teamCfg().name || ''; tFrom.value = teamCfg().from || '';
     wrap.addEventListener('click', async ev => {
       const t = ev.target, a = t.dataset.a;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -2786,11 +2788,12 @@
         try {
           const now = new Date(), j = await sheetPost({ team: { url, name, from: ddmm(now), to: ddmm(now) } }, surl);
           if (!j.days) throw new Error('обнови код скрипта (кнопка «Скопировать код» выше) и сделай новую версию развёртывания');
-          jset(TEAM_KEY, { url, name });
+          jset(TEAM_KEY, Object.assign({ url, name }, /^\d{4}-\d\d-\d\d$/.test(tFrom.value) ? { from: tFrom.value } : {}));
           teamTab = null;
           const miss = TEAM_K.filter(([k]) => !(j.rows || []).includes(k)).map(x => x[1]);
           tNote.textContent = '✓ Подключено. Лист «' + j.sheet + '», нашёл строки: ' + TEAM_K.filter(([k]) => (j.rows || []).includes(k)).map(x => x[1]).join(', ') +
-            (miss.length ? ' (нет: ' + miss.join(', ') + ')' : '') + (j.days[ddmm(now)] ? '' : '. Столбца за сегодня пока нет');
+            (miss.length ? ' (нет: ' + miss.join(', ') + ')' : '') + (j.days[ddmm(now)] ? '' : '. Столбца за сегодня пока нет') +
+            (teamStart() ? '. Беру с ' + ddmm(teamStart()) : '');
         } catch (err) { tNote.textContent = 'Не вышло: ' + err.message; }
         t.disabled = false;
         return;
@@ -2814,6 +2817,15 @@
   // ими дополняем старые смены. Продано и сумма – правда в помощнике: их пишем в отдел (в пустые клетки сразу, поверх цифр – после «ок»)
   const TEAM_KEY = 'bsTeam', TEAM_K = [['leads', 'лиды'], ['chats', 'чаты'], ['links', 'ссылки'], ['bought', 'продано'], ['sum', 'сумма']];
   const teamCfg = () => jget(TEAM_KEY, {});
+  // с какого дня брать таблицу отдела: из настроек, иначе – с 1-го числа месяца первой смены в истории (раньше – не нужно)
+  function teamStart() {
+    const f = teamCfg().from;
+    if (f) return new Date(f + 'T00:00');
+    const ds = histGet().map(e => dmyDate(e.d)).filter(d => !isNaN(d));
+    if (!ds.length) return null;
+    const m = new Date(Math.min(...ds));
+    return new Date(m.getFullYear(), m.getMonth(), 1);
+  }
   const teamOn = () => !!(sheetUrl() && teamCfg().url && teamCfg().name);
   // teamTab – последнее чтение: { days: {дата: {leads, …}}, sheet, got – скольким сменам дописали } | { err }
   let teamTab = null, teamBusy = false;
@@ -2834,9 +2846,10 @@
   }
   const teamMsg = st => [st.ok && 'записал ' + st.ok + ' ' + plural(st.ok, 'клетку', 'клетки', 'клеток'), st.changed && '⚠ ' + st.changed + ' не тронул – там уже вписали другое, сверь заново',
     st.formula && st.formula + ' – там формула, не трогал', st.nocol && st.nocol + ' – нет столбца этой даты', st.norow && st.norow + ' – нет такой строки в блоке'].filter(Boolean).join(' · ') || 'записывать нечего';
-  // за период (весь – с начала таблицы): читаем свой блок и дополняем им историю
+  // за период (весь – с teamStart): читаем свой блок и дополняем им историю
   async function teamFetch(from, to) {
-    const j = await teamRead(from, to || new Date());
+    const st = teamStart();
+    const j = await teamRead(st && (!from || from < st) ? st : from, to || new Date());
     teamTab = { days: j.days, sheet: j.sheet, got: teamApply(j.days) };
   }
   // смены, которые уже есть: «моя / не моя» (если не отмечена) – по блоку: цифры – моя, «выходной» – не моя;
