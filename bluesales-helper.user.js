@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.52.0
+// @version      1.52.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2798,7 +2798,7 @@
       '<li>Развернуть → Новое развёртывание → «Веб-приложение»: от имени «меня», доступ «Все».</li><li>Вставь сюда ссылку, которая кончается на /exec.</li></ol></details>' +
       '<label><span>Ссылка на скрипт</span><input data-k="url" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false"></label>' +
       '<div class="bs-sale-note"></div>' +
-      '<div class="bs-rep-btns">' + (sheetUrl() ? '<button data-a="off" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-tar-st"></span><button data-a="check" class="bs-main">Сохранить</button></div></section>' +
+      '<div class="bs-rep-btns">' + (sheetUrl() ? '<button data-a="off" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="check" class="bs-main">Сохранить</button></div></section>' +
       '<section class="bs-team-set"><h4>Таблица отдела <small>необязательно</small></h4><p class="bs-sheet-sub">Оттуда – лиды, чаты и ссылки для старых смен, туда – продано и сумма.</p>' +
       '<details><summary>Подробнее</summary><div class="bs-tar-help">По твоему блоку помощник отмечает «моя / не моя» (цифры – моя, «выходной» – нет). В пустые клетки пишет сразу, поверх чужих цифр – только после твоего «ок». ' +
       'Чужие блоки и формулы не трогает. Работает через тот же скрипт – если он старый, обнови код и сделай новую версию развёртывания.</div></details>' +
@@ -2806,7 +2806,7 @@
       '<div class="bs-sheet-2"><label><span>Имя, как в столбце A</span><input data-k="tname" placeholder="Имя"></label>' +
       '<label title="Пусто – с месяца первой смены в истории"><span>Брать с</span><input data-k="tfrom" type="date"></label></div>' +
       '<div class="bs-sale-note bs-team-note"></div>' +
-      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span></span><button data-a="team">Сохранить</button></div></section></div>';
+      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="team" class="bs-main">Сохранить</button></div></section></div>';
     document.body.appendChild(wrap);
     const inp = wrap.querySelector('[data-k=url]'), note = wrap.querySelector('.bs-sale-note');
     const tUrl = wrap.querySelector('[data-k=turl]'), tName = wrap.querySelector('[data-k=tname]'), tNote = wrap.querySelector('.bs-team-note');
@@ -3361,7 +3361,7 @@
       '.bs-sheet details{margin:0 0 10px;font-size:12px}.bs-sheet summary{width:max-content;cursor:pointer;color:var(--bs-accent,#3b82f6);user-select:none}.bs-sheet details .bs-tar-help{margin:6px 0 0}' +
       '.bs-sheet section label{margin-bottom:8px}.bs-sheet-2{display:grid;grid-template-columns:1fr 150px;gap:10px}' +
       '.bs-rep-head .bs-back{display:flex;margin:0 6px 0 -6px;padding:2px;border-radius:6px}.bs-rep-head .bs-back:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}' +
-      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{min-height:16px;margin-top:6px;word-break:break-word}.bs-team-set{margin-top:16px;padding-top:14px;border-top:1px solid var(--bs-border,#D9E0E7)}#bsSale.bs-sheet{max-height:90vh;overflow:auto}' +
+      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{margin-top:6px;word-break:break-word}.bs-sheet .bs-sale-note:empty{display:none}.bs-sheet .bs-rep-btns{align-items:center}.bs-sheet .bs-sp{flex:1}.bs-team-set{margin-top:16px;padding-top:14px;border-top:1px solid var(--bs-border,#D9E0E7)}#bsSale.bs-sheet{max-height:90vh;overflow:auto}' +
       '.bs-sale-pay small{font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hrep-sheet{margin-bottom:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222)}.bs-hrep-sheet[data-st=ok]{color:#22a55a}.bs-hrep-sheet[data-st=err]{color:#e04848}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
