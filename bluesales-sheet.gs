@@ -24,8 +24,9 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
+    const memo = {};   // лист месяца читаем один раз на весь запрос
     if (body.find) return out({ ok: true, res: body.find.map(s => {
-      try { return findSale(ss, s) || { st: 'miss' }; } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
+      try { return findSale(ss, s, null, memo) || { st: 'miss' }; } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
     }) });
     const res = (body.sales || []).map(s => {
       try { return addSale(ss, s); } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
@@ -97,13 +98,17 @@ function plan(A, O, key) {
 }
 
 // уже есть: тот же чат и сумма на листе этого месяца (продукт руками могли записать по-своему)
-function findSale(ss, s, got) {
+function findSale(ss, s, got, memo) {
   const p = dayOf(s.d);
   if (!p) throw new Error('Нет даты продажи');
-  const sh = pickSheet(ss, p);
-  const n = Math.max(sh.getLastRow(), 2);
-  const vals = sh.getRange(1, 1, n, WIDTH).getValues();
-  const forms = sh.getRange(1, COL.link, n, 1).getFormulas();
+  const mk = p.y * 100 + p.m;
+  let c = memo && memo[mk];
+  if (!c) {
+    const sh = pickSheet(ss, p), n = Math.max(sh.getLastRow(), 2);
+    c = { sh, n, vals: sh.getRange(1, 1, n, WIDTH).getValues(), forms: sh.getRange(1, COL.link, n, 1).getFormulas() };
+    if (memo) memo[mk] = c;
+  }
+  const { sh, n, vals, forms } = c;
   if (got) Object.assign(got, { p, sh, n, vals });
   const dlg = 'dialogId=' + s.dlg;
   for (let r = 2; r <= n; r++) {

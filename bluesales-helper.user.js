@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.43.0
+// @version      1.44.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2082,14 +2082,30 @@
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
     };
     const repaint = () => { paintPer(); paintBody(); };
+    // сама сверяет с таблицей закрытые смены за период – вдруг строки удалили или дописали руками
+    const autoCheck = () => {
+      if (!sheetUrl()) return;
+      const [from, to] = histRange();
+      const list = histGet().map((e, hi) => ({ hi, end: e.end, e })).filter(({ e }) => {
+        const d = dmyDate(e.d);
+        return (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+      }).map(({ hi, end }) => ({ hi, end }));
+      if (!list.length) return;
+      const tok = ++sheetTok;
+      sheetBusy = new Set(list.map(o => o.hi + ':' + o.end));
+      paintBody();
+      sheetCheck(list).then(st => { sheetAutoErr = st.err.length ? st.err.join('; ') : ''; }, err => { sheetAutoErr = err.message; })
+        .then(() => { if (tok !== sheetTok) return; sheetBusy = null; if (body.isConnected) paintBody(); });
+    };
     repaint();
+    autoCheck();
     const find = row => { const [hi, end] = row.dataset.k.split(':'), h = histGet(); return h[+hi] && String(h[+hi].end) === end ? { h, i: +hi } : null; };
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'bak') return openBackup();
       if (a === 'sheetset') return openSheet();
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
-      if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
+      if (t.dataset.p) { histPer.p = t.dataset.p; repaint(); return autoCheck(); }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
       if (a === 'sheet' || a === 'sheet1') {
@@ -2103,7 +2119,7 @@
         const f = find(row);
         if (!f) return paintBody();
         t.disabled = true; t.textContent = 'Сверяю…';
-        return sheetCheck(f.i, f.h[f.i].end).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
+        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { sheetAutoErr = ''; return st; }).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
           .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
       }
       if (a === 'hrep') {
@@ -2295,25 +2311,33 @@
     return st;
   }
   // сверка с таблицей: какие продажи смены там правда есть (строки могли удалить руками) – правим отметки sh
-  async function sheetCheck(hi, end) {
-    const e = histGet()[hi];
-    if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
-    const idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]));
-    const j = await sheetPost({ find: idx.map(i => sheetSale(e.d, e.sales[i])) });
-    if (!Array.isArray(j.res) || j.res.length !== idx.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
-    const h = histGet(), e2 = h[hi], same = e2 && String(e2.end) === String(end);
-    const st = { n: idx.length, here: 0, gone: 0, miss: 0, err: [] };
-    idx.forEach((i, k) => {
-      const r = j.res[k], x = same && e2.sales[i];
-      if (r.st === 'err') return void st.err.push(r.msg);
-      const ok = x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name;
-      if (r.st === 'dup') { st.here++; if (ok) x.sh = 1; return; }
-      if (e.sales[i].sh) st.gone++; else st.miss++;
-      if (ok) delete x.sh;
+  // list – смены [{hi, end}]; одним запросом
+  async function sheetCheck(list) {
+    const h0 = histGet(), items = [];
+    list.forEach(({ hi, end }) => {
+      const e = h0[hi];
+      if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+      e.sales.forEach((x, i) => { if (toSheet(x)) items.push({ hi, end, i, x, d: e.d }); });
     });
-    if (same) histSave(h);
+    const st = { n: items.length, here: 0, gone: 0, miss: 0, err: [] };
+    if (!items.length) return st;
+    const j = await sheetPost({ find: items.map(o => sheetSale(o.d, o.x)) });
+    if (!Array.isArray(j.res) || j.res.length !== items.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
+    const h = histGet();
+    let ch = false;
+    items.forEach((o, k) => {
+      const r = j.res[k], e2 = h[o.hi], x = e2 && String(e2.end) === String(o.end) && e2.sales[o.i];
+      const ok = x && x.dlg === o.x.dlg && x.name === o.x.name;
+      if (r.st === 'err') return void st.err.push(r.msg);
+      if (r.st === 'dup') { st.here++; if (ok && !x.sh) { x.sh = 1; ch = true; } return; }
+      if (o.x.sh) st.gone++; else st.miss++;
+      if (ok && x.sh) { delete x.sh; ch = true; }
+    });
+    if (ch) histSave(h);
     return st;
   }
+  // сверка при открытии истории: какие смены сейчас сверяются и чем кончилась прошлая
+  let sheetBusy = null, sheetAutoErr = '', sheetTok = 0;
   const checkMsg = st => [st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
     st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.here < st.n - st.err.length && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
@@ -2323,7 +2347,9 @@
     const xs = e.sales.filter(toSheet);
     if (e.now || !sheetUrl() || !xs.length) return '';
     const done = xs.filter(x => x.sh).length;
-    return '<p class="bs-hist-move"><span>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) + '</span>' +
+    if (sheetBusy && sheetBusy.has(e.hi + ':' + e.end)) return '<p class="bs-hist-move"><span>Таблица: сверяю…</span></p>';
+    return '<p class="bs-hist-move"><span' + (sheetAutoErr ? ' title="' + esc(sheetAutoErr) + '"' : '') + '>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) +
+      (sheetAutoErr ? ' · не сверилась: ' + esc(sheetAutoErr) : '') + '</span>' +
       '<button data-a="sheetchk" title="Посмотреть в таблице, какие продажи смены там правда есть – отметки у продаж обновятся">Сверить</button>' +
       (done < xs.length ? '<button data-a="sheet" title="Отправить все продажи без ✓">Отправить' + (xs.length - done > 1 ? ' все ' + (xs.length - done) : '') + '</button>' : '') + '</p>';
   }
