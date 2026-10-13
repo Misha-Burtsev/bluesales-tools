@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.39.0
+// @version      1.40.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1197,6 +1197,8 @@
   }
   function reportInit() {
     if (document.getElementById('bsRepCss')) return;
+    setTimeout(repAuto, 5000);
+    setInterval(repAuto, 60e3);
     const st = document.createElement('style');
     st.id = 'bsRepCss';
     st.textContent =
@@ -1662,7 +1664,10 @@
     const days = [...new Set([rOld && r.d, sOld && sl.d].filter(Boolean))];
     for (const d of days) {
       const hasRep = rOld && r.d === d;
-      const ok = histPush({ d, end: Date.now(), rep: hasRep ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [], text: hasRep ? r.text || repText(r, repFem()) : '' });
+      const e = { d, end: Date.now(), rep: hasRep ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [], text: hasRep ? r.text || repText(r, repFem()) : '' };
+      // день сменился сам, без «Закрыть смену» – лиды и чаты досчитает repAuto
+      if (!all) Object.assign(e, { fix: 1 }, hasRep && r.text != null ? { own: 1 } : {});
+      const ok = histPush(e);
       if (!ok) return false;   // не влезло – ничего не стираем
     }
     if (rOld || r.d !== today) jset(REP_KEY, { d: today });
@@ -1832,19 +1837,51 @@
     paintSold(); paintLinks();
   }
   // закрыть смену: досчитываем лиды и чаты за день, собираем отчёт – смена вместе с ним уходит в историю
+  async function countDay(d, m) {
+    const form = await clientsForm();
+    const [leads, blocks, chats] = await Promise.all([
+      countClients(form, 'psFirstContact', d, d, ST_ALL, m),
+      countClients(form, 'psFirstContact', d, d, ST_BLOCK, m),
+      countClients(form, 'psLastContact', d, d, ST_ALL, m),
+    ]);
+    return { leads, blocks, chats };
+  }
+  // отчёт сам: пока открыта CRM, цифры дня обновляются в фоне, а смену, закрытую сменой даты, досчитываем.
+  // Лиды и блоки за прошлый день считаются точно; чаты задним числом занижаются (у клиента уже новый «последний контакт»),
+  // поэтому для чатов берём большее из последнего фонового подсчёта и пересчёта
+  const AUTO_KEY = 'bsRepAuto', AUTO_EVERY = 25 * 60e3;
+  let autoBusy = false, autoFail = 0;
+  async function repAuto() {
+    if (autoBusy || Date.now() - autoFail < 5 * 60e3) return;
+    autoBusy = true;
+    try {
+      const e = histGet().find(x => x.fix);
+      if (e) {
+        const got = await countDay(e.d, meId());
+        const h = histGet(), e2 = h.find(x => x.fix && x.end === e.end && x.d === e.d);
+        if (e2) {
+          Object.assign(e2.rep, { leads: got.leads, blocks: got.blocks, chats: Math.max(+e2.rep.chats || 0, got.chats) });
+          if (e2.rep.rem == null) e2.rep.rem = 0;
+          if (!e2.own) e2.text = repText(e2.rep, repFem());
+          delete e2.fix; delete e2.own;
+          histSave(h);
+        }
+      }
+      const tabOpen = () => !!document.querySelector('.bs-tab #bsRep');   // вкладка «Отчёт» считает сама
+      if (Date.now() - (jget(AUTO_KEY, {}).at || 0) >= AUTO_EVERY && !tabOpen()) {
+        jset(AUTO_KEY, { at: Date.now() });   // сразу – чтобы другая вкладка CRM не считала то же самое
+        const d = repSaved().d, got = await countDay(d, meId());
+        const r = repSaved();   // перечитываем: пока считали, могли добавить ссылку или продажу
+        if (r.d === d && !tabOpen()) { Object.assign(r, got); if (r.rem == null) r.rem = 0; jset(REP_KEY, r); }
+      }
+    } catch (err) { autoFail = Date.now(); }
+    autoBusy = false;
+  }
   async function closeShift(btn) {
     if (btn) { btn.disabled = true; btn.textContent = 'Считаю отчёт…'; }
     const d = repSaved().d, m = meId();
     let got = null;
-    try {
-      const form = await clientsForm();
-      const [leads, blocks, chats] = await Promise.all([
-        countClients(form, 'psFirstContact', d, d, ST_ALL, m),
-        countClients(form, 'psFirstContact', d, d, ST_BLOCK, m),
-        countClients(form, 'psLastContact', d, d, ST_ALL, m),
-      ]);
-      got = { leads, blocks, chats };
-    } catch (e) {}
+    try { got = await countDay(d, m); } catch (e) {}
     // перечитываем: пока считали, могли нажать «+» у ссылок или добавить продажу
     const r = repSaved();
     if (got) Object.assign(r, got);
@@ -1874,7 +1911,7 @@
     ta.value = e.text || repText(e.rep || {}, repFem());
     ta.addEventListener('input', () => {
       const h2 = histGet(), e2 = h2[hi];
-      if (e2 && String(e2.end) === String(end)) { e2.text = ta.value; histSave(h2); }
+      if (e2 && String(e2.end) === String(end)) { e2.text = ta.value; if (e2.fix) e2.own = 1; histSave(h2); }
     });
     wrap.addEventListener('click', ev => {
       const t = ev.target, a = t.dataset.a;
