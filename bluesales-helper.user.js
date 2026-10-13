@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.46.0
+// @version      1.46.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2074,7 +2074,7 @@
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
               (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
-                x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата с другой суммой (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
+                x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
@@ -2295,8 +2295,8 @@
   }
   // неотправленные продажи смены из истории – в таблицу; отправленные (и найденные там повторы) помечаем sh
   // only – номер одной продажи (кнопка «+ в табл.» у продажи)
-  // строки таблицы с тем же человеком (чат или почта), но другой суммой
-  const alsoTxt = also => (also || []).map(a => 'стр. ' + a.row + (a.d ? ', ' + a.d : '') + ' – ' + rub(a.sum) + ' ₽').join('; ');
+  // строки таблицы с тем же человеком (чат или почта): в этом месяце – с другой суммой, в других листах – любые
+  const alsoTxt = also => (also || []).map(a => (a.sheet ? a.sheet + ', ' : '') + 'стр. ' + a.row + (a.d ? ', ' + a.d : '') + ' – ' + rub(a.sum) + ' ₽').join('; ');
   async function sheetSend(hi, end, only) {
     const e = histGet()[hi];
     if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
@@ -2317,7 +2317,7 @@
       if (warn.length) {
         const who = w => { const x = e.sales[w.i]; return '• ' + (x.who || x.fio || 'чат ' + x.dlg) + ' (' + rub(saleTotal(x)) + ' ₽): ' + w.t; };
         const rest = idx.length - warn.length;
-        if (!confirm('У этого человека в таблице уже есть оплата с другой суммой – проверь, не ошибка ли:\n\n' + warn.map(who).join('\n') +
+        if (!confirm('У этого человека в таблице уже есть оплата – проверь, не ошибка ли:\n\n' + warn.map(who).join('\n') +
           '\n\nОК – всё равно отправить' + (rest ? ', Отмена – отправить только остальные (' + rest + ')' : ', Отмена – не отправлять'))) {
           const off = new Set(warn.map(w => w.i));
           st.skip = off.size;
@@ -2375,7 +2375,7 @@
   const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
     st.nosheet && st.nosheet + ' – отметки оставил как были',
     st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»',
-    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата с другой суммой – перепроверь'].filter(Boolean).join(' · ');
+    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата – перепроверь'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
     [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
@@ -2629,20 +2629,19 @@
       box.querySelector('.bs-imp-day u').textContent = td ? 'прошлый день – продажи уйдут в «Историю»' : 'сегодня – в текущую смену';
       const have = td ? histGet().filter(e => e.d === td).flatMap(e => e.sales) : salesGet();
       // остальные продажи (другие дни истории, текущая смена) – там ищем повторы из ТГ и оплаты того же человека
-      const now = ddmm(new Date()), at = dmyDate(td || now);
+      const now = ddmm(new Date());
       const prior = histGet().filter(e => e.d !== td).flatMap(e => e.sales.map(s => ({ s, d: e.d })))
         .concat(td ? salesGet().map(s => ({ s, d: now })) : [], have.map(s => ({ s, d: td || now })));
-      const days = d => Math.abs(dmyDate(d) - at) / 864e5;
       const paid = o => o.d.slice(0, 5) + ' – ' + rub(saleTotal(o.s)) + ' ₽';
       found = parseSales(ta.value).map((x, i, all) => {
         const twin = x.bad ? null : have.find(s => impSame(s, x));
         Object.assign(x, { k: i + ':' + x.dlg + ':' + x.price, mine: !x.bad && x.mops.includes(me), dup: !!twin, fill: twin ? impFill(twin, x, !td) : [], seen: '', warn: '' });
         if (x.bad || twin) return x;
-        // та же оплата за последние 2 недели – скорее всего, в ТГ продублировали; ежемесячные оплаты дальше
-        const same = prior.find(o => samePerson(o.s, x) && String(o.s.price) === x.price && days(o.d) <= 14);
+        // та же оплата уже внесена – скорее всего, в ТГ продублировали (ежемесячных оплат у нас нет)
+        const same = prior.find(o => samePerson(o.s, x) && String(o.s.price) === x.price);
         if (same) { x.seen = 'уже есть ' + paid(same); x.dup = !force.has(x.k); return x; }
         // тот же человек с другой суммой – добавим, но пусть перепроверят
-        const other = prior.filter(o => samePerson(o.s, x) && days(o.d) <= 40).map(paid).concat(all.filter(y => y !== x && !y.bad && samePerson(y, x)).map(y => 'в этом тексте – ' + rub(saleTotal(y)) + ' ₽'));
+        const other = prior.filter(o => samePerson(o.s, x)).map(paid).concat(all.filter(y => y !== x && !y.bad && samePerson(y, x)).map(y => 'в этом тексте – ' + rub(saleTotal(y)) + ' ₽'));
         if (other.length) x.warn = 'у человека уже есть оплата: ' + other.join(', ') + ' – перепроверь';
         return x;
       });

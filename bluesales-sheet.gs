@@ -128,16 +128,27 @@ function findSale(ss, s, got, memo) {
   if (got) Object.assign(got, { p, sh, n, vals });
   const re = s.dlg ? new RegExp('dialogId=' + s.dlg + '(?!\\d)') : null;
   const mail = String(s.email || '').trim().toLowerCase(), also = [];
-  let day = '';   // дата пишется только у первой продажи дня
-  for (let r = 2; r <= n; r++) {
-    const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
-    if (v[COL.date - 1] !== '') day = dmOf(v[COL.date - 1]);
-    const byDlg = re && re.test(link), sum = +v[COL.sum - 1];
-    if (byDlg && sum === +s.sum) return { st: 'dup', row: r, sheet: sh.getName() };
-    // тот же человек (чат или почта), но другая сумма – пусть перепроверят
-    if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
-      also.push({ row: r, sum, d: day });
-  }
+  // тот же человек (чат или почта): на листе месяца с той же суммой – повтор, иначе пусть перепроверят
+  const scan = (vals, forms, n, name) => {
+    let day = '';   // дата пишется только у первой продажи дня
+    for (let r = 2; r <= n; r++) {
+      const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
+      if (v[COL.date - 1] !== '') day = dmOf(v[COL.date - 1]);
+      const byDlg = re && re.test(link), sum = +v[COL.sum - 1];
+      if (!name && byDlg && sum === +s.sum) return { st: 'dup', row: r, sheet: sh.getName() };
+      if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
+        also.push(name ? { row: r, sum, d: day, sheet: name } : { row: r, sum, d: day });
+    }
+  };
+  const dup = scan(vals, forms, n);
+  if (dup) return dup;
+  // другие месяцы (и скрытые листы): там только предупреждаем
+  const all = (memo && memo.all) || salesSheets(ss).map(x => {
+    const m = Math.max(x.getLastRow(), 2);
+    return { name: x.getName(), n: m, vals: x.getRange(1, 1, m, WIDTH).getValues(), forms: x.getRange(1, COL.link, m, 1).getFormulas() };
+  });
+  if (memo) memo.all = all;
+  all.filter(o => o.name !== sh.getName()).forEach(o => scan(o.vals, o.forms, o.n, o.name));
   if (got) got.also = also;
   return also.length ? { st: 'miss', also } : null;
 }
