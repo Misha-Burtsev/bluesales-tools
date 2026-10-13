@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.49.1
+// @version      1.50.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1914,17 +1914,24 @@
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-sales bs-hrep"><div class="bs-rep-head"><b>Отчёт за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-rep-status"></div><div class="bs-hrep-sheet" hidden></div><textarea spellcheck="false"></textarea>' +
+      '<div class="bs-rep-status"></div><div class="bs-hrep-sheet" hidden></div><div class="bs-hrep-sheet bs-hrep-team" hidden></div><textarea spellcheck="false"></textarea>' +
       '<div class="bs-rep-btns"><button data-a="back">К истории</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
     document.body.appendChild(wrap);
     const ta = wrap.querySelector('textarea'), status = wrap.querySelector('.bs-rep-status');
     if (warn) { status.dataset.st = 'err'; status.innerHTML = '<i></i><span></span>'; status.querySelector('span').textContent = warn; }
     ta.value = e.text || repText(e.rep || {}, repFem());
-    const sl = wrap.querySelector('.bs-hrep-sheet');
+    const sl = wrap.querySelector('.bs-hrep-sheet'), tl = wrap.querySelector('.bs-hrep-team');
+    let wait = Promise.resolve();
     if (send && sheetUrl() && e.sales.some(toSheet)) {
       sl.hidden = false; sl.textContent = '📊 Переношу продажи в таблицу…';
-      sheetSend(hi, end).then(st => { sl.textContent = '📊 Таблица: ' + sheetMsg(st); sl.dataset.st = st.err.length ? 'err' : 'ok'; })
+      wait = sheetSend(hi, end).then(st => { sl.textContent = '📊 Таблица: ' + sheetMsg(st); sl.dataset.st = st.err.length ? 'err' : 'ok'; })
         .catch(err => { sl.textContent = '📊 В таблицу не ушло: ' + err.message + '. Потом – «В таблицу» в истории.'; sl.dataset.st = 'err'; });
+    }
+    // цифры дня – в таблицу отдела (после своей таблицы: скрипт один)
+    if (send && teamOn()) {
+      tl.hidden = false; tl.textContent = '👥 Пишу в таблицу отдела…';
+      wait.then(() => teamCloseDay(e.d)).then(m => { tl.textContent = '👥 Отдел: ' + m; tl.dataset.st = /⚠|не тронул|нет столбца|формула/.test(m) ? 'err' : 'ok'; })
+        .catch(err => { tl.textContent = '👥 В таблицу отдела не ушло: ' + err.message + '. Потом – «⬆ В отдел» в истории.'; tl.dataset.st = 'err'; });
     }
     ta.addEventListener('input', () => {
       const h2 = histGet(), e2 = h2[hi];
@@ -2035,7 +2042,8 @@
       if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: mine == null ? true : !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
       if (a === 'shift') {
-        if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
+        if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.' +
+          (teamOn() ? '\n\nЦифры дня (лиды, чаты, ссылки, продано, сумма) запишутся в таблицу отдела – только в пустые клетки.' : ''))) return;
         return closeShift(t);
       }
       const row = t.closest('.bs-sales-row');
@@ -2074,7 +2082,7 @@
       '<span class="bs-range"><input type="date" data-r="from" max="' + today + '"><span>–</span><input type="date" data-r="to" max="' + today + '"></span></div>' +
       '<div class="bs-hist-body"></div>' +
       '<div class="bs-foot"><button data-a="bak" class="bs-ghost" title="Сохранить все данные помощника в файл или загрузить из файла">💾 Резервная копия</button>' +
-      '<button data-a="sheetset" class="bs-ghost" title="Своя Google Таблица для зарплаты: продажи с твоей долей переносятся туда сами">📊 Таблица' + (sheetUrl() ? ' ✓' : '') + '</button><span></span>' +
+      '<button data-a="sheetset" class="bs-ghost" title="Своя Google Таблица для зарплаты: продажи с твоей долей переносятся туда сами">📊 Таблица' + (sheetUrl() ? ' ✓' : '') + (teamOn() ? ' · 👥' : '') + '</button><span></span>' +
       '<button data-a="add" class="bs-main" title="Вставить отчёты из Telegram за прошлый день – они попадут в историю">+ Продажи за дату</button></div>';
     const body = box.querySelector('.bs-hist-body'), fromInp = box.querySelector('[data-r=from]'), toInp = box.querySelector('[data-r=to]');
     const paintPer = () => {
@@ -2104,13 +2112,21 @@
       list.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
       // у дня: чего нет в таблице, что там записано по-другому, что есть только там; премия за день – у первой смены даты
       // imp – сколько оплат «только в таблице» можно забрать (в идущую смену не добавляем)
-      const cnt = { miss: 0, bad: 0, only: 0, imp: 0 }, given = new Set();
+      const cnt = { miss: 0, bad: 0, only: 0, imp: 0 }, given = new Set(), givenT = new Set();
+      // таблица отдела: по дням периода – что дописать или перезаписать, и дни с цифрами, которых нет в истории
+      const team = teamOn() && !teamBusy && teamTab && teamTab.days ? teamTab.days : null, hh = histGet(), tcnt = { put: [], over: [], fresh: [] };
+      if (team) Object.keys(team).filter(inR).forEach(d => {
+        const c = teamCells(d, team[d], hh);
+        tcnt.put.push(...c.put); tcnt.over.push(...c.over);
+        if (typeof team[d].leads === 'number' && d !== ddmm(new Date()) && !hh.some(e => e.d === d)) tcnt.fresh.push(d);
+      });
       const info = list.map(e => {
-        const first = !given.has(e.d);
+        const first = !given.has(e.d), firstT = !e.now && !e.tab && !givenT.has(e.d);
         given.add(e.d);
+        if (firstT) givenT.add(e.d);
         const on = tab && ms.has(ymOf(e.d)), only = first && onlyBy[e.d] || [];
         const xs = on && !e.now ? e.sales.map((x, si) => ({ x, k: e.hi + ':' + si })).filter(o => toSheet(o.x)) : [];
-        const o = { only, on, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
+        const o = { only, on, team: firstT && team && team[e.d] ? teamCells(e.d, team[e.d], hh) : null, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
           miss: xs.filter(o => !tm.pair.has(o.k)).length, bad: xs.filter(o => tm.pair.has(o.k) && shBad(o.x)).length, any: xs.length + only.length };
         cnt.miss += o.miss; cnt.bad += o.bad; cnt.only += only.length;
         if (!e.now) cnt.imp += only.length;
@@ -2120,16 +2136,18 @@
       body.innerHTML =
         statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Продано', frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
           .concat(tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
-        tabLine(from, to, cnt) +
+        tabLine(from, to, cnt) + teamLine(tcnt) +
         (list.length ? '<div class="bs-hist-list' + (tab ? ' bs-prem' : '') + '">' + list.map((e, li) => {
           const k = e.now ? 'now' : e.tab ? 'tab:' + e.d : e.hi + ':' + e.end, f = info[li];
           const zero = !+e.rep.bought && !+e.rep.sum && !f.only.length && !f.prem;
           const issues = f.miss + f.bad + f.only.length;
           const mark = !f.on || !f.any ? '' : issues ? '<i class="bs-hist-tabm bs-warn" title="С таблицей не сходится: ' + esc([f.miss && 'нет в таблице ' + f.miss, f.bad && 'в таблице записано по-другому ' + f.bad, f.only.length && 'только в таблице ' + f.only.length].filter(Boolean).join(', ')) + ' – раскрой день">⚠ ' + issues + '</i>' :
             '<i class="bs-hist-tabm" title="Всё, что за этот день в помощнике, есть в таблице, и наоборот">✓ табл.</i>';
+          const tw = f.team ? f.team.put.length + f.team.over.length : 0;
+          const tmark = tw ? '<i class="bs-hist-tabm bs-warn" title="В таблице отдела не так, как в помощнике – раскрой день">👥 ⚠</i>' : '';
           const chip = e.tab ? '<i class="bs-hist-mine bs-warn">нет смены в истории</i>' :
             '<i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i>';
-          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + '</b>' +
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + tmark + '</b>' +
             '<em><span>' + (zero || e.tab ? '–' : frac(e.rep.bought) + ' прод.') + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
             (tab ? '<span class="bs-hist-prem" title="Премия за день – из таблицы (столбец N в строке с датой)">' + (f.prem ? '+' + rub(f.prem) + ' ₽' : '') + '</span>' : '') +
             '<span>' + (+e.rep.links ? +e.rep.links + ' ссыл.' : '') + '</span></em>' +
@@ -2145,7 +2163,7 @@
             (e.tab ? '' : '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>' + (e.now ? '(не отмечена: «Закрыть смену» – моя, день закроется сам – не моя)' : '(угадано по работе за день)') + '</small>' : '') +
               (e.mine == null && e.now || shiftMine(e) ? '' : ' <small>– лиды, чаты и ссылки не идут в итог</small>') + '</span><span class="bs-seg">' +
               [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (!(e.now && e.mine == null) && +shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span></p>' +
-            '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
+            '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) + (f.team ? teamDayHtml(e.d, f.team) : '') +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>')) +
             '</div></div>';
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
@@ -2156,6 +2174,10 @@
     const autoCheck = () => {
       if (!sheetUrl()) return;
       const [from, to] = histRange(), now = new Date(), tok = ++sheetTok;
+      // таблица отдела – после своей таблицы (скрипт один, запросы всё равно идут по очереди)
+      teamBusy = teamOn();
+      const team = () => !teamBusy ? null : teamFetch(from, to).catch(err => { teamTab = { err: err.message }; })
+        .then(() => { if (tok !== sheetTok) return; teamBusy = false; if (body.isConnected) paintBody(); });
       const keys = new Set(histGet().map((e, hi) => ({ e, k: hi + ':' + e.end })).filter(({ e }) => {
         const d = dmyDate(e.d);
         return (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
@@ -2173,7 +2195,7 @@
       sheetAutoErr = null;
       tabFetch(from, to).then(ok => { if (!ok) { sheetTab = { old: 1 }; return old(); } })
         .catch(err => { sheetTab = { err: err.message }; sheetAutoErr = { keys, msg: err.message }; })
-        .then(() => { if (tok !== sheetTok) return; sheetBusy = null; if (body.isConnected) paintBody(); });
+        .then(() => { if (tok !== sheetTok) return; sheetBusy = null; if (body.isConnected) paintBody(); return team(); });
     };
     repaint();
     autoCheck();
@@ -2220,6 +2242,39 @@
           tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(Object.assign({ n, rows: [] }, all)), ok);
           autoCheck();
         });
+      }
+      // таблица отдела: «⬇ Смены» – дни с цифрами, которых нет в истории (лиды, чаты, ссылки; продажи – из своей таблицы);
+      // «⬆ В отдел» – продано и сумма (и пустые лиды, чаты, ссылки) из помощника, со списком перед записью
+      if (a === 'teamimp' || a === 'teamexp') {
+        const [from, to] = histRange(), h = histGet(), days = teamTab && teamTab.days || {};
+        const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+        const ds = Object.keys(days).filter(inR).sort((a, b) => dmyDate(a) - dmyDate(b));
+        if (a === 'teamimp') {
+          const add = ds.filter(d => typeof days[d].leads === 'number' && d !== ddmm(new Date()) && !h.some(e => e.d === d));
+          if (!add.length) return paintBody();
+          if (!confirm('В таблице отдела у тебя есть цифры за ' + add.length + ' ' + plural(add.length, 'день', 'дня', 'дней') + ', которых нет в истории:\n' + add.map(d => d.slice(0, 5)).join(', ') +
+            '\n\nСоздать эти смены (моими) с лидами, чатами и ссылками из таблицы отдела? Продажи в них – кнопкой «⬇ Забрать» из своей таблицы.')) return;
+          add.forEach(d => {
+            const rep = {};
+            ['leads', 'chats', 'links'].forEach(k => { if (typeof days[d][k] === 'number') rep[k] = days[d][k]; });
+            h.push({ d, end: dmyDate(d).getTime() + 86399000, rep, sales: [], mine: true });
+          });
+          if (histSave(h)) tarHint('✓ Из таблицы отдела в историю: ' + add.length + ' ' + plural(add.length, 'смена', 'смены', 'смен'), true);
+          return repaint();
+        }
+        const put = [], over = [];
+        ds.forEach(d => { const c = teamCells(d, days[d], h); put.push(...c.put); over.push(...c.over); });
+        if (!put.length && !over.length) return paintBody();
+        const p1 = put.length ? 'Запишу в таблицу отдела (там пусто или «выходной», а оплаты были):\n' + teamList(put) : '';
+        let cells = put;
+        if (over.length) {
+          const p2 = 'Там другие цифры – перезапишу цифрами помощника:\n' + teamList(over, 1);
+          if (confirm([p1, p2].filter(Boolean).join('\n\n') + '\n\nОК – записать всё' + (put.length ? '. Отмена – выбрать: только пустые или ничего' : ''))) cells = put.concat(over);
+          else if (!put.length || !confirm('Тогда записать только в пустые клетки и вместо «выходного» (' + put.length + '), а другие цифры не трогать?\n\n' + teamList(put))) return;
+        } else if (!confirm(p1 + '\n\nЗаписать?')) return;
+        t.disabled = true; t.textContent = 'Пишу…';
+        return teamWrite(cells).then(st => { const ok = st.ok === cells.length; tarHint((ok ? '✓ ' : '') + 'Таблица отдела: ' + teamMsg(st), ok); autoCheck(); })
+          .catch(err => { tarHint('В таблицу отдела не ушло: ' + err.message); paintBody(); });
       }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
@@ -2682,10 +2737,19 @@
       '<li>Развернуть → Новое развёртывание → тип «Веб-приложение»: выполнять от имени «меня», доступ «Все» → Развернуть, разреши доступ.</li><li>Скопируй «URL веб-приложения» (…/exec) сюда.</li></ol>' +
       '<label><span>Ссылка веб-приложения</span><input data-k="url" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false"></label>' +
       '<div class="bs-sale-note"></div>' +
-      '<div class="bs-rep-btns">' + (sheetUrl() ? '<button data-a="off" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="check" class="bs-main">Проверить и сохранить</button></div></div>';
+      '<div class="bs-rep-btns">' + (sheetUrl() ? '<button data-a="off" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="check" class="bs-main">Проверить и сохранить</button></div>' +
+      '<div class="bs-team-set"><b>👥 Таблица отдела</b> <small>(общая, по желанию)</small>' +
+      '<div class="bs-tar-help">Из твоего блока помощник берёт лиды, чаты и ссылки для старых смен и по нему отмечает «моя / не моя» (цифры – моя, «выходной» – нет). Продано и сумму пишет туда из помощника: в пустые клетки и вместо «выходного» (если были оплаты) – сразу, поверх других цифр – только после твоего «ок». ' +
+      'При «Закрыть смену» цифры дня уходят в пустые клетки его столбца. Чужие блоки и формулы не трогаются. Работает через тот же скрипт: обнови его код и сделай новую версию развёртывания – Google заново спросит доступ, теперь к таблицам.</div>' +
+      '<label><span>Ссылка на таблицу отдела</span><input data-k="turl" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label>' +
+      '<label><span>Имя в таблице <small>(как в столбце A)</small></span><input data-k="tname" placeholder="Имя"></label>' +
+      '<div class="bs-sale-note bs-team-note"></div>' +
+      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span></span><button data-a="team">Проверить и сохранить</button></div></div></div>';
     document.body.appendChild(wrap);
-    const inp = wrap.querySelector('input'), note = wrap.querySelector('.bs-sale-note');
+    const inp = wrap.querySelector('[data-k=url]'), note = wrap.querySelector('.bs-sale-note');
+    const tUrl = wrap.querySelector('[data-k=turl]'), tName = wrap.querySelector('[data-k=tname]'), tNote = wrap.querySelector('.bs-team-note');
     inp.value = sheetUrl();
+    tUrl.value = teamCfg().url || ''; tName.value = teamCfg().name || '';
     wrap.addEventListener('click', async ev => {
       const t = ev.target, a = t.dataset.a;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -2706,6 +2770,30 @@
         localStorage.removeItem(SHEET_KEY);
         return openSales('hist');
       }
+      if (a === 'teamoff') {
+        if (!confirm('Отключить таблицу отдела? Ссылка и имя удалятся из помощника, сама таблица останется.')) return;
+        localStorage.removeItem(TEAM_KEY);
+        teamTab = null;
+        return openSales('hist');
+      }
+      if (a === 'team') {
+        const surl = SHEET_RX.test(inp.value.trim()) ? inp.value.trim() : sheetUrl(), url = tUrl.value.trim(), name = tName.value.trim();
+        if (!surl) return void (tNote.textContent = 'Сначала подключи свою таблицу выше – таблица отдела работает через тот же скрипт');
+        if (!/\/spreadsheets\/d\/[\w-]{20,}/.test(url)) return void (tNote.textContent = 'Нужна ссылка вида https://docs.google.com/spreadsheets/d/…');
+        if (!name) return void (tNote.textContent = 'Впиши имя, как оно стоит в столбце A таблицы отдела');
+        t.disabled = true; tNote.textContent = 'Проверяю…';
+        try {
+          const now = new Date(), j = await sheetPost({ team: { url, name, from: ddmm(now), to: ddmm(now) } }, surl);
+          if (!j.days) throw new Error('обнови код скрипта (кнопка «Скопировать код» выше) и сделай новую версию развёртывания');
+          jset(TEAM_KEY, { url, name });
+          teamTab = null;
+          const miss = TEAM_K.filter(([k]) => !(j.rows || []).includes(k)).map(x => x[1]);
+          tNote.textContent = '✓ Подключено. Лист «' + j.sheet + '», нашёл строки: ' + TEAM_K.filter(([k]) => (j.rows || []).includes(k)).map(x => x[1]).join(', ') +
+            (miss.length ? ' (нет: ' + miss.join(', ') + ')' : '') + (j.days[ddmm(now)] ? '' : '. Столбца за сегодня пока нет');
+        } catch (err) { tNote.textContent = 'Не вышло: ' + err.message; }
+        t.disabled = false;
+        return;
+      }
       if (a !== 'check') return;
       const url = inp.value.trim();
       if (!SHEET_RX.test(url)) return void (note.textContent = 'Нужна ссылка вида https://script.google.com/macros/s/…/exec');
@@ -2719,6 +2807,114 @@
       t.disabled = false;
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Таблица отдела (общая): свой блок по дням – лиды, чаты, ссылки, продано, сумма. Через тот же скрипт ----------
+  // Ссылка на таблицу отдела и имя в ней – только в этом браузере (bsTeam). Лиды, чаты и ссылки там – правда (их вписывают руками):
+  // ими дополняем старые смены. Продано и сумма – правда в помощнике: их пишем в отдел (в пустые клетки сразу, поверх цифр – после «ок»)
+  const TEAM_KEY = 'bsTeam', TEAM_K = [['leads', 'лиды'], ['chats', 'чаты'], ['links', 'ссылки'], ['bought', 'продано'], ['sum', 'сумма']];
+  const teamCfg = () => jget(TEAM_KEY, {});
+  const teamOn = () => !!(sheetUrl() && teamCfg().url && teamCfg().name);
+  // teamTab – последнее чтение: { days: {дата: {leads, …}}, sheet, got – скольким сменам дописали } | { err }
+  let teamTab = null, teamBusy = false;
+  const teamOff = v => typeof v === 'string' && /выход/.test(v);
+  const teamV = (k, v) => v == null ? 'пусто' : typeof v === 'string' ? '«' + v + '»' : k === 'sum' ? rub(v) + ' ₽' : k === 'bought' ? r2s(v) : v;
+  const teamLbl = k => TEAM_K.find(x => x[0] === k)[1];
+  async function teamRead(from, to) {
+    const c = teamCfg(), j = await sheetPost({ team: { url: c.url, name: c.name, from: from ? ddmm(from) : '', to: ddmm(to) } });
+    if (!j.days) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом новая версия развёртывания)');
+    return j;
+  }
+  async function teamWrite(cells) {
+    const c = teamCfg(), j = await sheetPost({ teamPut: { url: c.url, name: c.name, cells } });
+    if (!Array.isArray(j.res) || j.res.length !== cells.length) throw new Error('обнови код скрипта в таблице');
+    const st = { ok: 0, changed: 0, formula: 0, nocol: 0, norow: 0 };
+    j.res.forEach(r => { st[r] = (st[r] || 0) + 1; });
+    return st;
+  }
+  const teamMsg = st => [st.ok && 'записал ' + st.ok + ' ' + plural(st.ok, 'клетку', 'клетки', 'клеток'), st.changed && '⚠ ' + st.changed + ' не тронул – там уже вписали другое, сверь заново',
+    st.formula && st.formula + ' – там формула, не трогал', st.nocol && st.nocol + ' – нет столбца этой даты', st.norow && st.norow + ' – нет такой строки в блоке'].filter(Boolean).join(' · ') || 'записывать нечего';
+  // за период (весь – с начала таблицы): читаем свой блок и дополняем им историю
+  async function teamFetch(from, to) {
+    const j = await teamRead(from, to || new Date());
+    teamTab = { days: j.days, sheet: j.sheet, got: teamApply(j.days) };
+  }
+  // смены, которые уже есть: «моя / не моя» (если не отмечена) – по блоку: цифры – моя, «выходной» – не моя;
+  // лиды, чаты и ссылки – если в смене их нет. Возвращает, скольким сменам что-то дописали
+  function teamApply(days) {
+    const h = histGet();
+    let n = 0;
+    Object.keys(days).forEach(d => {
+      const t = days[d], es = h.filter(e => e.d === d), num = typeof t.leads === 'number', off = teamOff(t.leads);
+      if (!es.length || !num && !off) return;
+      let ch = false;
+      es.forEach(e => { e.rep = e.rep || {}; if (e.mine == null) { e.mine = num; ch = true; } });
+      const e = num && es.filter(shiftMine).pop();
+      if (e) ['leads', 'chats', 'links'].forEach(k => { if (typeof t[k] === 'number' && (e.rep[k] == null || e.rep[k] === '')) { e.rep[k] = t[k]; ch = true; } });
+      if (ch) n++;
+    });
+    if (n) histSave(h);
+    return n;
+  }
+  // что записать в столбец дня. put – сразу: пустые клетки (лиды, чаты, ссылки – только в мою смену) и «выходной» в продано/сумме,
+  // если в тот день были оплаты; over – там другие продано/сумма: только после «ок». Лиды, чаты, ссылки поверх цифр не пишем
+  function teamCells(d, t, h) {
+    const es = h.filter(e => e.d === d), res = { put: [], over: [] };
+    if (!es.length || !t) return res;
+    const mine = es.some(shiftMine);
+    // продажи дня помощник знает, если в смене есть продажи или цифры продаж (смена из таблицы отдела – только лиды, чаты, ссылки)
+    const sold = es.some(e => (e.sales || []).length || e.rep && (e.rep.bought != null || e.rep.sum != null));
+    const total = k => Math.round(es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0) * 100) / 100;
+    const work = k => { const xs = es.filter(e => shiftMine(e) && e.rep && e.rep[k] != null && e.rep[k] !== ''); return xs.length ? xs.reduce((a, e) => a + (+e.rep[k] || 0), 0) : null; };
+    TEAM_K.forEach(([k]) => {
+      if (!(k in t)) return;   // такой строки в блоке нет
+      const was = t[k], money = k === 'bought' || k === 'sum', v = money ? sold ? total(k) : null : mine ? work(k) : null;
+      // 0 лидов или чатов в рабочий день – скорее не посчиталось, такое не пишем
+      if (v == null || !v && (k === 'leads' || k === 'chats')) return;
+      const c = { d, k, v, was };
+      if (was == null) { if (mine || v > 0) res.put.push(c); }
+      else if (typeof was === 'string') { if (money && v > 0) res.put.push(c); }
+      else if (money && Math.abs(was - v) > 0.005) res.over.push(c);
+    });
+    return res;
+  }
+  // клетки списком по дням: «• 15.09: продано 2 → 3, сумма 10 000 ₽ → 13 000 ₽»
+  const teamList = (cs, arrow) => {
+    const by = {};
+    cs.forEach(c => (by[c.d] = by[c.d] || []).push(c));
+    return Object.keys(by).sort((a, b) => dmyDate(a) - dmyDate(b)).map(d => '• ' + d.slice(0, 5) + ': ' +
+      by[d].map(c => teamLbl(c.k) + ' ' + (arrow || c.was != null ? teamV(c.k, c.was) + ' → ' : '') + teamV(c.k, c.v)).join(', ')).join('\n');
+  };
+  const teamDays = cs => new Set(cs.map(c => c.d)).size;
+  // строка над списком смен: что в таблице отдела не так, как в помощнике
+  function teamLine(cnt) {
+    if (!teamOn()) return '';
+    const wrap = (t, warn, more) => '<div class="bs-hist-tab' + (warn ? ' bs-warn' : '') + '"><span>👥 ' + t + '</span>' + (more || '') + '</div>';
+    if (teamBusy) return wrap('Читаю таблицу отдела…');
+    if (!teamTab) return '';
+    if (teamTab.err) return wrap('Таблица отдела не прочиталась: ' + esc(teamTab.err), true, '<button data-a="tabsync">Ещё раз</button>');
+    const put = teamDays(cnt.put), over = teamDays(cnt.over), all = teamDays(cnt.put.concat(cnt.over));
+    return wrap('Таблица отдела: ' +
+      (put || over ? '⚠ ' + [put && 'дописать ' + put + ' ' + plural(put, 'день', 'дня', 'дней'), over && 'продано или сумма расходятся – ' + over].filter(Boolean).join(', ') : 'с историей всё сходится ✓') +
+      (teamTab.got ? ' · из отдела дописал ' + teamTab.got + ' ' + plural(teamTab.got, 'смене', 'сменам', 'сменам') : ''), put || over,
+      (cnt.fresh.length ? '<button data-a="teamimp" title="Дни, где у тебя в таблице отдела цифры, а в помощнике смены нет, – в историю (лиды, чаты, ссылки)">⬇ Смены ' + cnt.fresh.length + '</button>' : '') +
+      (all ? '<button data-a="teamexp" title="Записать в таблицу отдела цифры помощника – перед записью покажу список">⬆ В отдел ' + all + '</button>' : ''));
+  }
+  // цифры дня в таблице отдела – в раскрытой смене истории
+  function teamDayHtml(d, c) {
+    const t = teamOn() && teamTab && teamTab.days && teamTab.days[d];
+    if (!t) return '';
+    const bad = c.put.concat(c.over);
+    return '<p class="bs-hist-move"><span>Отдел: ' + TEAM_K.filter(([k]) => k in t).map(([k, l]) => l + ' ' + (t[k] == null ? '–' : typeof t[k] === 'string' ? esc(t[k]) : k === 'sum' ? rub(t[k]) + ' ₽' : k === 'bought' ? frac(t[k]) : t[k])).join(' · ') +
+      (bad.length ? ' · <b class="bs-warn" title="' + esc(teamList(bad)) + '">⚠ ' + [c.put.length && 'дописать ' + c.put.map(x => teamLbl(x.k)).join(', '), c.over.length && 'у тебя ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.v)).join(', ')].filter(Boolean).join('; ') + '</b>' : '') + '</span></p>';
+  }
+  // после «Закрыть смену»: цифры дня – в пустые клетки его столбца (и вместо «выходного», если были оплаты)
+  async function teamCloseDay(d) {
+    const j = await teamRead(dmyDate(d), dmyDate(d)), t = j.days[d];
+    if (!t) throw new Error('нет столбца ' + d.slice(0, 5) + ' – добавь его в таблицу отдела, потом «⬆ В отдел» в истории');
+    const c = teamCells(d, t, histGet());
+    const st = c.put.length ? await teamWrite(c.put) : null;
+    return [c.put.length ? 'записал ' + teamList(c.put).replace(/^• /, '') : '', st && st.ok < c.put.length ? teamMsg(st) : '',
+      c.over.length ? '⚠ там уже ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.was) + ', у тебя ' + teamV(x.k, x.v)).join('; ') + ' – поправь в «Истории» (⬆ В отдел)' : ''].filter(Boolean).join(' · ') || 'всё уже вписано';
   }
   // ---------- Резервная копия: все данные помощника (ключи bs* в localStorage) в файл и обратно ----------
   const bakKeys = () => Object.keys(localStorage).filter(k => /^bs[A-Z]/.test(k));
@@ -3052,7 +3248,7 @@
       '.bs-hist-row>b .bs-hist-tabm{margin-left:6px;font-size:11px;font-weight:400;font-style:normal;color:#16a34a}.bs-hist-row>b .bs-hist-tabm.bs-warn{color:#d97706}' +
       '.bs-hist-row>b .bs-hist-mine.bs-warn{color:#d97706;background:rgba(245,158,11,.12)}' +
       '.bs-hist-tab{display:flex;align-items:center;gap:8px;margin:-2px 0 10px;padding:6px 10px;border-radius:9px;background:var(--bs-hover,#f5f7fa);font-size:12px;color:var(--bs-muted,#888)}.bs-hist-tab span{flex:1}.bs-hist-tab b{color:var(--bs-text,#222);font-variant-numeric:tabular-nums}' +
-      '.bs-hist-tab.bs-warn{background:rgba(245,158,11,.1);color:#b45309}' +
+      '.bs-hist-tab.bs-warn{background:rgba(245,158,11,.1);color:#b45309}.bs-hist-move b.bs-warn{font-weight:500;color:#d97706}' +
       '.bs-hist-tab button{padding:2px 10px;white-space:nowrap;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer}.bs-hist-tab button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-sales .bs-hist-onlyh{margin-top:4px;color:#d97706}.bs-hist-sales .bs-hist-only{cursor:default}.bs-hist-only small{color:var(--bs-muted,#888)}.bs-hist-sgap{flex:none;width:18px}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
@@ -3070,7 +3266,7 @@
       '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
-      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{margin:0 0 10px;padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{min-height:16px;margin-top:6px;word-break:break-word}' +
+      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{margin:0 0 10px;padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{min-height:16px;margin-top:6px;word-break:break-word}.bs-team-set{margin-top:14px;padding-top:12px;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-team-set>b{font-size:13px}.bs-team-set>small{color:var(--bs-muted,#888)}.bs-team-set .bs-tar-help{margin:6px 0 8px}#bsSale.bs-sheet{max-height:90vh;overflow:auto}' +
       '.bs-sale-pay small{font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hrep-sheet{margin-bottom:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222)}.bs-hrep-sheet[data-st=ok]{color:#22a55a}.bs-hrep-sheet[data-st=err]{color:#e04848}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +

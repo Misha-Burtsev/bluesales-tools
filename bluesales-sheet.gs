@@ -10,8 +10,10 @@
 // Одну и ту же продажу (тот же чат и сумма на этом листе, в том числе внесённую руками) второй раз не добавляет.
 // Для «Истории» отдаёт строки оплат за месяцы периода и премию: N у первой строки дня (где дата в O) – за день, N1 – за месяц.
 //
-// Строка ниже – доступ только к этой таблице, а не ко всем таблицам на Google Диске.
-/** @OnlyCurrentDoc */
+// Таблица отдела (общая, если подключена в помощнике): читает и пишет только свой блок (имя в A, подписи строк в B) и только
+// в столбцах дат («дд.мм» в строке 1) – лиды, чаты, ссылки, продано, сумма. Формулы и чужие блоки не трогает.
+// Поэтому скрипту нужен доступ к таблицам, но работает он только с одной таблицей отдела: её id запоминается
+// при первом подключении, другие отклоняются. Сменить: Apps Script → Настройки проекта → Свойства скрипта → удалить TEAM.
 
 const COL = { name: 1, kind: 2, link: 5, pay: 6, sum: 7, email: 9, mops: 11, date: 15 };
 const WIDTH = 15;   // A…O – строки продаж; правее (справочник продуктов) не трогаем
@@ -26,6 +28,8 @@ function doPost(e) {
     const body = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
+    if (body.team) return out(Object.assign({ ok: true }, teamRead(body.team)));
+    if (body.teamPut) return out({ ok: true, res: teamPut(body.teamPut) });
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
     // (две оплаты в одном чате на одну сумму – это две строки)
@@ -258,4 +262,92 @@ function addSale(ss, s) {
     c.setNumberFormat(fmt ? sh.getRange(fmt, COL.date).getNumberFormat() : 'dd.MM');
   }
   return got.also.length ? { st: 'add', row, sheet: sh.getName(), also: got.also } : { st: 'add', row, sheet: sh.getName() };
+}
+
+// ---------- Таблица отдела: свой блок по датам ----------
+const TEAM_ROWS = { leads: 'новые лиды', chats: 'чатов в работе', links: 'выставлено ссылок', bought: 'продано курсов', sum: 'сумма оплат' };
+const pad2 = n => (n < 10 ? '0' : '') + n;
+// число (и «3,5» текстом) – числом, пусто – null, остальное («выходной») – строкой в нижнем регистре
+function teamVal(v) {
+  if (v === '' || v == null) return null;
+  if (typeof v === 'number') return v;
+  const t = String(v).trim();
+  if (/^-?[\d\s\u00a0]+([.,]\d+)?$/.test(t)) return +t.replace(/[\s\u00a0]/g, '').replace(',', '.');
+  return t.toLowerCase() || null;
+}
+function teamOpen(q) {
+  const id = (String(q.url || '').match(/\/spreadsheets\/d\/([\w-]{20,})/) || [])[1];
+  if (!id) throw new Error('нужна ссылка на таблицу отдела (docs.google.com/spreadsheets/d/…)');
+  const props = PropertiesService.getScriptProperties(), was = props.getProperty('TEAM');
+  if (was && was !== id) throw new Error('скрипт уже работает с другой таблицей отдела. Сменить: Apps Script → Настройки проекта → Свойства скрипта → удалить TEAM');
+  let ss;
+  try { ss = SpreadsheetApp.openById(id); } catch (e) { throw new Error('таблица отдела не открылась – проверь ссылку и доступ на редактирование'); }
+  const name = String(q.name || '').trim().toLowerCase();
+  if (!name) throw new Error('не указано имя в таблице отдела');
+  for (const sh of ss.getSheets()) {
+    const last = sh.getLastRow(), lc = sh.getLastColumn();
+    if (last < 2 || lc < 3) continue;
+    const ab = sh.getRange(1, 1, last, 2).getDisplayValues();
+    const r0 = ab.findIndex(r => String(r[0]).trim().toLowerCase() === name);
+    if (r0 < 0) continue;
+    // блок – от строки с именем до следующего имени в A (объединённая ячейка: имя только в первой строке)
+    const rows = {};
+    for (let i = r0; i < last && (i === r0 || !String(ab[i][0]).trim()); i++) {
+      const lb = String(ab[i][1]).trim().toLowerCase();
+      Object.keys(TEAM_ROWS).forEach(k => { if (!rows[k] && lb.indexOf(TEAM_ROWS[k]) === 0) rows[k] = i + 1; });
+    }
+    if (!Object.keys(rows).length) continue;
+    if (!was) props.setProperty('TEAM', id);
+    return { ss, sh, rows, cols: teamCols(sh, lc) };
+  }
+  throw new Error('в таблице отдела нет блока «' + String(q.name).trim() + '» (имя в столбце A, подписи строк – в B)');
+}
+// столбцы дат: «дд.мм» в строке 1 → 'дд.мм.гггг'. Года в шапке нет – считаем справа налево: самый правый столбец –
+// этот год (или соседний, если месяц далеко), левее год убывает, когда месяц «прыгает» вверх (январь ← декабрь)
+function teamCols(sh, lc) {
+  const r = sh.getRange(1, 1, 1, lc), v = r.getValues()[0], dv = r.getDisplayValues()[0], now = new Date(), nm = now.getMonth() + 1;
+  const cols = {};
+  let y = null, pm = null;
+  for (let c = lc - 1; c >= 0; c--) {
+    const p = dayOf(v[c] instanceof Date ? v[c] : dv[c]);
+    if (!p || p.m < 1 || p.m > 12 || p.d < 1 || p.d > 31) continue;
+    if (!p.y) {
+      if (y == null) y = now.getFullYear() + (p.m - nm > 6 ? -1 : nm - p.m > 6 ? 1 : 0);
+      else if (p.m > pm) y--;
+      p.y = y;
+    } else y = p.y;
+    pm = p.m;
+    const k = pad2(p.d) + '.' + pad2(p.m) + '.' + p.y;
+    if (!cols[k]) cols[k] = c + 1;
+  }
+  return cols;
+}
+// q: {url, name, from, to} → { sheet, rows: что нашлось, days: {'дд.мм.гггг': {leads, chats, links, bought, sum}} }
+function teamRead(q) {
+  const t = teamOpen(q), lo = dayOf(q.from), hi = dayOf(q.to);
+  const ks = Object.keys(t.rows), r1 = Math.min(...ks.map(k => t.rows[k])), r2 = Math.max(...ks.map(k => t.rows[k]));
+  const vals = t.sh.getRange(r1, 1, r2 - r1 + 1, t.sh.getLastColumn()).getValues(), days = {};
+  Object.keys(t.cols).forEach(d => {
+    const p = dayOf(d);
+    if (lo && ord(p) < ord(lo) || hi && ord(p) > ord(hi)) return;
+    const o = {};
+    ks.forEach(k => { o[k] = teamVal(vals[t.rows[k] - r1][t.cols[d] - 1]); });
+    days[d] = o;
+  });
+  return { sheet: t.sh.getName(), rows: ks, days };
+}
+// q: {url, name, cells: [{d, k, v, was}]} – пишем, только если в ячейке всё ещё то, что помощник видел (was), и там не формула
+function teamPut(q) {
+  const t = teamOpen(q);
+  return (q.cells || []).map(c => {
+    const row = t.rows[c.k], col = t.cols[c.d];
+    if (!row) return 'norow';
+    if (!col) return 'nocol';
+    const cell = t.sh.getRange(row, col);
+    if (cell.getFormula()) return 'formula';
+    const cur = teamVal(cell.getValue()), was = c.was == null ? null : c.was;
+    if (typeof cur === 'number' && typeof was === 'number' ? Math.abs(cur - was) > 0.005 : cur !== was) return 'changed';
+    cell.setValue(+c.v || 0);
+    return 'ok';
+  });
 }
