@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.47.0
+// @version      1.47.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2001,7 +2001,7 @@
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   function paintShift(box) {
-    const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine() != null ? curMine() : shiftMine({ rep: r });
+    const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
     box.innerHTML =
       statsHtml([['Сегодня', ddmm(now).slice(0, 5) + ', ' + WD[now.getDay()]], ['Продано', r2s(r.bought)], ['Сумма', rub(+r.sum || 0) + ' ₽'], ['Ссылки', +r.links || 0]]) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
@@ -2011,13 +2011,14 @@
         : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
       '<button data-a="mine" class="bs-ghost bs-mine' + (mine ? ' on' : '') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
-        (curMine() == null ? 'Сейчас угадано по работе за день (есть твои лиды, чаты или ссылки). «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : '') + 'Нажми, чтобы поменять">' + (mine ? '● Моя смена' : '○ Не моя смена') + '</button><span></span>' +
+        (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
+        (mine == null ? '◌ Моя смена?' : mine ? '● Моя смена' : '○ Не моя смена') + '</button><span></span>' +
       '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
       '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'me') return askMe();
-      if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: !mine }); return paintShift(box); }
+      if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: mine == null ? true : !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
       if (a === 'shift') {
         if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
@@ -2082,7 +2083,7 @@
         statsHtml([['Смен', list.length + (list.some(e => !shiftMine(e)) ? '<small> · моих ' + list.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
         (list.length ? '<div class="bs-hist-list">' + list.map(e => {
           const k = e.now ? 'now' : e.hi + ':' + e.end;
-          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span><i class="bs-hist-mine' + (shiftMine(e) ? ' on' : '') + '">' + (shiftMine(e) ? 'моя' : 'не моя') + '</i></b>' +
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span><i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i></b>' +
             '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
@@ -2092,8 +2093,9 @@
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
-            '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>(угадано по работе за день)</small>' : '') + (shiftMine(e) ? '' : ' <small>– лиды, чаты и ссылки не идут в итог</small>') + '</span><span class="bs-seg">' +
-              [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (+shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span></p>' +
+            '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>' + (e.now ? '(не отмечена: «Закрыть смену» – моя, день закроется сам – не моя)' : '(угадано по работе за день)') + '</small>' : '') +
+              (e.mine == null && e.now || shiftMine(e) ? '' : ' <small>– лиды, чаты и ссылки не идут в итог</small>') + '</span><span class="bs-seg">' +
+              [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (!(e.now && e.mine == null) && +shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span></p>' +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
             '</div></div>';
