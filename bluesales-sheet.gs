@@ -63,17 +63,21 @@ const ord = x => x.y * 10000 + x.m * 100 + x.d;
 function pickSheet(ss, day) {
   const list = salesSheets(ss);
   if (!list.length) throw new Error('Нет листа с шапкой «Продукт» в A1 и «Дата» в O1');
-  const byName = list.filter(sh => monthOfName(sh.getName()) === day.m - 1);
-  if (byName.length === 1) return byName[0];
+  // старые месяцы лежат тут же скрытыми листами – поэтому сначала смотрим на даты, а не только на название
   const dates = list.map(sh => {
     const n = sh.getLastRow();
     return n < 2 ? [] : sh.getRange(2, COL.date, n - 1, 1).getValues().map(r => dayOf(r[0], day.y)).filter(Boolean);
   });
+  const named = sh => monthOfName(sh.getName()) === day.m - 1;
   const same = list.filter((sh, i) => dates[i].some(x => x.y === day.y && x.m === day.m));
+  const sameNamed = same.filter(named);
+  if (sameNamed.length === 1) return sameNamed[0];
   if (same.length === 1) return same[0];
   if (same.length > 1) throw new Error('Не понял, на какой лист писать ' + day.d + '.' + day.m + ' – назови лист по месяцу («Октябрь»)');
-  // запасной – чистый лист без чужого месяца (без дат и без другого месяца в названии),
-  // и только для месяца не раньше тех, что уже есть в таблице: старый месяц в новый лист не пишем
+  // этот месяц ещё не начат: новый чистый лист с его названием (прошлогодний «Октябрь» с датами не подходит)
+  const emptyNamed = list.filter((sh, i) => !dates[i].length && named(sh));
+  if (emptyNamed.length === 1) return emptyNamed[0];
+  // запасной – чистый лист без месяца в названии, и только для месяца не раньше тех, что уже есть в таблице
   const ym = x => x.y * 100 + x.m, newest = Math.max(0, ...[].concat(...dates).map(ym));
   const free = list.filter((sh, i) => !dates[i].length && monthOfName(sh.getName()) < 0);
   if (free.length === 1 && ym(day) >= newest) return free[0];
