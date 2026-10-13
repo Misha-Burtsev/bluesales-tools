@@ -25,7 +25,9 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
-    const memo = {};   // лист месяца читаем один раз на весь запрос
+    // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
+    // (две оплаты в одном чате на одну сумму – это две строки)
+    const memo = { used: new Set() };
     if (body.find) return out({ ok: true, res: body.find.map(s => {
       try { return findSale(ss, s, null, memo) || { st: 'miss' }; }
       catch (err) { return { st: err.noSheet ? 'nosheet' : 'err', msg: String(err && err.message || err) }; }
@@ -129,7 +131,12 @@ function findSale(ss, s, got, memo) {
       const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
       if (v[COL.date - 1] !== '') day = dmOf(v[COL.date - 1]);
       const byDlg = re && re.test(link), sum = +v[COL.sum - 1];
-      if (!name && byDlg && sum === +s.sum) return { st: 'dup', row: r, sheet: sh.getName() };
+      // force – помощник уже сверил и знает, что это отдельная оплата
+      const key = sh.getName() + ':' + r, used = memo && memo.used;
+      if (!name && byDlg && sum === +s.sum && !s.force && !(used && used.has(key))) {
+        if (used) used.add(key);
+        return { st: 'dup', row: r, sheet: sh.getName() };
+      }
       if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
         also.push(name ? { row: r, sum, d: day, sheet: name } : { row: r, sum, d: day });
     }

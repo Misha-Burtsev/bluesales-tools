@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.46.2
+// @version      1.46.3
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2297,6 +2297,8 @@
   // only – номер одной продажи (кнопка «+ в табл.» у продажи)
   // строки таблицы с тем же человеком (чат или почта): в этом месяце – с другой суммой, в прошлом месяце – любые
   const alsoTxt = also => (also || []).map(a => (a.sheet ? a.sheet + ', ' : '') + 'стр. ' + a.row + (a.d ? ', ' + a.d : '') + ' – ' + rub(a.sum) + ' ₽').join('; ');
+  // отправленные (✓) – вперёд: в таблице им достаются строки, остальным – что останется
+  const shOrder = (list, get) => list.filter(o => get(o).sh).concat(list.filter(o => !get(o).sh));
   async function sheetSend(hi, end, only) {
     const e = histGet()[hi];
     if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
@@ -2305,11 +2307,14 @@
     if (!idx.length) return st;
     const h = histGet(), e2 = h[hi], same = e2 && String(e2.end) === String(end);
     const mark = (i, f) => { const x = same && e2.sales[i]; if (x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name) f(x); };
-    // сначала смотрим, что уже есть: повторы не шлём, а про того же человека с другой суммой – спрашиваем
-    const f = await sheetPost({ find: idx.map(i => sheetSale(e.d, e.sales[i])) }), warn = [];
-    if (Array.isArray(f.res) && f.res.length === idx.length) {
-      idx = idx.filter((i, k) => {
-        const r = f.res[k];
+    // сначала смотрим, что уже есть: повторы не шлём, а про того же человека – спрашиваем.
+    // Сверяем всю смену, отправленные первыми: две оплаты в одном чате на одну сумму – это две строки таблицы
+    const all = shOrder(e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i])), i => e.sales[i]);
+    const f = await sheetPost({ find: all.map(i => sheetSale(e.d, e.sales[i])) }), warn = [];
+    const checked = Array.isArray(f.res) && f.res.length === all.length;
+    if (checked) {
+      idx = idx.filter(i => {
+        const r = f.res[all.indexOf(i)];
         if (r.st === 'dup') { st.dup++; mark(i, x => { x.sh = 1; delete x.shAlso; }); return false; }
         if (r.also && r.also.length) warn.push({ i, t: alsoTxt(r.also) });
         return true;
@@ -2326,7 +2331,8 @@
       }
     }
     if (idx.length) {
-      const j = await sheetPost({ sales: idx.map(i => sheetSale(e.d, e.sales[i])) });
+      // force – уже сверили: это отдельная оплата, даже если в чате есть строка на ту же сумму
+      const j = await sheetPost({ sales: idx.map(i => Object.assign(sheetSale(e.d, e.sales[i]), checked ? { force: 1 } : {})) });
       idx.forEach((i, k) => {
         const r = (j.res || [])[k] || { st: 'err', msg: 'нет ответа' };
         if (r.st === 'err') return void st.err.push(r.msg);
@@ -2347,7 +2353,7 @@
     list.forEach(({ hi, end }) => {
       const e = h0[hi];
       if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
-      e.sales.forEach((x, i) => { if (toSheet(x)) items.push({ hi, end, i, x, d: e.d }); });
+      shOrder(e.sales.map((x, i) => ({ hi, end, i, x, d: e.d })).filter(o => toSheet(o.x)), o => o.x).forEach(o => items.push(o));
     });
     const st = { n: items.length, here: 0, gone: 0, miss: 0, also: 0, nosheet: '', err: [] };
     if (!items.length) return st;
@@ -2599,7 +2605,8 @@
   }
   // day – 'ГГГГ-ММ-ДД': продажи за прошлый день уходят в «Историю», за сегодня – в текущую смену
   // та же продажа уже есть в списке: тот же чат и тариф или цена – тогда дописываем пустые поля (почту, имя…) из отчёта
-  const impSame = (s, x) => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price);
+  // другая сумма в том же чате – это вторая оплата, её добавляем отдельно
+  const impSame = (s, x) => s.dlg === x.dlg && String(s.price) === x.price;
   const IMP_FILL = { email: 'почту', fio: 'имя', nick: 'ник', src: 'источник', quote: 'откуда узнал' };
   // today – продажа текущей смены (там хранится всё), иначе из истории (только почта и имя); put – записать
   function impFill(s, x, today, put) {
@@ -2634,12 +2641,14 @@
         .concat(td ? salesGet().map(s => ({ s, d: now })) : [], have.map(s => ({ s, d: td || now })));
       const paid = o => o.d.slice(0, 5) + ' – ' + rub(saleTotal(o.s)) + ' ₽';
       found = parseSales(ta.value).map((x, i, all) => {
-        const twin = x.bad ? null : have.find(s => impSame(s, x));
-        Object.assign(x, { k: i + ':' + x.dlg + ':' + x.price, mine: !x.bad && x.mops.includes(me), dup: !!twin, fill: twin ? impFill(twin, x, !td) : [], seen: '', warn: '' });
+        const k = i + ':' + x.dlg + ':' + x.price, forced = force.has(k);
+        // клик по строке («всё-таки добавить») – отдельная продажа, ничего не дописываем
+        const twin = x.bad || forced ? null : have.find(s => impSame(s, x));
+        Object.assign(x, { k, mine: !x.bad && x.mops.includes(me), dup: !!twin, twin: !!twin, fill: twin ? impFill(twin, x, !td) : [], seen: '', warn: '' });
         if (x.bad || twin) return x;
         // та же оплата уже внесена – скорее всего, в ТГ продублировали (ежемесячных оплат у нас нет)
         const same = prior.find(o => samePerson(o.s, x) && String(o.s.price) === x.price);
-        if (same) { x.seen = 'уже есть ' + paid(same); x.dup = !force.has(x.k); return x; }
+        if (same) { x.seen = 'уже есть ' + paid(same); x.dup = !forced; return x; }
         // тот же человек с другой суммой – добавим, но пусть перепроверят
         const other = prior.filter(o => samePerson(o.s, x)).map(paid).concat(all.filter(y => y !== x && !y.bad && samePerson(y, x)).map(y => 'в этом тексте – ' + rub(saleTotal(y)) + ' ₽'));
         if (other.length) x.warn = 'у человека уже есть оплата: ' + other.join(', ') + ' – перепроверь';
@@ -2647,9 +2656,9 @@
       });
       const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine), fills = found.filter(x => x.fill.length);
       out.innerHTML = found.length ? found.map(x =>
-        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"' + (x.seen ? ' data-k="' + esc(x.k) + '" title="Нажми, чтобы ' + (x.dup ? 'всё-таки добавить' : 'не добавлять') + '"' : '') + '><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"' + (x.seen || x.twin ? ' data-k="' + esc(x.k) + '" title="' + (x.dup ? 'Если это другая оплата – нажми, добавлю отдельно' : 'Нажми, чтобы не добавлять') + '"' : '') + '><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
         '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u' + (x.warn || x.seen ? ' class="bs-warn"' : '') + '>' + (x.bad ? x.bad + ' – пропущу' : x.seen ? x.seen + (x.dup ? ' – повтор, пропущу' : ' – добавлю ещё раз') : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') : x.dup ? 'уже в списке' : [x.warn, !x.mine && 'не твоя – без учёта в сумме'].filter(Boolean).join(' · ')) + '</u></div>').join('')
+        '<u' + (x.warn || x.seen ? ' class="bs-warn"' : '') + '>' + (x.bad ? x.bad + ' – пропущу' : x.seen ? x.seen + (x.dup ? ' – повтор, пропущу' : ' – добавлю ещё раз') : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') + ' (другая оплата – нажми)' : x.dup ? 'уже в списке (другая оплата – нажми)' : [x.warn, !x.mine && 'не твоя – без учёта в сумме'].filter(Boolean).join(' · ')) + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
       btn.disabled = !ok.length && !fills.length;
       btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить') +
