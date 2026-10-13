@@ -113,18 +113,12 @@ function plan(A, O, key) {
   return { row: Math.max(last, lastDate) + 1, date: true };
 }
 
-// уже есть: тот же чат и сумма на листе этого месяца (продукт руками могли записать по-своему)
+// уже есть: тот же чат и сумма на листе этого месяца (продукт руками могли записать по-своему);
+// тот же человек с другой суммой или в прошлом месяце – в also, для предупреждения
 function findSale(ss, s, got, memo) {
   const p = dayOf(s.d);
   if (!p) throw new Error('Нет даты продажи');
-  const mk = p.y * 100 + p.m;
-  let c = memo && memo[mk];
-  if (!c) {
-    const sh = pickSheet(ss, p), n = Math.max(sh.getLastRow(), 2);
-    c = { sh, n, vals: sh.getRange(1, 1, n, WIDTH).getValues(), forms: sh.getRange(1, COL.link, n, 1).getFormulas() };
-    if (memo) memo[mk] = c;
-  }
-  const { sh, n, vals, forms } = c;
+  const c = monthSheet(ss, p, memo), { sh, n, vals, forms } = c;
   if (got) Object.assign(got, { p, sh, n, vals });
   const re = s.dlg ? new RegExp('dialogId=' + s.dlg + '(?!\\d)') : null;
   const mail = String(s.email || '').trim().toLowerCase(), also = [];
@@ -142,15 +136,24 @@ function findSale(ss, s, got, memo) {
   };
   const dup = scan(vals, forms, n);
   if (dup) return dup;
-  // другие месяцы (и скрытые листы): там только предупреждаем
-  const all = (memo && memo.all) || salesSheets(ss).map(x => {
-    const m = Math.max(x.getLastRow(), 2);
-    return { name: x.getName(), n: m, vals: x.getRange(1, 1, m, WIDTH).getValues(), forms: x.getRange(1, COL.link, m, 1).getFormulas() };
-  });
-  if (memo) memo.all = all;
-  all.filter(o => o.name !== sh.getName()).forEach(o => scan(o.vals, o.forms, o.n, o.name));
+  // прошлый месяц (лист может быть скрыт): там только предупреждаем
+  let prev = null;
+  try { prev = monthSheet(ss, p.m > 1 ? { y: p.y, m: p.m - 1, d: 1 } : { y: p.y - 1, m: 12, d: 1 }, memo); } catch (e) {}
+  if (prev && prev.sh.getName() !== sh.getName()) scan(prev.vals, prev.forms, prev.n, prev.sh.getName());
   if (got) got.also = also;
   return also.length ? { st: 'miss', also } : null;
+}
+
+// лист месяца и его значения – читаем один раз на запрос
+function monthSheet(ss, p, memo) {
+  const mk = p.y * 100 + p.m;
+  let c = memo && memo[mk];
+  if (!c) {
+    const sh = pickSheet(ss, p), n = Math.max(sh.getLastRow(), 2);
+    c = { sh, n, vals: sh.getRange(1, 1, n, WIDTH).getValues(), forms: sh.getRange(1, COL.link, n, 1).getFormulas() };
+    if (memo) memo[mk] = c;
+  }
+  return c;
 }
 
 function dmOf(v) {
