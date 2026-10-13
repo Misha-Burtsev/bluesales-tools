@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.47.1
+// @version      1.48.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1947,6 +1947,16 @@
   const fromIso = s => { const [y, m, d] = String(s).split('-'); return y && m && d ? new Date(+y, m - 1, +d) : null; };
   const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
   const r2s = n => String(Math.round((+n || 0) * 100) / 100).replace('.', ',');
+  // доли продаж дробью: 0,5 → ½, 23,33 → 23⅓; что не похоже на дробь – числом
+  const FRACS = [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [0.67, '⅔'], [0.75, '¾']];
+  const frac = n => {
+    n = Math.round((+n || 0) * 100) / 100;
+    let w = Math.floor(n), f = Math.round((n - w) * 100) / 100;
+    if (f >= 0.98) { w++; f = 0; }
+    if (!f) return String(w);
+    const hit = FRACS.find(([v]) => Math.abs(v - f) < 0.015);
+    return hit ? (w || '') + hit[1] : r2s(n);
+  };
   // период истории помнится, пока открыта страница
   const histPer = { p: '7', from: null, to: null };
   function histRange() {
@@ -2047,7 +2057,7 @@
   const dateOk = s => { const d = fromIso(s); return d && d.getFullYear() >= 2000 && d <= new Date() ? d : null; };
   // цифры отчёта смены в раскрытой строке истории; чего не считали (старые смены) – прочерк
   function histRepHtml(r) {
-    const v = k => r[k] == null || r[k] === '' ? '–' : k === 'sum' ? rub(+r[k] || 0) + ' ₽' : k === 'bought' ? r2s(r[k]) : +r[k] || 0;
+    const v = k => r[k] == null || r[k] === '' ? '–' : k === 'sum' ? rub(+r[k] || 0) + ' ₽' : k === 'bought' ? frac(r[k]) : +r[k] || 0;
     return '<div class="bs-hist-rep">' + [['Лиды', v('leads') + (r.blocks ? ' <small>(' + r.blocks + ' блок.)</small>' : '')], ['Чаты', v('chats')], ['Ссылки', v('links')],
       ['Продано', v('bought')], ['Сумма', v('sum')], ['Напоминания', v('rem')]].map(([k, x]) => '<span>' + k + '<b>' + x + '</b></span>').join('') + '</div>';
   }
@@ -2072,52 +2082,91 @@
     };
     const paintBody = () => {
       const [from, to] = histRange();
-      const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
+      const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+      const shifts = histAll().filter(e => inR(e.d));
       // лиды, чаты, ссылки – только за мои смены (в чужую смену CRM могла что-то насчитать); продажи и сумма – за все
       const WORK = ['leads', 'blocks', 'chats', 'links'];
-      const tot = k => list.reduce((a, e) => a + (WORK.includes(k) && !shiftMine(e) ? 0 : +e.rep[k] || 0), 0);
+      const tot = k => shifts.reduce((a, e) => a + (WORK.includes(k) && !shiftMine(e) ? 0 : +e.rep[k] || 0), 0);
       const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
       const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k)), sheetOn = !!sheetUrl();
       if (histKeep) { open.add(histKeep); histKeep = null; }
+      // сверка со строками таблицы: что есть только там – к своему дню (дня нет в истории – отдельной строкой)
+      const tab = sheetOn && sheetTab && sheetTab.rows ? sheetTab : null, tm = tab ? tabMatch() : null;
+      const ms = new Set(tab ? tab.months.filter(m => m.sheet).map(m => m.y * 100 + m.m) : []);
+      const onlyBy = {};
+      if (tab) tm.only.forEach(r => { if (r.d && inR(r.d)) (onlyBy[r.d] = onlyBy[r.d] || []).push(r); });
+      const list = shifts.slice(), seen = new Set(shifts.map(e => e.d));
+      Object.keys(onlyBy).forEach(d => { if (!seen.has(d)) list.push({ d, tab: 1, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }); });
+      list.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
+      // у дня: чего нет в таблице, что там записано по-другому, что есть только там; премия за день – у первой смены даты
+      const cnt = { miss: 0, bad: 0, only: 0 }, given = new Set();
+      const info = list.map(e => {
+        const first = !given.has(e.d);
+        given.add(e.d);
+        const on = tab && ms.has(ymOf(e.d)), only = first && onlyBy[e.d] || [];
+        const xs = on && !e.now ? e.sales.map((x, si) => ({ x, k: e.hi + ':' + si })).filter(o => toSheet(o.x)) : [];
+        const o = { only, on, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
+          miss: xs.filter(o => !tm.pair.has(o.k)).length, bad: xs.filter(o => tm.pair.has(o.k) && shBad(o.x)).length, any: xs.length + only.length };
+        cnt.miss += o.miss; cnt.bad += o.bad; cnt.only += only.length;
+        return o;
+      });
+      const prem = tab ? Object.keys(tab.days).filter(inR).reduce((a, d) => a + tab.days[d], 0) : null;
       body.innerHTML =
-        statsHtml([['Смен', list.length + (list.some(e => !shiftMine(e)) ? '<small> · моих ' + list.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
-        (list.length ? '<div class="bs-hist-list">' + list.map(e => {
-          const k = e.now ? 'now' : e.hi + ':' + e.end;
-          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span><i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i></b>' +
-            '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
-            (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
-            '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
-              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
+        statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
+          .concat(tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
+        tabLine(from, to, cnt) +
+        (list.length ? '<div class="bs-hist-list' + (tab ? ' bs-prem' : '') + '">' + list.map((e, li) => {
+          const k = e.now ? 'now' : e.tab ? 'tab:' + e.d : e.hi + ':' + e.end, f = info[li];
+          const zero = !+e.rep.bought && !+e.rep.sum && !f.only.length && !f.prem;
+          const issues = f.miss + f.bad + f.only.length;
+          const mark = !f.on || !f.any ? '' : issues ? '<i class="bs-hist-tabm bs-warn" title="С таблицей не сходится: ' + esc([f.miss && 'нет в таблице ' + f.miss, f.bad && 'в таблице записано по-другому ' + f.bad, f.only.length && 'только в таблице ' + f.only.length].filter(Boolean).join(', ')) + ' – раскрой день">⚠ ' + issues + '</i>' :
+            '<i class="bs-hist-tabm" title="Всё, что за этот день в помощнике, есть в таблице, и наоборот">✓ табл.</i>';
+          const chip = e.tab ? '<i class="bs-hist-mine bs-warn">нет смены в истории</i>' :
+            '<i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i>';
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + '</b>' +
+            '<em><span>' + (zero || e.tab ? '–' : frac(e.rep.bought) + ' прод.') + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
+            (tab ? '<span class="bs-hist-prem" title="Премия за день – из таблицы (столбец N в строке с датой)">' + (f.prem ? '+' + rub(f.prem) + ' ₽' : '') + '</span>' : '') +
+            '<span>' + (+e.rep.links ? +e.rep.links + ' ссыл.' : '') + '</span></em>' +
+            (e.now || e.tab ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
+            '<div class="bs-hist-sales">' + (e.tab ? '' : histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
+              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + '</span>' +
               (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице записано по-другому: ' + esc(shDiff(x).join('; ')) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
                 x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
-              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
-            '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>' + (e.now ? '(не отмечена: «Закрыть смену» – моя, день закроется сам – не моя)' : '(угадано по работе за день)') + '</small>' : '') +
+              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : f.only.length ? '' : '<div><span>Список продаж не вёлся</span></div>')) +
+            onlyHtml(e, f.only) +
+            (e.tab ? '' : '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>' + (e.now ? '(не отмечена: «Закрыть смену» – моя, день закроется сам – не моя)' : '(угадано по работе за день)') + '</small>' : '') +
               (e.mine == null && e.now || shiftMine(e) ? '' : ' <small>– лиды, чаты и ссылки не идут в итог</small>') + '</span><span class="bs-seg">' +
               [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (!(e.now && e.mine == null) && +shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span></p>' +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
-            (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
+            (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>')) +
             '</div></div>';
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
     };
     const repaint = () => { paintPer(); paintBody(); };
-    // сама сверяет с таблицей закрытые смены текущего месяца за период – вдруг строки удалили или дописали руками
+    // сама сверяет с таблицей смены за период: строки оплат листов этих месяцев против продаж в истории
+    // (строки могли удалить или дописать руками). Старый скрипт строк не отдаёт – тогда как раньше, только текущий месяц
     const autoCheck = () => {
       if (!sheetUrl()) return;
-      const [from, to] = histRange(), now = new Date();
-      // только текущий месяц: старые листы в таблице удаляют, там отметки остаются как были
-      const list = histGet().map((e, hi) => ({ hi, end: e.end, e })).filter(({ e }) => {
+      const [from, to] = histRange(), now = new Date(), tok = ++sheetTok;
+      const keys = new Set(histGet().map((e, hi) => ({ e, k: hi + ':' + e.end })).filter(({ e }) => {
         const d = dmyDate(e.d);
-        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() &&
-          (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
-      }).map(({ hi, end }) => ({ hi, end }));
-      if (!list.length) return;
-      const tok = ++sheetTok;
-      const keys = new Set(list.map(o => o.hi + ':' + o.end));
+        return (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+      }).map(o => o.k));
       sheetBusy = keys;
       paintBody();
-      sheetCheck(list).then(st => { sheetAutoErr = st.err.length ? { keys, msg: st.err.join('; ') } : null; }, err => { sheetAutoErr = { keys, msg: err.message }; })
+      const old = () => {
+        const list = histGet().map((e, hi) => ({ hi, end: e.end, e })).filter(({ e }) => {
+          const d = dmyDate(e.d);
+          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() &&
+            (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+        }).map(({ hi, end }) => ({ hi, end }));
+        return list.length ? sheetCheck(list).then(st => { if (st.err.length) sheetAutoErr = { keys, msg: st.err.join('; ') }; }) : null;
+      };
+      sheetAutoErr = null;
+      tabFetch(from, to).then(ok => { if (!ok) { sheetTab = { old: 1 }; return old(); } })
+        .catch(err => { sheetTab = { err: err.message }; sheetAutoErr = { keys, msg: err.message }; })
         .then(() => { if (tok !== sheetTok) return; sheetBusy = null; if (body.isConnected) paintBody(); });
     };
     repaint();
@@ -2129,13 +2178,27 @@
       if (a === 'sheetset') return openSheet();
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
       if (t.dataset.p) { histPer.p = t.dataset.p; repaint(); return autoCheck(); }
+      if (a === 'tabsync') return autoCheck();
       const row = t.closest('.bs-hist-row');
       if (!row) return;
+      // оплата есть только в таблице – добавить её продажей в смену того дня (дня нет – создастся)
+      if (a === 'tabadd') {
+        const only = sheetTab && sheetTab.rows ? tabMatch().only : [];
+        const rs = only.filter(r => t.dataset.r ? r.sheet + ':' + r.row === t.dataset.r : r.d === t.dataset.d);
+        if (!rs.length) return paintBody();
+        const d = rs[0].d;
+        if (!confirm((rs.length > 1 ? 'Добавить ' + rs.length + ' оплаты из таблицы' : 'Добавить оплату из таблицы (' + (rs[0].name || 'без продукта') + ', ' + rub(rs[0].sum) + ' ₽)') +
+          ' в смену ' + d + '? Продано и сумма этой смены вырастут. ФИО и тариф потом можно поправить в продаже.')) return;
+        const xs = rs.map((r, n) => ({ id: Date.now().toString(36) + n, dlg: r.dlg, name: r.name, price: r.sum, disc: '', mops: [], share: shareFor(r.mops || 1), cnt: true,
+          fio: '', who: '', email: r.email, pay: PAYS.some(p => p[0] === r.pay) ? r.pay : undefined, sh: 1, shT: shTab(r) }));
+        if (histAddDay(d, xs)) tarHint('✓ Добавлено в смену ' + d + ': ' + xs.length, true);
+        return repaint();
+      }
       if (a === 'sheet' || a === 'sheet1') {
         const f = find(row);
         if (!f) return paintBody();
         t.disabled = true; t.textContent = a === 'sheet' ? 'Переношу…' : '…';
-        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintBody(); })
+        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); if (st.add) autoCheck(); else paintBody(); })
           .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintBody(); });
       }
       if (a === 'sheetfix') {
@@ -2199,7 +2262,7 @@
         histSave(f.h);
         return paintBody();
       }
-      const sd = t.closest('.bs-hist-s');
+      const sd = t.closest('.bs-hist-s:not(.bs-hist-only)');
       if (sd) {
         if (sd.dataset.id) return openSale(sd.dataset.id, true);
         const f = find(row);
@@ -2436,6 +2499,84 @@
     });
     if (ch) histSave(h);
     return st;
+  }
+  // ---------- Сверка «История ↔ таблица» по строкам: скрипт отдаёт строки оплат и премию за месяцы периода ----------
+  // sheetTab – последний ответ: { months: [{y, m, sheet, prem (N1) | err}], rows, days: {дата: премия за день} }; old – скрипт старый; err – не сверилась
+  let sheetTab = null;
+  const ymOf = d => { const x = dmyDate(d); return x.getFullYear() * 100 + x.getMonth() + 1; };
+  // строки за месяцы периода и прошлый месяц (там ищем «этот человек уже платил»), не больше года; false – скрипт старый
+  async function tabFetch(from, to) {
+    const h = histGet(), now = new Date();
+    to = to || now;
+    from = from || (h.length ? new Date(Math.min(...h.map(e => +dmyDate(e.d)))) : now);
+    const cap = new Date(to.getFullYear(), to.getMonth() - 12, 1);
+    let a = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    if (a < cap) a = cap;
+    const j = await sheetPost({ rows: { from: ddmm(a), to: ddmm(to) } });
+    if (!Array.isArray(j.rows)) return false;
+    sheetTab = { months: j.months || [], rows: j.rows, days: j.days || {} };
+    tabMatch(true);
+    return true;
+  }
+  // каждой продаже – её строка, как в скрипте: тот же чат на листе месяца продажи, сначала сумма из таблицы (продажу могли
+  // поправить), потом своя; отправленные (✓) – вперёд. Строки без пары – «только в таблице».
+  // persist – по строкам обновить отметки у продаж в истории (✓, что записано в таблице, «у человека уже есть оплата»)
+  function tabMatch(persist) {
+    const t = sheetTab, res = { pair: new Map(), only: [] };
+    if (!t || !t.rows) return res;
+    const ms = new Set(t.months.filter(m => m.sheet).map(m => m.y * 100 + m.m)), h = histGet(), items = [], today = ddmm(new Date());
+    // pair – по ключу «номер смены:номер продажи» (у сегодняшних – «now:номер»)
+    h.forEach((e, hi) => { const ym = ymOf(e.d); if (ms.has(ym)) e.sales.forEach((x, si) => { if (toSheet(x)) items.push({ x, ym, k: hi + ':' + si }); }); });
+    // сегодняшние ещё не отправлены, но если строку уже вписали руками – она не «только в таблице»
+    if (ms.has(ymOf(today))) salesGet().forEach((x, si) => { if (toSheet(x)) items.push({ x, ym: ymOf(today), now: 1, k: 'now:' + si }); });
+    const used = new Set();
+    shOrder(items, o => o.x).forEach(o => {
+      const c = t.rows.filter(r => !used.has(r) && r.ym === o.ym && r.dlg === String(o.x.dlg || ''));
+      const was = o.x.sh && o.x.shT ? o.x.shT.sum : null;
+      const r = (was != null && c.find(r => r.sum === was)) || c.find(r => r.sum === saleTotal(o.x));
+      if (r) { used.add(r); res.pair.set(o.k, r); }
+    });
+    res.only = t.rows.filter(r => !used.has(r));
+    if (!persist) return res;
+    let ch = false;
+    items.forEach(o => {
+      if (o.now) return;
+      const x = o.x, r = res.pair.get(o.k), was = JSON.stringify([x.sh, x.shAlso, x.shT]);
+      if (r) shHere(x, r);
+      else {
+        delete x.sh; delete x.shT;
+        const mail = (x.email || '').trim().toLowerCase(), prev = o.ym % 100 === 1 ? o.ym - 89 : o.ym - 1;
+        const also = t.rows.filter(r => (r.ym === o.ym || r.ym === prev) && (r.dlg && r.dlg === String(x.dlg) || mail && r.email.toLowerCase() === mail))
+          .map(r => ({ row: r.row, sum: r.sum, d: r.d.slice(0, 5), sheet: r.ym === o.ym ? '' : r.sheet }));
+        if (also.length) x.shAlso = alsoTxt(also); else delete x.shAlso;
+      }
+      if (JSON.stringify([x.sh, x.shAlso, x.shT]) !== was) ch = true;
+    });
+    if (ch) histSave(h);
+    return res;
+  }
+  // строка над списком смен: премия за месяц (N1) и что не сходится с таблицей
+  function tabLine(from, to, cnt) {
+    if (!sheetUrl()) return '';
+    const wrap = (t, warn, btn) => '<div class="bs-hist-tab' + (warn ? ' bs-warn' : '') + '"><span>📊 ' + t + '</span>' + (btn ? '<button data-a="tabsync" title="Заново прочитать таблицу и сверить с историей">Сверить</button>' : '') + '</div>';
+    if (sheetBusy) return wrap('Сверяю с таблицей…');
+    if (!sheetTab) return '';
+    if (sheetTab.old) return wrap('Обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом новая версия развёртывания) – тогда тут будет премия и сверка всех строк', true);
+    if (sheetTab.err) return wrap('Таблица не сверилась: ' + esc(sheetTab.err), true, 1);
+    const lo = from ? from.getFullYear() * 100 + from.getMonth() + 1 : 0, hi = to ? to.getFullYear() * 100 + to.getMonth() + 1 : 1e9;
+    const months = sheetTab.months.filter(m => m.y * 100 + m.m >= lo && m.y * 100 + m.m <= hi && (from || m.sheet));
+    const bad = cnt.miss + cnt.bad + cnt.only;
+    return wrap(months.map(m => m.sheet ? (m.prem != null ? 'премия за ' + MONTHS[m.m - 1] + ': <b>' + rub(m.prem) + ' ₽</b>' : '') : 'нет листа за ' + MONTHS[m.m - 1]).filter(Boolean)
+      .concat(bad ? '⚠ ' + [cnt.miss && 'нет в таблице ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean).join(', ') : 'с историей всё сходится ✓').join(' · '), bad, 1);
+  }
+  // оплаты дня, которые есть только в таблице
+  function onlyHtml(e, rs) {
+    if (!rs.length) return '';
+    const add = !e.now;   // в идущую смену не добавляем – она ещё не в истории
+    return '<div class="bs-hist-onlyh"><span>Только в таблице – в помощнике этих оплат нет</span>' + (add && rs.length > 1 ? '<button data-a="tabadd" data-d="' + e.d + '" class="bs-hist-sh">+ все</button>' : '') + '</div>' +
+      rs.map(r => '<div class="bs-hist-s bs-hist-only" title="' + esc(r.sheet + ', стр. ' + r.row + (r.email ? ', ' + r.email : '')) + '"><span>' + esc(r.name || 'без продукта') + (r.dlg ? '' : ' <small>(без ссылки на чат)</small>') + '</span>' +
+        '<span>' + rub(r.sum) + ' ₽ · ' + frac(shareFor(r.mops || 1)) + '</span>' +
+        (add ? '<button data-a="tabadd" data-r="' + esc(r.sheet + ':' + r.row) + '" class="bs-hist-sh bs-warn" title="Добавить эту оплату продажей в смену ' + e.d + '">+ сюда</button>' : '<b class="bs-hist-sh" title="Добавишь, когда закроешь смену">табл.</b>') + '<s class="bs-hist-sgap"></s></div>').join('');
   }
   // сумма, почта и число менеджеров в таблице – как в продаже (поправили в помощнике после отправки). only – одна продажа.
   // Шлём всю смену в том же порядке, что и сверка, – тогда каждой продаже достаётся её строка
@@ -2861,6 +3002,14 @@
       '.bs-hist-move .bs-seg{flex:none}.bs-hist-move .bs-seg em{display:block;padding:2px 10px;font-size:12px;text-align:center}.bs-hist-move small{font-size:11px}.bs-foot button.bs-mine.on{color:#16a34a}.bs-stats small{font-size:12px;font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
+      '.bs-prem .bs-hist-row em{grid-template-columns:72px 104px 88px 64px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
+      '.bs-hist-zero>b,.bs-hist-zero>em{opacity:.45}.bs-hist-zero.open>b,.bs-hist-zero:hover>b{opacity:1}' +
+      '.bs-hist-row>b .bs-hist-tabm{margin-left:6px;font-size:11px;font-weight:400;font-style:normal;color:#16a34a}.bs-hist-row>b .bs-hist-tabm.bs-warn{color:#d97706}' +
+      '.bs-hist-row>b .bs-hist-mine.bs-warn{color:#d97706;background:rgba(245,158,11,.12)}' +
+      '.bs-hist-tab{display:flex;align-items:center;gap:8px;margin:-2px 0 10px;padding:6px 10px;border-radius:9px;background:var(--bs-hover,#f5f7fa);font-size:12px;color:var(--bs-muted,#888)}.bs-hist-tab span{flex:1}.bs-hist-tab b{color:var(--bs-text,#222);font-variant-numeric:tabular-nums}' +
+      '.bs-hist-tab.bs-warn{background:rgba(245,158,11,.1);color:#b45309}' +
+      '.bs-hist-tab button{padding:2px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer}.bs-hist-tab button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-sales .bs-hist-onlyh{margin-top:4px;color:#d97706}.bs-hist-sales .bs-hist-only{cursor:default}.bs-hist-only small{color:var(--bs-muted,#888)}.bs-hist-sgap{flex:none;width:18px}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
       '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
       '.bs-hist-other{color:var(--bs-muted,#888)}' +

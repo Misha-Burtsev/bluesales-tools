@@ -8,12 +8,14 @@
 // Формулы (C, D, H, J, L, N) не трогает. День в таблице – это строки от даты в O до следующей даты,
 // поэтому продажа за день, который уже есть, встаёт в конец этого дня, а новый день – по порядку дат.
 // Одну и ту же продажу (тот же чат и сумма на этом листе, в том числе внесённую руками) второй раз не добавляет.
+// Для «Истории» отдаёт строки оплат за месяцы периода и премию: N у первой строки дня (где дата в O) – за день, N1 – за месяц.
 //
 // Строка ниже – доступ только к этой таблице, а не ко всем таблицам на Google Диске.
 /** @OnlyCurrentDoc */
 
 const COL = { name: 1, kind: 2, link: 5, pay: 6, sum: 7, email: 9, mops: 11, date: 15 };
 const WIDTH = 15;   // A…O – строки продаж; правее (справочник продуктов) не трогаем
+const PREM = 14;    // N – премия: N1 за месяц, в строке с датой – за день (формулы, только читаем)
 const MONTH_NAMES = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const MONTHS = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
 
@@ -28,6 +30,7 @@ function doPost(e) {
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
     // (две оплаты в одном чате на одну сумму – это две строки)
     const memo = { used: new Set() };
+    if (body.rows) return out(Object.assign({ ok: true }, sheetRows(ss, body.rows, memo)));
     // fix – то же, что сверка, но у найденных продаж с fix:1 пишем сумму, почту и число менеджеров из помощника
     const list = body.find || body.fix;
     if (list) return out({ ok: true, res: list.map(s => {
@@ -166,6 +169,39 @@ function findSale(ss, s, got, memo) {
   if (prev && prev.sh.getName() !== sh.getName()) scan(prev.vals, prev.forms, prev.n, prev.sh.getName());
   if (got) got.also = also;
   return also.length ? { st: 'miss', also } : null;
+}
+
+// строки оплат и премия за месяцы с from по to («дд.мм.гггг»), ничего не пишет: помощник сам сверит их с «Историей».
+// Листа за месяц нет – в months у него err
+function sheetRows(ss, q, memo) {
+  const a = dayOf(q.from), b = dayOf(q.to);
+  if (!a || !b) throw new Error('Нет периода');
+  const z = x => ('0' + x).slice(-2), dmy = p => z(p.d) + '.' + z(p.m) + '.' + p.y;
+  const num = v => { if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(',', '.')); return isNaN(x) ? null : x; };
+  const months = [], rows = [], days = {};
+  for (let y = a.y, m = a.m; y * 100 + m <= b.y * 100 + b.m;) {
+    let c = null;
+    try { c = monthSheet(ss, { y, m, d: 1 }, memo); } catch (err) { months.push({ y, m, err: String(err && err.message || err) }); }
+    if (c) {
+      const { sh, n, vals, forms } = c, name = sh.getName();
+      months.push({ y, m, sheet: name, prem: num(vals[0][PREM - 1]) });
+      let day = '';   // дата пишется только у первой продажи дня – там и премия за день
+      for (let r = 2; r <= n; r++) {
+        const v = vals[r - 1];
+        if (v[COL.date - 1] !== '') {
+          const p = dayOf(v[COL.date - 1], y);
+          if (p) { day = dmy(p); const pr = num(v[PREM - 1]); if (pr != null) days[day] = (days[day] || 0) + pr; }
+        }
+        const prod = String(v[COL.name - 1]).trim(), sum = +v[COL.sum - 1] || 0;
+        if (!prod && !sum) continue;
+        const dlg = /dialogId=(\d+)/.exec(String(v[COL.link - 1]) + forms[r - 1][0]);
+        rows.push({ sheet: name, ym: y * 100 + m, row: r, d: day, name: prod, kind: String(v[COL.kind - 1]).trim(), pay: String(v[COL.pay - 1]).trim(),
+          sum, email: String(v[COL.email - 1]).trim(), mops: +v[COL.mops - 1] || 0, dlg: dlg ? dlg[1] : '' });
+      }
+    }
+    if (++m > 12) { m = 1; y++; }
+  }
+  return { months, rows, days };
 }
 
 const dayKey = d => { const p = dayOf(d); return p.y * 100 + p.m; };
