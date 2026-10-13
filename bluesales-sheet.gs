@@ -28,14 +28,15 @@ function doPost(e) {
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
     // (две оплаты в одном чате на одну сумму – это две строки)
     const memo = { used: new Set() };
-    // fix – то же, что сверка, но у найденных продаж с fix:1 правим число менеджеров
+    // fix – то же, что сверка, но у найденных продаж с fix:1 пишем сумму, почту и число менеджеров из помощника
     const list = body.find || body.fix;
     if (list) return out({ ok: true, res: list.map(s => {
       try {
         const r = findSale(ss, s, null, memo) || { st: 'miss' };
         if (body.fix && s.fix && r.st === 'dup') {
-          memo[dayKey(s.d)].sh.getRange(r.row, COL.mops).setValue(+s.mops || 1);
-          return { st: 'fix', row: r.row, sheet: r.sheet, mops: +s.mops || 1 };
+          const sh = memo[dayKey(s.d)].sh, v = { sum: +s.sum || 0, email: String(s.email || '').trim(), mops: +s.mops || 1 };
+          Object.keys(v).forEach(k => sh.getRange(r.row, COL[k]).setValue(v[k]));
+          return Object.assign({ st: 'fix', row: r.row, sheet: r.sheet }, v);
         }
         return r;
       }
@@ -134,21 +135,28 @@ function findSale(ss, s, got, memo) {
   const re = s.dlg ? new RegExp('dialogId=' + s.dlg + '(?!\\d)') : null;
   const mail = String(s.email || '').trim().toLowerCase(), also = [];
   // тот же человек (чат или почта): на листе месяца с той же суммой – повтор, иначе пусть перепроверят
+  // was – сумма, с которой продажа записана в таблицу (в помощнике её потом поправили): сначала ищем строку по ней
+  const used = memo && memo.used, was = s.was != null && s.was !== '' ? +s.was : null;
   const scan = (vals, forms, n, name) => {
-    let day = '';   // дата пишется только у первой продажи дня
+    let day = '', hitWas = 0, hitSum = 0;   // дата пишется только у первой продажи дня
     for (let r = 2; r <= n; r++) {
       const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
       if (v[COL.date - 1] !== '') day = dmOf(v[COL.date - 1]);
       const byDlg = re && re.test(link), sum = +v[COL.sum - 1];
       // force – помощник уже сверил и знает, что это отдельная оплата
-      const key = sh.getName() + ':' + r, used = memo && memo.used;
-      if (!name && byDlg && sum === +s.sum && !s.force && !(used && used.has(key))) {
-        if (used) used.add(key);
-        return { st: 'dup', row: r, sheet: sh.getName(), mops: +v[COL.mops - 1] || 0 };
+      if (!name && byDlg && !s.force && !(used && used.has(sh.getName() + ':' + r))) {
+        if (!hitWas && was !== null && sum === was) hitWas = r;
+        if (!hitSum && sum === +s.sum) hitSum = r;
       }
       if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
         also.push(name ? { row: r, sum, d: day, sheet: name } : { row: r, sum, d: day });
     }
+    const r = hitWas || hitSum;
+    if (!r) return null;
+    if (used) used.add(sh.getName() + ':' + r);
+    // что в этой строке сейчас – помощник сравнит со своей продажей
+    const v = vals[r - 1];
+    return { st: 'dup', row: r, sheet: sh.getName(), sum: +v[COL.sum - 1] || 0, email: String(v[COL.email - 1]).trim(), mops: +v[COL.mops - 1] || 0 };
   };
   const dup = scan(vals, forms, n);
   if (dup) return dup;
