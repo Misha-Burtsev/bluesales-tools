@@ -7,7 +7,7 @@
 // (A продукт, B 1 предмет/комбо, E ссылка на чат, F месяц/год, G сумма оплаты, I почта, K число менеджеров, O дата).
 // Формулы (C, D, H, J, L, N) не трогает. День в таблице – это строки от даты в O до следующей даты,
 // поэтому продажа за день, который уже есть, встаёт в конец этого дня, а новый день – по порядку дат.
-// Одну и ту же продажу (тот же чат, продукт и сумма) второй раз не добавляет.
+// Одну и ту же продажу (тот же чат и сумма на этом листе, в том числе внесённую руками) второй раз не добавляет.
 //
 // Строка ниже – доступ только к этой таблице, а не ко всем таблицам на Google Диске.
 /** @OnlyCurrentDoc */
@@ -99,11 +99,11 @@ function addSale(ss, s) {
   const n = Math.max(sh.getLastRow(), 2);
   const vals = sh.getRange(1, 1, n, WIDTH).getValues();
   const forms = sh.getRange(1, COL.link, n, 1).getFormulas();
-  // уже есть: тот же чат, продукт и сумма (в том числе внесённые руками)
+  // уже есть: тот же чат и сумма (продукт руками могли записать по-своему)
   const dlg = 'dialogId=' + s.dlg;
   for (let r = 2; r <= n; r++) {
     const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
-    if (s.dlg && link.indexOf(dlg) >= 0 && String(v[COL.name - 1]).trim() === String(s.name).trim() && +v[COL.sum - 1] === +s.sum)
+    if (s.dlg && new RegExp(dlg + '(?!\\d)').test(link) && +v[COL.sum - 1] === +s.sum)
       return { st: 'dup', row: r, sheet: sh.getName() };
   }
   const A = vals.map(v => v[COL.name - 1]);
