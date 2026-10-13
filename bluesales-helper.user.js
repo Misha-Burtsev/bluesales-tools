@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.46.3
+// @version      1.46.4
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1640,7 +1640,7 @@
   const histGet = () => jget(HIST_KEY, []);
   const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
   // в архив – только то, что нужно для статистики, без лишних полей
-  const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, sh: x.sh });
+  const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, sh: x.sh, shM: x.shM, shAlso: x.shAlso });
   const histRep = r => { const o = {}; ['leads', 'blocks', 'chats', 'links', 'bought', 'sum', 'rem'].forEach(k => { if (r[k] != null && r[k] !== '') o[k] = +r[k] || 0; }); return o; };
   // true – если запись получилась (если место в браузере кончилось – выкидываем самые старые смены)
   function histPush(e) {
@@ -2073,7 +2073,8 @@
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
-              (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
+              (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице менеджеров: ' + x.shM + ', а в продаже – ' + saleMops(x) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
+                x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
@@ -2119,11 +2120,18 @@
         return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintBody(); })
           .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintBody(); });
       }
+      if (a === 'sheetfix') {
+        const f = find(row);
+        if (!f) return paintBody();
+        t.disabled = true; t.textContent = t.dataset.si ? '…' : 'Исправляю…';
+        return sheetFix(f.i, f.h[f.i].end, t.dataset.si ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.gone; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + fixMsg(st), ok); paintBody(); })
+          .catch(err => { tarHint('Исправить не вышло: ' + err.message); paintBody(); });
+      }
       if (a === 'sheetchk') {
         const f = find(row);
         if (!f) return paintBody();
         t.disabled = true; t.textContent = 'Сверяю…';
-        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { if (sheetAutoErr) sheetAutoErr.keys.delete(f.i + ':' + f.h[f.i].end); return st; }).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
+        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { if (sheetAutoErr) sheetAutoErr.keys.delete(f.i + ':' + f.h[f.i].end); return st; }).then(st => { tarHint((st.err.length || st.here < st.n || st.mops ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n && !st.mops); paintBody(); })
           .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
       }
       if (a === 'hrep') {
@@ -2219,7 +2227,7 @@
       const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
       note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
         (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '') +
-        (x.sh ? ' · уже в таблице – правки туда сами не уйдут' : '');
+        (x.sh ? ' · уже в таблице: число менеджеров там поправишь кнопкой «↻ табл.», остальное – руками' : '');
     };
     paint();
     box.addEventListener('input', ev => { const k = ev.target.dataset.k; if (k) { x[k] = ev.target.value; paint(); } });
@@ -2277,9 +2285,15 @@
   }
   // в таблицу идут только продажи с моей долей
   const toSheet = x => x.cnt !== false && saleShare(x) > 0;
+  // менеджеров для таблицы – из доли (0.5 → 2)
+  const saleMops = x => Math.max(1, Math.round(1 / (+x.share || 1)));
+  // в таблице записано другое число менеджеров (shM – что там стоит по последней сверке/отправке)
+  const shBad = x => !!x.sh && x.shM != null && x.shM !== saleMops(x);
+  // найденная в таблице строка: отметка ✓ и сколько там менеджеров
+  const shHere = (x, r) => { x.sh = 1; delete x.shAlso; if (r.mops) x.shM = r.mops; };
   const sheetSale = (d, x) => ({
     d, dlg: x.dlg, name: x.name, kind: saleKind(x), pay: salePay(x), sum: saleTotal(x), email: (x.email || '').trim(),
-    mops: Math.max(1, Math.round(1 / (+x.share || 1))), link: 'https://bluesales.ru/app/messenger/?dialogId=' + x.dlg,
+    mops: saleMops(x), link: 'https://bluesales.ru/app/messenger/?dialogId=' + x.dlg,
   });
   async function sheetPost(body, url) {
     url = url || sheetUrl();
@@ -2315,7 +2329,7 @@
     if (checked) {
       idx = idx.filter(i => {
         const r = f.res[all.indexOf(i)];
-        if (r.st === 'dup') { st.dup++; mark(i, x => { x.sh = 1; delete x.shAlso; }); return false; }
+        if (r.st === 'dup') { st.dup++; mark(i, x => shHere(x, r)); return false; }
         if (r.also && r.also.length) warn.push({ i, t: alsoTxt(r.also) });
         return true;
       });
@@ -2340,7 +2354,7 @@
         if (r.st === 'add') st.rows.push(r.sheet + ', стр. ' + r.row);
         // тот же человек пришёл в этой же отправке – заранее не спросили
         if (r.also && r.also.length && !warn.some(w => w.i === i)) st.late++;
-        mark(i, x => { x.sh = 1; delete x.shAlso; });
+        mark(i, x => shHere(x, r.st === 'add' ? { mops: saleMops(x) } : r));
       });
     }
     if (same) histSave(h);
@@ -2355,7 +2369,7 @@
       if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
       shOrder(e.sales.map((x, i) => ({ hi, end, i, x, d: e.d })).filter(o => toSheet(o.x)), o => o.x).forEach(o => items.push(o));
     });
-    const st = { n: items.length, here: 0, gone: 0, miss: 0, also: 0, nosheet: '', err: [] };
+    const st = { n: items.length, here: 0, gone: 0, miss: 0, also: 0, mops: 0, nosheet: '', err: [] };
     if (!items.length) return st;
     const j = await sheetPost({ find: items.map(o => sheetSale(o.d, o.x)) });
     if (!Array.isArray(j.res) || j.res.length !== items.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
@@ -2367,33 +2381,67 @@
       if (r.st === 'err') return void st.err.push(r.msg);
       // листа за тот месяц в таблице уже нет – отметку оставляем как была
       if (r.st === 'nosheet') return void (st.nosheet = r.msg);
-      if (r.st === 'dup') { st.here++; if (ok && (!x.sh || x.shAlso)) { x.sh = 1; delete x.shAlso; ch = true; } return; }
+      if (r.st === 'dup') {
+        st.here++;
+        if (ok && (!x.sh || x.shAlso || (r.mops && r.mops !== x.shM))) { shHere(x, r); ch = true; }
+        if (r.mops && r.mops !== saleMops(o.x)) st.mops++;
+        return;
+      }
       if (o.x.sh) st.gone++; else st.miss++;
       const also = alsoTxt(r.also);
       if (also) st.also++;
-      if (ok && (x.sh || (x.shAlso || '') !== also)) { delete x.sh; if (also) x.shAlso = also; else delete x.shAlso; ch = true; }
+      if (ok && (x.sh || (x.shAlso || '') !== also)) { delete x.sh; delete x.shM; if (also) x.shAlso = also; else delete x.shAlso; ch = true; }
     });
     if (ch) histSave(h);
     return st;
   }
+  // число менеджеров в таблице – как в продаже (поправили в отчёте после отправки). only – одна продажа.
+  // Шлём всю смену в том же порядке, что и сверка, – тогда каждой продаже достаётся её строка
+  async function sheetFix(hi, end, only) {
+    const e = histGet()[hi];
+    if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    const all = shOrder(e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i])), i => e.sales[i]);
+    const want = i => shBad(e.sales[i]) && (only == null || i === only);
+    const st = { n: all.filter(want).length, fix: 0, gone: 0, err: [] };
+    if (!st.n) return st;
+    const j = await sheetPost({ fix: all.map(i => Object.assign(sheetSale(e.d, e.sales[i]), want(i) ? { fix: 1 } : {})) });
+    if (!Array.isArray(j.res) || j.res.length !== all.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
+    const h = histGet(), e2 = h[hi];
+    if (!e2 || String(e2.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    all.forEach((i, k) => {
+      if (!want(i)) return;
+      const r = j.res[k], x = e2.sales[i], ok = x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name;
+      if (r.st === 'fix') { st.fix++; if (ok) x.shM = r.mops; return; }
+      if (r.st === 'err' || r.st === 'nosheet') return void st.err.push(r.msg);
+      // строки уже нет – значит, и отметка ✓ неверна
+      st.gone++;
+      if (ok) { delete x.sh; delete x.shM; }
+    });
+    histSave(h);
+    return st;
+  }
+  const fixMsg = st => [st.fix && 'исправил число менеджеров: ' + st.fix, st.gone && 'не нашёл в таблице ' + st.gone + ' – отправь заново',
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ') || 'исправлять нечего';
   // сверка при открытии истории: какие смены сейчас сверяются и чем кончилась прошлая
   let sheetBusy = null, sheetAutoErr = null, sheetTok = 0;
   const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
     st.nosheet && st.nosheet + ' – отметки оставил как были',
     st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»',
-    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата – перепроверь'].filter(Boolean).join(' · ');
+    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата – перепроверь',
+    st.mops && '⚠ у ' + st.mops + ' продаж в таблице другое число менеджеров – нажми «↻ табл.» или «Исправить»'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
     [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
   function sheetLine(e) {
     const xs = e.sales.filter(toSheet);
     if (e.now || !sheetUrl() || !xs.length) return '';
-    const done = xs.filter(x => x.sh).length;
+    const done = xs.filter(x => x.sh).length, bad = xs.filter(shBad).length;
     if (sheetBusy && sheetBusy.has(e.hi + ':' + e.end)) return '<p class="bs-hist-move"><span>Таблица: сверяю…</span></p>';
     const err = sheetAutoErr && sheetAutoErr.keys.has(e.hi + ':' + e.end) ? sheetAutoErr.msg : '';
     return '<p class="bs-hist-move"><span>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) +
-      (err ? ' · не сверилась: ' + esc(err) : '') + '</span>' +
+      (bad ? ' · у ' + bad + ' другое число менеджеров' : '') + (err ? ' · не сверилась: ' + esc(err) : '') + '</span>' +
       '<button data-a="sheetchk" title="Посмотреть в таблице, какие продажи смены там правда есть – отметки у продаж обновятся">Сверить</button>' +
+      (bad ? '<button data-a="sheetfix" title="Поставить в таблице число менеджеров как в продажах">Исправить' + (bad > 1 ? ' ' + bad : '') + '</button>' : '') +
       (done < xs.length ? '<button data-a="sheet" title="Отправить все продажи без ✓">Отправить' + (xs.length - done > 1 ? ' все ' + (xs.length - done) : '') + '</button>' : '') + '</p>';
   }
   function openSheet() {

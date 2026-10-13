@@ -28,8 +28,17 @@ function doPost(e) {
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
     // (две оплаты в одном чате на одну сумму – это две строки)
     const memo = { used: new Set() };
-    if (body.find) return out({ ok: true, res: body.find.map(s => {
-      try { return findSale(ss, s, null, memo) || { st: 'miss' }; }
+    // fix – то же, что сверка, но у найденных продаж с fix:1 правим число менеджеров
+    const list = body.find || body.fix;
+    if (list) return out({ ok: true, res: list.map(s => {
+      try {
+        const r = findSale(ss, s, null, memo) || { st: 'miss' };
+        if (body.fix && s.fix && r.st === 'dup') {
+          memo[dayKey(s.d)].sh.getRange(r.row, COL.mops).setValue(+s.mops || 1);
+          return { st: 'fix', row: r.row, sheet: r.sheet, mops: +s.mops || 1 };
+        }
+        return r;
+      }
       catch (err) { return { st: err.noSheet ? 'nosheet' : 'err', msg: String(err && err.message || err) }; }
     }) });
     const res = (body.sales || []).map(s => {
@@ -135,7 +144,7 @@ function findSale(ss, s, got, memo) {
       const key = sh.getName() + ':' + r, used = memo && memo.used;
       if (!name && byDlg && sum === +s.sum && !s.force && !(used && used.has(key))) {
         if (used) used.add(key);
-        return { st: 'dup', row: r, sheet: sh.getName() };
+        return { st: 'dup', row: r, sheet: sh.getName(), mops: +v[COL.mops - 1] || 0 };
       }
       if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
         also.push(name ? { row: r, sum, d: day, sheet: name } : { row: r, sum, d: day });
@@ -150,6 +159,8 @@ function findSale(ss, s, got, memo) {
   if (got) got.also = also;
   return also.length ? { st: 'miss', also } : null;
 }
+
+const dayKey = d => { const p = dayOf(d); return p.y * 100 + p.m; };
 
 // лист месяца и его значения – читаем один раз на запрос
 function monthSheet(ss, p, memo) {
