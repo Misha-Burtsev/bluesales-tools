@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.46.5
+// @version      1.47.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1638,6 +1638,12 @@
   // ---------- История смен: закрытая смена (кнопкой или сменой даты) уходит в архив bsHistory ----------
   const HIST_KEY = 'bsHistory', HIST_MAX = 180;
   const histGet = () => jget(HIST_KEY, []);
+  // моя смена или нет (моя продажа может закрыться и в чужую смену). mine ставится при закрытии дня:
+  // «Закрыть смену» – моя, день закрылся сам – не моя (или как отметили руками). Старые смены и импорт –
+  // по работе за день: были мои лиды, чаты или ссылки – значит, моя
+  const MINE_KEY = 'bsShiftMine';
+  const shiftMine = e => e.mine != null ? !!e.mine : ['leads', 'blocks', 'chats', 'links'].some(k => +(e.rep || {})[k] > 0);
+  const curMine = () => { const m = jget(MINE_KEY, {}); return m.d === ddmm(new Date()) ? !!m.v : null; };
   const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
   // в архив – только то, что нужно для статистики, без лишних полей
   const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, sh: x.sh, shT: x.shT, shAlso: x.shAlso });
@@ -1667,6 +1673,8 @@
       const e = { d, end: Date.now(), rep: hasRep ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [], text: hasRep ? r.text || repText(r, repFem()) : '' };
       // день сменился сам, без «Закрыть смену» – лиды и чаты досчитает repAuto
       if (!all) Object.assign(e, { fix: 1 }, hasRep && r.text != null ? { own: 1 } : {});
+      const mk = jget(MINE_KEY, {});
+      e.mine = mk.d === d ? !!mk.v : !!all;
       const ok = histPush(e);
       if (!ok) return false;   // не влезло – ничего не стираем
     }
@@ -1954,7 +1962,7 @@
   function histAll() {
     const cur = repSaved(), curSales = salesGet();
     const all = histGet().map((e, hi) => Object.assign({ hi }, e));
-    if (repHas(cur) || curSales.length) all.push({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales });
+    if (repHas(cur) || curSales.length || curMine() != null) all.push(Object.assign({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales }, curMine() != null ? { mine: curMine() } : {}));
     return all.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
   }
   function histSave(h) {
@@ -1993,7 +2001,7 @@
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
   function paintShift(box) {
-    const list = salesGet(), r = repSaved(), now = new Date();
+    const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine() != null ? curMine() : shiftMine({ rep: r });
     box.innerHTML =
       statsHtml([['Сегодня', ddmm(now).slice(0, 5) + ', ' + WD[now.getDay()]], ['Продано', r2s(r.bought)], ['Сумма', rub(+r.sum || 0) + ' ₽'], ['Ссылки', +r.links || 0]]) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
@@ -2001,12 +2009,15 @@
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
-      '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button><span></span>' +
+      '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
+      '<button data-a="mine" class="bs-ghost bs-mine' + (mine ? ' on' : '') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
+        (curMine() == null ? 'Сейчас угадано по работе за день (есть твои лиды, чаты или ссылки). «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : '') + 'Нажми, чтобы поменять">' + (mine ? '● Моя смена' : '○ Не моя смена') + '</button><span></span>' +
       '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
       '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'me') return askMe();
+      if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
       if (a === 'shift') {
         if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
@@ -2028,6 +2039,7 @@
     const t = h[j];
     Object.keys(Object.assign({}, t.rep, e.rep)).forEach(k => { t.rep[k] = Math.round(((+t.rep[k] || 0) + (+e.rep[k] || 0)) * 100) / 100; });
     t.sales = (t.sales || []).concat(e.sales || []);
+    if (shiftMine(e)) t.mine = true;   // хоть одна из двух – моя
     h.splice(i, 1);
   }
   // дата из поля ввода – только целиком набранная (пока год печатается, там 0002, 0020…)
@@ -2060,15 +2072,17 @@
     const paintBody = () => {
       const [from, to] = histRange();
       const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
-      const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
+      // лиды, чаты, ссылки – только за мои смены (в чужую смену CRM могла что-то насчитать); продажи и сумма – за все
+      const WORK = ['leads', 'blocks', 'chats', 'links'];
+      const tot = k => list.reduce((a, e) => a + (WORK.includes(k) && !shiftMine(e) ? 0 : +e.rep[k] || 0), 0);
       const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
       const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k)), sheetOn = !!sheetUrl();
       if (histKeep) { open.add(histKeep); histKeep = null; }
       body.innerHTML =
-        statsHtml([['Смен', list.length], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
+        statsHtml([['Смен', list.length + (list.some(e => !shiftMine(e)) ? '<small> · моих ' + list.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
         (list.length ? '<div class="bs-hist-list">' + list.map(e => {
           const k = e.now ? 'now' : e.hi + ':' + e.end;
-          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span><i class="bs-hist-mine' + (shiftMine(e) ? ' on' : '') + '">' + (shiftMine(e) ? 'моя' : 'не моя') + '</i></b>' +
             '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
@@ -2078,6 +2092,8 @@
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
+            '<p class="bs-hist-move"><span>Смена' + (e.mine == null ? ' <small>(угадано по работе за день)</small>' : '') + (shiftMine(e) ? '' : ' <small>– лиды, чаты и ссылки не идут в итог</small>') + '</span><span class="bs-seg">' +
+              [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (+shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span></p>' +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
             '</div></div>';
@@ -2133,6 +2149,17 @@
         t.disabled = true; t.textContent = 'Сверяю…';
         return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { if (sheetAutoErr) sheetAutoErr.keys.delete(f.i + ':' + f.h[f.i].end); return st; }).then(st => { tarHint((st.err.length || st.here < st.n || st.mops ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n && !st.mops); paintBody(); })
           .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
+      }
+      if (a === 'mine') {
+        const v = t.dataset.v === '1';
+        if (row.dataset.k === 'now') jset(MINE_KEY, { d: ddmm(new Date()), v });
+        else {
+          const f = find(row);
+          if (!f) return paintBody();
+          f.h[f.i].mine = v;
+          if (!histSave(f.h)) return;
+        }
+        return repaint();
       }
       if (a === 'hrep') {
         if (row.dataset.k === 'now') return openSales('rep');
@@ -2828,6 +2855,8 @@
       '.bs-hist-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-hist-row{display:grid;grid-template-columns:1fr auto 22px;align-items:center;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-row>b span{margin-left:6px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hist-row>b .bs-hist-mine{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:400;font-style:normal;color:var(--bs-muted,#888);background:var(--bs-hover,rgba(0,0,0,.06))}.bs-hist-row>b .bs-hist-mine.on{color:#16a34a;background:rgba(22,163,74,.1)}' +
+      '.bs-hist-move .bs-seg{flex:none}.bs-hist-move .bs-seg em{display:block;padding:2px 10px;font-size:12px;text-align:center}.bs-hist-move small{font-size:11px}.bs-foot button.bs-mine.on{color:#16a34a}.bs-stats small{font-size:12px;font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
