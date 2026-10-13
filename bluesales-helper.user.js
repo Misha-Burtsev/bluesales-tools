@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.44.0
+// @version      1.45.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2082,19 +2082,22 @@
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
     };
     const repaint = () => { paintPer(); paintBody(); };
-    // сама сверяет с таблицей закрытые смены за период – вдруг строки удалили или дописали руками
+    // сама сверяет с таблицей закрытые смены текущего месяца за период – вдруг строки удалили или дописали руками
     const autoCheck = () => {
       if (!sheetUrl()) return;
-      const [from, to] = histRange();
+      const [from, to] = histRange(), now = new Date();
+      // только текущий месяц: старые листы в таблице удаляют, там отметки остаются как были
       const list = histGet().map((e, hi) => ({ hi, end: e.end, e })).filter(({ e }) => {
         const d = dmyDate(e.d);
-        return (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+        return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() &&
+          (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
       }).map(({ hi, end }) => ({ hi, end }));
       if (!list.length) return;
       const tok = ++sheetTok;
-      sheetBusy = new Set(list.map(o => o.hi + ':' + o.end));
+      const keys = new Set(list.map(o => o.hi + ':' + o.end));
+      sheetBusy = keys;
       paintBody();
-      sheetCheck(list).then(st => { sheetAutoErr = st.err.length ? st.err.join('; ') : ''; }, err => { sheetAutoErr = err.message; })
+      sheetCheck(list).then(st => { sheetAutoErr = st.err.length ? { keys, msg: st.err.join('; ') } : null; }, err => { sheetAutoErr = { keys, msg: err.message }; })
         .then(() => { if (tok !== sheetTok) return; sheetBusy = null; if (body.isConnected) paintBody(); });
     };
     repaint();
@@ -2119,7 +2122,7 @@
         const f = find(row);
         if (!f) return paintBody();
         t.disabled = true; t.textContent = 'Сверяю…';
-        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { sheetAutoErr = ''; return st; }).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
+        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { if (sheetAutoErr) sheetAutoErr.keys.delete(f.i + ':' + f.h[f.i].end); return st; }).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
           .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
       }
       if (a === 'hrep') {
@@ -2283,7 +2286,7 @@
     let r;
     // text/plain – простой запрос, Google отвечает без предварительной проверки CORS
     try { r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }); }
-    catch (e) { throw new Error('таблица не ответила – проверь ссылку и что в развёртывании доступ «Все»'); }
+    catch (e) { throw new Error('таблица не ответила – проверь интернет, ссылку и что в развёртывании доступ «Все»'); }
     let j; try { j = await r.json(); } catch (e) {}
     if (!j) throw new Error('таблица ответила не так (' + r.status + ') – проверь ссылку …/exec');
     if (!j.ok) throw new Error(j.msg || 'ошибка в таблице');
@@ -2319,7 +2322,7 @@
       if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
       e.sales.forEach((x, i) => { if (toSheet(x)) items.push({ hi, end, i, x, d: e.d }); });
     });
-    const st = { n: items.length, here: 0, gone: 0, miss: 0, err: [] };
+    const st = { n: items.length, here: 0, gone: 0, miss: 0, nosheet: '', err: [] };
     if (!items.length) return st;
     const j = await sheetPost({ find: items.map(o => sheetSale(o.d, o.x)) });
     if (!Array.isArray(j.res) || j.res.length !== items.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
@@ -2329,6 +2332,8 @@
       const r = j.res[k], e2 = h[o.hi], x = e2 && String(e2.end) === String(o.end) && e2.sales[o.i];
       const ok = x && x.dlg === o.x.dlg && x.name === o.x.name;
       if (r.st === 'err') return void st.err.push(r.msg);
+      // листа за тот месяц в таблице уже нет – отметку оставляем как была
+      if (r.st === 'nosheet') return void (st.nosheet = r.msg);
       if (r.st === 'dup') { st.here++; if (ok && !x.sh) { x.sh = 1; ch = true; } return; }
       if (o.x.sh) st.gone++; else st.miss++;
       if (ok && x.sh) { delete x.sh; ch = true; }
@@ -2337,9 +2342,10 @@
     return st;
   }
   // сверка при открытии истории: какие смены сейчас сверяются и чем кончилась прошлая
-  let sheetBusy = null, sheetAutoErr = '', sheetTok = 0;
-  const checkMsg = st => [st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
-    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.here < st.n - st.err.length && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»'].filter(Boolean).join(' · ');
+  let sheetBusy = null, sheetAutoErr = null, sheetTok = 0;
+  const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
+    st.nosheet && st.nosheet + ' – отметки оставил как были',
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
     [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
@@ -2348,8 +2354,9 @@
     if (e.now || !sheetUrl() || !xs.length) return '';
     const done = xs.filter(x => x.sh).length;
     if (sheetBusy && sheetBusy.has(e.hi + ':' + e.end)) return '<p class="bs-hist-move"><span>Таблица: сверяю…</span></p>';
-    return '<p class="bs-hist-move"><span' + (sheetAutoErr ? ' title="' + esc(sheetAutoErr) + '"' : '') + '>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) +
-      (sheetAutoErr ? ' · не сверилась: ' + esc(sheetAutoErr) : '') + '</span>' +
+    const err = sheetAutoErr && sheetAutoErr.keys.has(e.hi + ':' + e.end) ? sheetAutoErr.msg : '';
+    return '<p class="bs-hist-move"><span>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) +
+      (err ? ' · не сверилась: ' + esc(err) : '') + '</span>' +
       '<button data-a="sheetchk" title="Посмотреть в таблице, какие продажи смены там правда есть – отметки у продаж обновятся">Сверить</button>' +
       (done < xs.length ? '<button data-a="sheet" title="Отправить все продажи без ✓">Отправить' + (xs.length - done > 1 ? ' все ' + (xs.length - done) : '') + '</button>' : '') + '</p>';
   }

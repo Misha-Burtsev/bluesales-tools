@@ -14,6 +14,7 @@
 
 const COL = { name: 1, kind: 2, link: 5, pay: 6, sum: 7, email: 9, mops: 11, date: 15 };
 const WIDTH = 15;   // A…O – строки продаж; правее (справочник продуктов) не трогаем
+const MONTH_NAMES = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const MONTHS = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
 
 function doPost(e) {
@@ -26,7 +27,8 @@ function doPost(e) {
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
     const memo = {};   // лист месяца читаем один раз на весь запрос
     if (body.find) return out({ ok: true, res: body.find.map(s => {
-      try { return findSale(ss, s, null, memo) || { st: 'miss' }; } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
+      try { return findSale(ss, s, null, memo) || { st: 'miss' }; }
+      catch (err) { return { st: err.noSheet ? 'nosheet' : 'err', msg: String(err && err.message || err) }; }
     }) });
     const res = (body.sales || []).map(s => {
       try { return addSale(ss, s); } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
@@ -61,8 +63,7 @@ const ord = x => x.y * 10000 + x.m * 100 + x.d;
 function pickSheet(ss, day) {
   const list = salesSheets(ss);
   if (!list.length) throw new Error('Нет листа с шапкой «Продукт» в A1 и «Дата» в O1');
-  const byName = list.filter(sh => sh.getName().toLowerCase().indexOf(MONTHS[day.m - 1]) >= 0 &&
-    (MONTHS[day.m - 1] !== 'ма' || /ма[йя]/i.test(sh.getName())));
+  const byName = list.filter(sh => monthOfName(sh.getName()) === day.m - 1);
   if (byName.length === 1) return byName[0];
   const dates = list.map(sh => {
     const n = sh.getLastRow();
@@ -70,10 +71,21 @@ function pickSheet(ss, day) {
   });
   const same = list.filter((sh, i) => dates[i].some(x => x.y === day.y && x.m === day.m));
   if (same.length === 1) return same[0];
-  const empty = list.filter((sh, i) => !dates[i].length);
-  if (empty.length === 1) return empty[0];
-  if (list.length === 1) return list[0];
-  throw new Error('Не понял, на какой лист писать ' + day.d + '.' + day.m + ' – назови лист по месяцу («Октябрь»)');
+  if (same.length > 1) throw new Error('Не понял, на какой лист писать ' + day.d + '.' + day.m + ' – назови лист по месяцу («Октябрь»)');
+  // запасной – чистый лист без чужого месяца (без дат и без другого месяца в названии),
+  // и только для месяца не раньше тех, что уже есть в таблице: старый месяц в новый лист не пишем
+  const ym = x => x.y * 100 + x.m, newest = Math.max(0, ...[].concat(...dates).map(ym));
+  const free = list.filter((sh, i) => !dates[i].length && monthOfName(sh.getName()) < 0);
+  if (free.length === 1 && ym(day) >= newest) return free[0];
+  // листа за этот месяц нет (старый удалили) – в чужой месяц не пишем
+  const err = new Error('В таблице нет листа за ' + MONTH_NAMES[day.m - 1] + (free.length ? ' – назови лист по месяцу («Октябрь»)' : ''));
+  err.noSheet = true;
+  throw err;
+}
+// номер месяца (0…11) в названии листа или -1
+function monthOfName(name) {
+  name = String(name).toLowerCase();
+  return MONTHS.findIndex(m => name.indexOf(m) >= 0 && (m !== 'ма' || /ма[йя]/.test(name)));
 }
 
 // куда ставить продажу: A – продукты по строкам, O – даты (ord или null), строки с 1; data[0] – шапка
