@@ -126,18 +126,30 @@ function findSale(ss, s, got, memo) {
   }
   const { sh, n, vals, forms } = c;
   if (got) Object.assign(got, { p, sh, n, vals });
-  const dlg = 'dialogId=' + s.dlg;
+  const re = s.dlg ? new RegExp('dialogId=' + s.dlg + '(?!\\d)') : null;
+  const mail = String(s.email || '').trim().toLowerCase(), also = [];
+  let day = '';   // дата пишется только у первой продажи дня
   for (let r = 2; r <= n; r++) {
     const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
-    if (s.dlg && new RegExp(dlg + '(?!\\d)').test(link) && +v[COL.sum - 1] === +s.sum)
-      return { st: 'dup', row: r, sheet: sh.getName() };
+    if (v[COL.date - 1] !== '') day = dmOf(v[COL.date - 1]);
+    const byDlg = re && re.test(link), sum = +v[COL.sum - 1];
+    if (byDlg && sum === +s.sum) return { st: 'dup', row: r, sheet: sh.getName() };
+    // тот же человек (чат или почта), но другая сумма – пусть перепроверят
+    if (byDlg || mail && String(v[COL.email - 1]).trim().toLowerCase() === mail)
+      also.push({ row: r, sum, d: day });
   }
-  return null;
+  if (got) got.also = also;
+  return also.length ? { st: 'miss', also } : null;
+}
+
+function dmOf(v) {
+  const z = x => ('0' + x).slice(-2);
+  return v instanceof Date ? z(v.getDate()) + '.' + z(v.getMonth() + 1) : String(v || '').slice(0, 5);
 }
 
 function addSale(ss, s) {
   const got = {}, dup = findSale(ss, s, got);
-  if (dup) return dup;
+  if (dup && dup.st === 'dup') return dup;
   const { p, sh, vals } = got, key = ord(p);
   const A = vals.map(v => v[COL.name - 1]);
   const O = vals.map((v, i) => { if (!i) return null; const x = dayOf(v[COL.date - 1], p.y); return x ? ord(x) : null; });
@@ -169,5 +181,5 @@ function addSale(ss, s) {
     c.setValue(new Date(p.y, p.m - 1, p.d));
     c.setNumberFormat(fmt ? sh.getRange(fmt, COL.date).getNumberFormat() : 'dd.MM');
   }
-  return { st: 'add', row, sheet: sh.getName() };
+  return got.also.length ? { st: 'add', row, sheet: sh.getName(), also: got.also } : { st: 'add', row, sheet: sh.getName() };
 }

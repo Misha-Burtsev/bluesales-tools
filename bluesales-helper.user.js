@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.45.1
+// @version      1.46.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2074,6 +2074,7 @@
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
               (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
+                x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата с другой суммой (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
@@ -2115,7 +2116,7 @@
         const f = find(row);
         if (!f) return paintBody();
         t.disabled = true; t.textContent = a === 'sheet' ? 'Переношу…' : '…';
-        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { tarHint((st.err.length ? '' : '✓ ') + 'Таблица: ' + sheetMsg(st), !st.err.length); paintBody(); })
+        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintBody(); })
           .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintBody(); });
       }
       if (a === 'sheetchk') {
@@ -2294,22 +2295,48 @@
   }
   // неотправленные продажи смены из истории – в таблицу; отправленные (и найденные там повторы) помечаем sh
   // only – номер одной продажи (кнопка «+ в табл.» у продажи)
+  // строки таблицы с тем же человеком (чат или почта), но другой суммой
+  const alsoTxt = also => (also || []).map(a => 'стр. ' + a.row + (a.d ? ', ' + a.d : '') + ' – ' + rub(a.sum) + ' ₽').join('; ');
   async function sheetSend(hi, end, only) {
     const e = histGet()[hi];
     if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
-    const idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only));
-    const st = { n: idx.length, add: 0, dup: 0, err: [], rows: [] };
+    let idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only));
+    const st = { n: idx.length, add: 0, dup: 0, err: [], rows: [], skip: 0, late: 0 };
     if (!idx.length) return st;
-    const j = await sheetPost({ sales: idx.map(i => sheetSale(e.d, e.sales[i])) });
     const h = histGet(), e2 = h[hi], same = e2 && String(e2.end) === String(end);
-    idx.forEach((i, k) => {
-      const r = (j.res || [])[k] || { st: 'err', msg: 'нет ответа' };
-      if (r.st === 'err') return void st.err.push(r.msg);
-      st[r.st === 'dup' ? 'dup' : 'add']++;
-      if (r.st === 'add') st.rows.push(r.sheet + ', стр. ' + r.row);
-      const x = same && e2.sales[i];
-      if (x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name) x.sh = 1;
-    });
+    const mark = (i, f) => { const x = same && e2.sales[i]; if (x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name) f(x); };
+    // сначала смотрим, что уже есть: повторы не шлём, а про того же человека с другой суммой – спрашиваем
+    const f = await sheetPost({ find: idx.map(i => sheetSale(e.d, e.sales[i])) }), warn = [];
+    if (Array.isArray(f.res) && f.res.length === idx.length) {
+      idx = idx.filter((i, k) => {
+        const r = f.res[k];
+        if (r.st === 'dup') { st.dup++; mark(i, x => { x.sh = 1; delete x.shAlso; }); return false; }
+        if (r.also && r.also.length) warn.push({ i, t: alsoTxt(r.also) });
+        return true;
+      });
+      if (warn.length) {
+        const who = w => { const x = e.sales[w.i]; return '• ' + (x.who || x.fio || 'чат ' + x.dlg) + ' (' + rub(saleTotal(x)) + ' ₽): ' + w.t; };
+        const rest = idx.length - warn.length;
+        if (!confirm('У этого человека в таблице уже есть оплата с другой суммой – проверь, не ошибка ли:\n\n' + warn.map(who).join('\n') +
+          '\n\nОК – всё равно отправить' + (rest ? ', Отмена – отправить только остальные (' + rest + ')' : ', Отмена – не отправлять'))) {
+          const off = new Set(warn.map(w => w.i));
+          st.skip = off.size;
+          idx = idx.filter(i => !off.has(i));
+        }
+      }
+    }
+    if (idx.length) {
+      const j = await sheetPost({ sales: idx.map(i => sheetSale(e.d, e.sales[i])) });
+      idx.forEach((i, k) => {
+        const r = (j.res || [])[k] || { st: 'err', msg: 'нет ответа' };
+        if (r.st === 'err') return void st.err.push(r.msg);
+        st[r.st === 'dup' ? 'dup' : 'add']++;
+        if (r.st === 'add') st.rows.push(r.sheet + ', стр. ' + r.row);
+        // тот же человек пришёл в этой же отправке – заранее не спросили
+        if (r.also && r.also.length && !warn.some(w => w.i === i)) st.late++;
+        mark(i, x => { x.sh = 1; delete x.shAlso; });
+      });
+    }
     if (same) histSave(h);
     return st;
   }
@@ -2322,7 +2349,7 @@
       if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
       e.sales.forEach((x, i) => { if (toSheet(x)) items.push({ hi, end, i, x, d: e.d }); });
     });
-    const st = { n: items.length, here: 0, gone: 0, miss: 0, nosheet: '', err: [] };
+    const st = { n: items.length, here: 0, gone: 0, miss: 0, also: 0, nosheet: '', err: [] };
     if (!items.length) return st;
     const j = await sheetPost({ find: items.map(o => sheetSale(o.d, o.x)) });
     if (!Array.isArray(j.res) || j.res.length !== items.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
@@ -2334,9 +2361,11 @@
       if (r.st === 'err') return void st.err.push(r.msg);
       // листа за тот месяц в таблице уже нет – отметку оставляем как была
       if (r.st === 'nosheet') return void (st.nosheet = r.msg);
-      if (r.st === 'dup') { st.here++; if (ok && !x.sh) { x.sh = 1; ch = true; } return; }
+      if (r.st === 'dup') { st.here++; if (ok && (!x.sh || x.shAlso)) { x.sh = 1; delete x.shAlso; ch = true; } return; }
       if (o.x.sh) st.gone++; else st.miss++;
-      if (ok && x.sh) { delete x.sh; ch = true; }
+      const also = alsoTxt(r.also);
+      if (also) st.also++;
+      if (ok && (x.sh || (x.shAlso || '') !== also)) { delete x.sh; if (also) x.shAlso = also; else delete x.shAlso; ch = true; }
     });
     if (ch) histSave(h);
     return st;
@@ -2345,9 +2374,10 @@
   let sheetBusy = null, sheetAutoErr = null, sheetTok = 0;
   const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
     st.nosheet && st.nosheet + ' – отметки оставил как были',
-    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»'].filter(Boolean).join(' · ');
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»',
+    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата с другой суммой – перепроверь'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
-    [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
+    [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
   function sheetLine(e) {
     const xs = e.sales.filter(toSheet);
@@ -2496,6 +2526,9 @@
     }
     return '';
   }
+  // тот же человек: тот же чат или та же почта
+  const mailOf = x => String(x.email || '').trim().toLowerCase();
+  const samePerson = (s, x) => s.dlg === x.dlg || !!mailOf(s) && mailOf(s) === mailOf(x);
   function parseSales(text) {
     const parts = [];
     let cur = null;
@@ -2561,7 +2594,7 @@
       return x;
     });
     // одну продажу часто присылают дважды (исправленную или «докреплю») – берём нижнюю
-    res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.dlg === x.dlg && y.price === x.price)) x.bad = 'повтор ниже'; });
+    res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.price === x.price && samePerson(y, x))) x.bad = 'повтор ниже'; });
     return res;
   }
   // day – 'ГГГГ-ММ-ДД': продажи за прошлый день уходят в «Историю», за сегодня – в текущую смену
@@ -2588,21 +2621,36 @@
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), ta = box.querySelector('.bs-imp-in'), out = box.querySelector('.bs-imp-list'), btn = box.querySelector('[data-a="add"]');
     let found = [];
+    const force = new Set();   // повторы, которые всё-таки добавить (клик по строке)
     const dayInp = box.querySelector('.bs-imp-day input');
     const target = () => { const d = fromIso(dayInp.value); return d && ddmm(d) !== ddmm(new Date()) ? ddmm(d) : ''; };
     const paint = () => {
       const td = target(), me = meName();
       box.querySelector('.bs-imp-day u').textContent = td ? 'прошлый день – продажи уйдут в «Историю»' : 'сегодня – в текущую смену';
       const have = td ? histGet().filter(e => e.d === td).flatMap(e => e.sales) : salesGet();
-      found = parseSales(ta.value).map(x => {
+      // остальные продажи (другие дни истории, текущая смена) – там ищем повторы из ТГ и оплаты того же человека
+      const now = ddmm(new Date()), at = dmyDate(td || now);
+      const prior = histGet().filter(e => e.d !== td).flatMap(e => e.sales.map(s => ({ s, d: e.d })))
+        .concat(td ? salesGet().map(s => ({ s, d: now })) : [], have.map(s => ({ s, d: td || now })));
+      const days = d => Math.abs(dmyDate(d) - at) / 864e5;
+      const paid = o => o.d.slice(0, 5) + ' – ' + rub(saleTotal(o.s)) + ' ₽';
+      found = parseSales(ta.value).map((x, i, all) => {
         const twin = x.bad ? null : have.find(s => impSame(s, x));
-        return Object.assign(x, { mine: !x.bad && x.mops.includes(me), dup: !!twin, fill: twin ? impFill(twin, x, !td) : [] });
+        Object.assign(x, { k: i + ':' + x.dlg + ':' + x.price, mine: !x.bad && x.mops.includes(me), dup: !!twin, fill: twin ? impFill(twin, x, !td) : [], seen: '', warn: '' });
+        if (x.bad || twin) return x;
+        // та же оплата за последние 2 недели – скорее всего, в ТГ продублировали; ежемесячные оплаты дальше
+        const same = prior.find(o => samePerson(o.s, x) && String(o.s.price) === x.price && days(o.d) <= 14);
+        if (same) { x.seen = 'уже есть ' + paid(same); x.dup = !force.has(x.k); return x; }
+        // тот же человек с другой суммой – добавим, но пусть перепроверят
+        const other = prior.filter(o => samePerson(o.s, x) && days(o.d) <= 40).map(paid).concat(all.filter(y => y !== x && !y.bad && samePerson(y, x)).map(y => 'в этом тексте – ' + rub(saleTotal(y)) + ' ₽'));
+        if (other.length) x.warn = 'у человека уже есть оплата: ' + other.join(', ') + ' – перепроверь';
+        return x;
       });
       const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine), fills = found.filter(x => x.fill.length);
       out.innerHTML = found.length ? found.map(x =>
-        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"' + (x.seen ? ' data-k="' + esc(x.k) + '" title="Нажми, чтобы ' + (x.dup ? 'всё-таки добавить' : 'не добавлять') + '"' : '') + '><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
         '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – без учёта в сумме') + '</u></div>').join('')
+        '<u' + (x.warn || x.seen ? ' class="bs-warn"' : '') + '>' + (x.bad ? x.bad + ' – пропущу' : x.seen ? x.seen + (x.dup ? ' – повтор, пропущу' : ' – добавлю ещё раз') : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') : x.dup ? 'уже в списке' : [x.warn, !x.mine && 'не твоя – без учёта в сумме'].filter(Boolean).join(' · ')) + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
       btn.disabled = !ok.length && !fills.length;
       btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить') +
@@ -2612,7 +2660,8 @@
     dayInp.addEventListener('change', paint);
     paint();
     box.addEventListener('click', ev => {
-      const a = ev.target.dataset.a;
+      const a = ev.target.dataset.a, row = ev.target.closest('.bs-imp-row[data-k]');
+      if (row) { const k = row.dataset.k; force.has(k) ? force.delete(k) : force.add(k); return paint(); }
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (a === 'back') return openSales(target() ? 'hist' : 'shift');
       if (a !== 'add') return;
@@ -2716,7 +2765,7 @@
       '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
-      '.bs-hist-sales .bs-hist-sh{flex:none;box-sizing:border-box;width:64px;font-size:11px;font-weight:400;text-align:center;white-space:nowrap}b.bs-hist-sh{color:#16a34a}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-sales .bs-hist-sh{flex:none;box-sizing:border-box;width:64px;font-size:11px;font-weight:400;text-align:center;white-space:nowrap}b.bs-hist-sh{color:#16a34a}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}button.bs-hist-sh.bs-warn{border-color:#f59e0b;color:#d97706}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
       '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
       '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
@@ -2746,7 +2795,7 @@
       '#bsSale.bs-imp{width:560px}.bs-imp-in{width:100%;box-sizing:border-box;min-height:140px;margin:8px 0;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:transparent;color:var(--bs-text,#222);font:12px/1.4 inherit;resize:vertical;outline:none}' +
       '.bs-imp-in:focus{border-color:var(--bs-accent,#3b82f6)}.bs-imp-list{display:flex;flex-direction:column;gap:5px;max-height:40vh;overflow:auto}' +
       '.bs-imp-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px}.bs-imp-row.bs-off{opacity:.5}' +
-      '.bs-imp-row span{font-size:12px;color:var(--bs-muted,#888)}.bs-imp-row em{font-style:normal;font-weight:600;text-align:right}.bs-imp-row u{text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '.bs-imp-row span{font-size:12px;color:var(--bs-muted,#888)}.bs-imp-row em{font-style:normal;font-weight:600;text-align:right}.bs-imp-row u{text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}.bs-imp-row u.bs-warn{grid-column:1/-1;color:#dc2626}.bs-imp-row[data-k]{cursor:pointer}.bs-imp-row[data-k].bs-off{opacity:.65}' +
       '#bsSale button:disabled{opacity:.5;cursor:default}' +
       '.bs-sales-foot .bs-imp-btn:hover{border-color:var(--bs-accent,#3b82f6)!important;color:var(--bs-accent,#3b82f6)!important}' +
       '.bs-sales-foot .bs-me-btn{margin-right:auto}.bs-sales-foot .bs-me-btn:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}';
