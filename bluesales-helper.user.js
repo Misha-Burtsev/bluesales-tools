@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.51.0
+// @version      1.51.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1755,14 +1755,19 @@
     const curD = repSaved().d || ddmm(new Date());
     let day = curD;
     const past = () => day !== curD;
-    // по этому чату сегодня уже есть продажа – подсказываем, чтобы не посчитать дважды (доплата/бронь – это нормально, тогда просто заполняем дальше)
-    const twins = old ? [] : list.filter(s => s.dlg === dlg);
+    // по этому чату уже есть продажа – в текущей смене или в истории: подсказываем, чтобы не посчитать дважды
+    // (доплата/бронь – это нормально, тогда просто заполняем дальше). Новые сверху
+    const twins = old ? [] : list.filter(s => s.dlg === dlg).map(s => ({ s, d: curD })).reverse().concat(
+      histGet().map((e, hi) => ({ e, hi })).reverse().flatMap(({ e, hi }) => (e.sales || []).map((s, si) => ({ s, d: e.d, hi, end: e.end, si })).filter(o => o.s.dlg === dlg).reverse()));
+    const twinBtn = o => o.hi == null ? '<button data-a="twin" data-id="' + o.s.id + '">Открыть</button>' : '<button data-a="htwin" data-hi="' + o.hi + '" data-end="' + o.end + '" data-si="' + o.si + '">Открыть</button>';
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
     wrap.innerHTML =
       '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
-      twins.map(s => '<div class="bs-sale-dup">По этому чату сегодня уже есть продажа: <b>' + esc(s.name || 'без тарифа') + ' · ' + rub(saleTotal(s)) + ' ₽</b>. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.<button data-a="twin" data-id="' + s.id + '">Открыть</button></div>').join('') +
+      (twins.length ? '<div class="bs-sale-dup bs-sale-dups"><span>По этому чату уже ' + (twins.length > 1 ? 'есть продажи' : 'есть продажа') + '. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.</span>' +
+        twins.slice(0, 3).map(o => '<p><span><b>' + (o.d === curD ? 'сегодня' : o.d.slice(0, 5)) + '</b> – ' + esc(o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽</span>' + twinBtn(o) + '</p>').join('') +
+        (twins.length > 3 ? '<p><span>и ещё ' + (twins.length - 3) + ' – в «Истории»</span></p>' : '') + '</div>' : '') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
       (old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
       '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
@@ -1809,6 +1814,9 @@
       paint();
     });
     const save = () => {
+      const same = twins.filter(o => o.d === day || Math.abs(saleTotal(o.s) - saleTotal(x)) < 1);
+      if (same.length && !confirm('По этому чату уже есть ' + (same.length > 1 ? 'продажи' : 'продажа') + ':\n' + same.map(o => '• ' + o.d.slice(0, 5) + ' – ' + (o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽').join('\n') +
+        '\n\nЕсли это та же оплата – нажми «Отмена» и открой её. Добавить ещё одну (доплата, бронь)?')) return false;
       if (past()) {
         x.cnt = saleMine(x);
         if (!histAddDay(day, [x])) return false;
@@ -1839,6 +1847,7 @@
         paint();
       } else if (a === 'back') openSales();
       else if (a === 'twin') openSale(ev.target.dataset.id, fromList);
+      else if (a === 'htwin') openHistSale(+ev.target.dataset.hi, ev.target.dataset.end, +ev.target.dataset.si);
       else if (a === 'save') { if (!x.name) return inp('tar').focus(); if (!save()) return; fromList ? openSales() : closeSale(); tarHint(saved(), true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
@@ -3254,6 +3263,7 @@
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
       '.bs-sale-dup{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:9px;background:rgba(245,158,11,.14);color:var(--bs-text,#222);font-size:12.5px;line-height:1.35}' +
       '.bs-sale-dup button{flex:none;padding:5px 12px;border:1px solid #f59e0b;border-radius:7px;background:none;color:inherit;font-size:12.5px;cursor:pointer}.bs-sale-dup button:hover{background:#f59e0b;color:#fff}' +
+      '.bs-sale-dups{flex-direction:column;align-items:stretch;gap:6px}.bs-sale-dups p{display:flex;align-items:center;gap:10px;margin:0}.bs-sale-dups p span{flex:1}' +
       '#bsSale.bs-hist{width:560px}' +
       '.bs-rep-head .bs-seg{margin-right:12px}' +
       '.bs-seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--bs-hover,rgba(0,0,0,.06))}' +
