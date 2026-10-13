@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.38.2
+// @version      1.39.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -449,7 +449,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -1108,13 +1108,11 @@
     ['leads', 'Новые лиды', 1], ['blocks', 'из них блоков', 1], ['chats', 'Чатов в работе', 1],
     ['links', 'Выставлено ссылок'], ['bought', 'Купили (программ)'], ['sum', 'Сумма продаж, ₽'], ['rem', 'Напоминаний'],
   ];
-  function closeReport() { const o = document.getElementById('bsRepWrap'); if (o) o.remove(); }
-  function openReport() {
-    if (document.getElementById('bsRepWrap')) return closeReport();
-    const wrap = document.createElement('div');
-    wrap.id = 'bsRepWrap';
-    wrap.innerHTML =
-      '<div id="bsRep"><div class="bs-rep-head"><b>Отчёт за смену</b><i title="Закрыть">×</i></div>' +
+  const repFem = m => (MANAGERS.find(x => x[0] === (m || meId())) || [])[2];
+  // отчёт – вкладка раздела «Смена»: смотреть и копировать можно по ходу дня, при закрытии смены он сохраняется сам
+  function paintReport(host) {
+    host.innerHTML =
+      '<div id="bsRep">' +
       '<div class="bs-rep-top"><div class="bs-rep-range">' + MANAGERS.map(([id, n]) => '<span data-m="' + id + '">' + n + '</span>').join('') + '</div>' +
       '<input type="date" class="bs-rep-date" title="Дата отчёта"></div>' +
       '<div class="bs-rep-grid">' + REP_FIELDS.map(([k, label, auto]) =>
@@ -1122,8 +1120,7 @@
       '<div class="bs-rep-status"></div>' +
       '<textarea spellcheck="false"></textarea>' +
       '<div class="bs-rep-btns"><span class="bs-rep-edited">Текст правлен вручную</span><button data-a="rebuild" class="bs-rep-edited" title="Собрать текст из цифр заново">Собрать заново</button><button data-a="reload">Обновить цифры</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
-    document.body.appendChild(wrap);
-    const box = wrap.querySelector('#bsRep'), ta = box.querySelector('textarea'), status = box.querySelector('.bs-rep-status');
+    const box = host.querySelector('#bsRep'), ta = box.querySelector('textarea'), status = box.querySelector('.bs-rep-status');
     const inputs = {};
     box.querySelectorAll('input[data-k]').forEach(i => { inputs[i.dataset.k] = i; });
     const saved = repSaved();
@@ -1144,7 +1141,8 @@
     };
     const values = () => { const v = {}; for (const k in inputs) v[k] = inputs[k].value; return v; };
     const update = () => {
-      if (!edited) ta.value = repText(values(), (MANAGERS.find(x => x[0] === manager) || [])[2]);
+      if (!box.isConnected) return;   // вкладку закрыли или смену уже закрыли – старые цифры не записываем
+      if (!edited) ta.value = repText(values(), repFem(manager));
       box.classList.toggle('bs-edited', edited);
       // ручные цифры за сегодня запоминаются, автоматические пересчитываются при каждом открытии
       jset(REP_KEY, Object.assign({ d: ddmm(new Date()) }, values(), edited ? { text: ta.value } : {}));
@@ -1166,7 +1164,7 @@
           countClients(form, 'psFirstContact', t, t, ST_BLOCK, m),
           countClients(form, 'psLastContact', t, t, ST_ALL, m),
         ]);
-        if (my !== run) return;   // пока считали, переключили менеджера
+        if (my !== run || !box.isConnected) return;   // пока считали, переключили менеджера или закрыли вкладку
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
         setStatus('ok', 'Посчитано: ' + who + ', ' + t.slice(0, 5) + ' · остальное вручную');
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
@@ -1184,8 +1182,7 @@
     dateInp.addEventListener('change', () => load(true));
     box.addEventListener('click', ev => {
       const r = ev.target.dataset.m, a = ev.target.dataset.a;
-      if (ev.target.tagName === 'I') closeReport();
-      else if (r) { manager = r; paintRange(); load(true); }
+      if (r) { manager = r; paintRange(); load(true); }
       else if (a === 'reload') load(true);
       else if (a === 'rebuild') { edited = false; update(); }
       else if (a === 'copy') {
@@ -1196,19 +1193,15 @@
         });
       }
     });
-    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeReport(); });
     paintRange(); update(); load();
   }
   function reportInit() {
-    const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
-    if (!dock || document.getElementById('bsRepBtn')) return;
-    const b = btn('bsRepBtn', 'Отчёт за смену');
-    b.innerHTML = svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>');
-    b.addEventListener('click', openReport);
-    dock.insertBefore(b, before);
-    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeReport(); });
+    if (document.getElementById('bsRepCss')) return;
     const st = document.createElement('style');
+    st.id = 'bsRepCss';
     st.textContent =
+      '.bs-tab #bsRep{width:auto;max-width:none;max-height:none;overflow:visible;padding:0;border:0;border-radius:0;box-shadow:none;background:none}' +
+      '.bs-hrep textarea{width:100%;box-sizing:border-box;height:260px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12.5px/1.4 inherit}' +
       '#bsRepWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
       '#bsRep{width:400px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
@@ -1281,8 +1274,9 @@
     const on = document.body.classList.contains('slide-panel-right-open');
     const tog = document.getElementById('bsEmoToggle');
     b.style.display = on ? 'flex' : 'none';
-    const sd = document.getElementById('bsSold');
+    const sd = document.getElementById('bsSold'), sh = document.getElementById('bsShift');
     if (sd) sd.style.display = b.style.display;
+    if (sh) sh.style.display = b.style.display;
     if (tog) tog.style.display = 'none';
     if (!on) return;
     // поле ввода скрыто (клиент заблокировал и т.п.) – плашку смайликов не показываем
@@ -1296,8 +1290,9 @@
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
     const sold = document.getElementById('bsSold');
     if (sold) sold.style.bottom = (innerHeight - b.getBoundingClientRect().top + 6) + 'px';
+    if (sold && sh) sh.style.bottom = (innerHeight - sold.getBoundingClientRect().top + 6) + 'px';
     // карточка клиента прокручивается под плашками – снизу у неё отступ на их высоту
-    const top = (sold && sold.offsetHeight ? sold : b).getBoundingClientRect().top;
+    const top = (sh && sh.offsetHeight ? sh : sold && sold.offsetHeight ? sold : b).getBoundingClientRect().top;
     document.body.style.setProperty('--bs-stack', Math.max(10, Math.round(innerHeight - top + 10)) + 'px');
     if (open && tog) {
       tog.style.display = 'flex';
@@ -1319,8 +1314,8 @@
     });
     sel.style.removeProperty('height');
     const r = sel.getBoundingClientRect();
-    const sold = document.getElementById('bsSold');
-    const pills = pill.offsetHeight + 6 + (sold && sold.offsetHeight ? sold.offsetHeight + 6 : 0);
+    const sold = document.getElementById('bsSold'), sh = document.getElementById('bsShift');
+    const pills = pill.offsetHeight + 6 + (sold && sold.offsetHeight ? sold.offsetHeight + 6 : 0) + (sh && sh.offsetHeight ? sh.offsetHeight + 6 : 0);
     const room = r.bottom - (bottom + 22 + pills);
     if (room < r.height) sel.style.setProperty('height', Math.max(110, room) + 'px', 'important');
   }
@@ -1367,6 +1362,8 @@
   function paintSold() {
     const b = document.getElementById('bsSold');
     if (b) b.querySelector('b').textContent = String(soldGet()).replace('.', ',');
+    const sh = document.getElementById('bsShift'), now = new Date();
+    if (sh) { const t = WD[now.getDay()] + ', ' + ddmm(now).slice(0, 5); if (sh.querySelector('span').textContent !== t) sh.querySelector('span').textContent = t; }
   }
   function soldInit() {
     if (document.getElementById('bsSold')) return;
@@ -1374,9 +1371,24 @@
     b.id = 'bsSold';
     b.className = 'bs-pill';
     b.style.display = 'none';
-    b.innerHTML = '<span>Продано</span><b></b><i data-a="list" class="bs-ico" title="Продажи за смену"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg></i><i data-a="new" class="bs-cta" title="Добавить продажу в этом чате">+ Продажа</i>';
-    b.addEventListener('click', ev => { const i = ev.target.closest('i'), a = i && i.dataset.a; if (a === 'list') openSales(); else if (a === 'new') openSale(); });
+    b.innerHTML = '<span>Продано</span><b></b><i data-a="new" class="bs-cta" title="Добавить продажу в этом чате">+ Продажа</i>';
+    b.addEventListener('click', ev => { const i = ev.target.closest('i'), a = i && i.dataset.a; if (a === 'new') openSale(); });
     document.body.appendChild(b);
+    // раздел «Смена» – отдельной большой кнопкой над «Продано»
+    const sh = document.createElement('div');
+    sh.id = 'bsShift';
+    sh.style.display = 'none';
+    sh.title = 'Смена: продажи, отчёт за день, история';
+    sh.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg><b>Смена</b><span></span><i>›</i>';
+    sh.addEventListener('click', () => openSales());
+    document.body.appendChild(sh);
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsShift{position:fixed;right:12px;width:230px;height:42px;box-sizing:border-box;z-index:2001;align-items:center;gap:8px;padding:0 12px;border-radius:12px;cursor:pointer;font-size:12.5px;' +
+      'background:var(--bs-accent,#3b82f6);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,.25)}#bsShift:hover{filter:brightness(1.08)}' +
+      '#bsShift svg{flex:none}#bsShift b{font-size:14px;font-weight:600}#bsShift span{flex:1;min-width:0;text-align:right;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+      '#bsShift i{font-style:normal;font-size:20px;line-height:1;opacity:.85}';
+    document.head.appendChild(st);
     paintSold();
   }
   document.addEventListener('DOMContentLoaded', soldInit);
@@ -1649,7 +1661,8 @@
     }
     const days = [...new Set([rOld && r.d, sOld && sl.d].filter(Boolean))];
     for (const d of days) {
-      const ok = histPush({ d, end: Date.now(), rep: rOld && r.d === d ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [] });
+      const hasRep = rOld && r.d === d;
+      const ok = histPush({ d, end: Date.now(), rep: hasRep ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [], text: hasRep ? r.text || repText(r, repFem()) : '' });
       if (!ok) return false;   // не влезло – ничего не стираем
     }
     if (rOld || r.d !== today) jset(REP_KEY, { d: today });
@@ -1818,7 +1831,63 @@
     salesSet([]);
     paintSold(); paintLinks();
   }
-  // ---------- Окно «Продажи»: вкладки «Смена» (сегодня) и «История» (архив смен) ----------
+  // закрыть смену: досчитываем лиды и чаты за день, собираем отчёт – смена вместе с ним уходит в историю
+  async function closeShift(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Считаю отчёт…'; }
+    const d = repSaved().d, m = meId();
+    let got = null;
+    try {
+      const form = await clientsForm();
+      const [leads, blocks, chats] = await Promise.all([
+        countClients(form, 'psFirstContact', d, d, ST_ALL, m),
+        countClients(form, 'psFirstContact', d, d, ST_BLOCK, m),
+        countClients(form, 'psLastContact', d, d, ST_ALL, m),
+      ]);
+      got = { leads, blocks, chats };
+    } catch (e) {}
+    // перечитываем: пока считали, могли нажать «+» у ссылок или добавить продажу
+    const r = repSaved();
+    if (got) Object.assign(r, got);
+    if (r.rem == null) r.rem = 0;
+    jset(REP_KEY, r);
+    const before = histGet().length;
+    newShift();
+    const h = histGet(), e = h[h.length - 1];
+    tarHint('✓ Смена закрыта, отчёт сохранён в истории', true);
+    if (h.length > before && e.d === d) return openHistReport(h.length - 1, e.end, got ? '' : 'Лиды и чаты не посчитались – поправь их в тексте вручную');
+    openSales('hist');
+  }
+  // отчёт закрытой смены: текст можно поправить (сохраняется в истории) и скопировать
+  function openHistReport(hi, end, warn) {
+    const h = histGet(), e = h[hi];
+    if (!e || String(e.end) !== String(end)) return openSales('hist');
+    histKeep = hi + ':' + end;
+    closeSale();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales bs-hrep"><div class="bs-rep-head"><b>Отчёт за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-rep-status"></div><textarea spellcheck="false"></textarea>' +
+      '<div class="bs-rep-btns"><button data-a="back">К истории</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
+    document.body.appendChild(wrap);
+    const ta = wrap.querySelector('textarea'), status = wrap.querySelector('.bs-rep-status');
+    if (warn) { status.dataset.st = 'err'; status.innerHTML = '<i></i><span></span>'; status.querySelector('span').textContent = warn; }
+    ta.value = e.text || repText(e.rep || {}, repFem());
+    ta.addEventListener('input', () => {
+      const h2 = histGet(), e2 = h2[hi];
+      if (e2 && String(e2.end) === String(end)) { e2.text = ta.value; histSave(h2); }
+    });
+    wrap.addEventListener('click', ev => {
+      const t = ev.target, a = t.dataset.a;
+      if (t.matches('.bs-rep-head i')) return closeSale();
+      if (a === 'back') return openSales('hist');
+      if (a === 'copy') navigator.clipboard.writeText(ta.value).then(() => {
+        t.textContent = 'Скопировано ✓';
+        setTimeout(() => { t.textContent = 'Скопировать'; }, 1500);
+      });
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Окно «Смена»: вкладки «Продажи» (сегодня), «Отчёт» (за день) и «История» (архив смен) ----------
   const dmyDate = d => { const [a, b, c] = String(d).split('.'); return new Date(+c, b - 1, +a); };
   const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const fromIso = s => { const [y, m, d] = String(s).split('-'); return y && m && d ? new Date(+y, m - 1, +d) : null; };
@@ -1858,17 +1927,18 @@
     return histSave(h);
   }
   const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
+  const SHIFT_TABS = [['shift', 'Продажи'], ['rep', 'Отчёт'], ['hist', 'История']];
   function openSales(tab) {
     closeSale();
-    tab = tab === 'hist' ? 'hist' : 'shift';
+    tab = SHIFT_TABS.some(x => x[0] === tab) ? tab : 'shift';
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
-    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи</b>' +
-      '<span class="bs-seg"><em data-tab="shift"' + (tab === 'shift' ? ' class="on"' : '') + '>Смена</em><em data-tab="hist"' + (tab === 'hist' ? ' class="on"' : '') + '>История</em></span>' +
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Смена</b>' +
+      '<span class="bs-seg">' + SHIFT_TABS.map(([k, t]) => '<em data-tab="' + k + '"' + (tab === k ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>' +
       '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('.bs-tab');
-    (tab === 'hist' ? paintHist : paintShift)(box);
+    ({ shift: paintShift, rep: paintReport, hist: paintHist })[tab](box);
     wrap.addEventListener('click', ev => {
       const t = ev.target;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -1887,14 +1957,14 @@
         : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button><span></span>' +
       '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
-      '<button data-a="shift" class="bs-main" title="Смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
+      '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'me') return askMe();
       if (a === 'imp') return openImport();
       if (a === 'shift') {
-        if (!confirm('Закрыть смену? Она сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
-        newShift(); openSales('hist'); return tarHint('✓ Смена закрыта и сохранена в истории', true);
+        if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
+        return closeShift(t);
       }
       const row = t.closest('.bs-sales-row');
       if (row && t.matches('.bs-sales-del')) {
@@ -1916,6 +1986,12 @@
   }
   // дата из поля ввода – только целиком набранная (пока год печатается, там 0002, 0020…)
   const dateOk = s => { const d = fromIso(s); return d && d.getFullYear() >= 2000 && d <= new Date() ? d : null; };
+  // цифры отчёта смены в раскрытой строке истории; чего не считали (старые смены) – прочерк
+  function histRepHtml(r) {
+    const v = k => r[k] == null || r[k] === '' ? '–' : k === 'sum' ? rub(+r[k] || 0) + ' ₽' : k === 'bought' ? r2s(r[k]) : +r[k] || 0;
+    return '<div class="bs-hist-rep">' + [['Лиды', v('leads') + (r.blocks ? ' <small>(' + r.blocks + ' блок.)</small>' : '')], ['Чаты', v('chats')], ['Ссылки', v('links')],
+      ['Продано', v('bought')], ['Сумма', v('sum')], ['Напоминания', v('rem')]].map(([k, x]) => '<span>' + k + '<b>' + x + '</b></span>').join('') + '</div>';
+  }
   function paintHist(box) {
     const today = isoOf(new Date());
     // шапка с периодом рисуется один раз – иначе поле даты теряет ввод посреди набора года
@@ -1942,15 +2018,16 @@
       const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
       if (histKeep) { open.add(histKeep); histKeep = null; }
       body.innerHTML =
-        statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
+        statsHtml([['Смен', list.length], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
         (list.length ? '<div class="bs-hist-list">' + list.map(e => {
           const k = e.now ? 'now' : e.hi + ':' + e.end;
           return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
             '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
-            '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
+            '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
+            '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
             '</div></div>';
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
@@ -1965,6 +2042,11 @@
       if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
+      if (a === 'hrep') {
+        if (row.dataset.k === 'now') return openSales('rep');
+        const f = find(row);
+        return f ? openHistReport(f.i, f.h[f.i].end) : paintBody();
+      }
       if (a === 'move' || t.matches('.bs-hist-del,.bs-hist-sdel')) {
         const f = find(row);
         if (!f) return paintBody();
@@ -2384,6 +2466,9 @@
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
       '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
       '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
+      '.bs-hist-sales .bs-hist-rep{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin-bottom:6px}' +
+      '.bs-hist-sales .bs-hist-rep span{flex:none!important;display:flex;flex-direction:column;gap:1px;padding:5px 8px;border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-muted,#888);font-size:11px;white-space:nowrap;overflow:hidden}' +
+      '.bs-hist-rep b{font-size:13.5px;color:var(--bs-text,#222);font-variant-numeric:tabular-nums}.bs-hist-rep small{font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hist-move{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}.bs-hist-move span{flex:1}' +
       '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
