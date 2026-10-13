@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.41.0
+// @version      1.41.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2233,7 +2233,7 @@
   // ---------- Своя таблица продаж (Google Таблицы): продажи с моей долей дописываются через веб-приложение Apps Script ----------
   // Код для таблицы – bluesales-sheet.gs в репозитории. Ссылка …/exec хранится только в этом браузере (bsSheet).
   const SHEET_KEY = 'bsSheet', SHEET_RX = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
-  const SHEET_CODE = 'https://github.com/Misha-Burtsev/bluesales-tools/blob/beta/bluesales-sheet.gs';
+  const SHEET_CODE = 'https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/beta/bluesales-sheet.gs';
   const sheetUrl = () => jget(SHEET_KEY, {}).url || '';
   // «Оплата» (столбец F): сама угадывается по тарифу и сумме, можно поменять в продаже
   const PAYS = [['Месяц', 'Месяц'], ['Год', 'Год'], ['Высшая математика', 'Высшая']];
@@ -2300,7 +2300,7 @@
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-backup bs-sheet"><div class="bs-rep-head"><b>Таблица продаж</b><i title="Закрыть">×</i></div>' +
       '<div class="bs-tar-help">Продажи с твоей долей сами дописываются в твою Google Таблицу для зарплаты, когда жмёшь «Закрыть смену». Потерянную продажу добавь в историю («+ Продажи за дату») и нажми «В таблицу» у этой смены. Формулы таблицы не трогаются, одну продажу дважды не запишет.</div>' +
-      '<ol class="bs-tar-help"><li>Открой свою таблицу → Расширения → Apps Script.</li><li>Вставь вместо всего, что там, <a href="' + SHEET_CODE + '" target="_blank">код скрипта ↗</a> и сохрани.</li>' +
+      '<ol class="bs-tar-help"><li>Открой свою таблицу → Расширения → Apps Script.</li><li>Сотри всё, что там, вставь код скрипта <button data-a="code">Скопировать код</button> (или <a href="' + SHEET_CODE + '" target="_blank">открыть текстом ↗</a>) и сохрани.</li>' +
       '<li>Развернуть → Новое развёртывание → тип «Веб-приложение»: выполнять от имени «меня», доступ «Все» → Развернуть, разреши доступ.</li><li>Скопируй «URL веб-приложения» (…/exec) сюда.</li></ol>' +
       '<label><span>Ссылка веб-приложения</span><input data-k="url" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false"></label>' +
       '<div class="bs-sale-note"></div>' +
@@ -2312,6 +2312,17 @@
       const t = ev.target, a = t.dataset.a;
       if (t.matches('.bs-rep-head i')) return closeSale();
       if (a === 'back') return openSales('hist');
+      if (a === 'code') {
+        t.disabled = true;
+        try {
+          const r = await fetch(SHEET_CODE, { cache: 'no-store' });
+          if (!r.ok) throw 0;
+          await navigator.clipboard.writeText(await r.text());
+          t.textContent = 'Скопировано ✓';
+        } catch (err) { t.textContent = 'Не вышло – открой текстом'; }
+        t.disabled = false;
+        return;
+      }
       if (a === 'off') {
         if (!confirm('Отключить таблицу? Ссылка удалится из помощника, сама таблица и скрипт останутся.')) return;
         localStorage.removeItem(SHEET_KEY);
@@ -2632,7 +2643,7 @@
       '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
-      '#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{margin:0 0 10px;padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{min-height:16px;margin-top:6px;word-break:break-word}' +
+      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{margin:0 0 10px;padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{min-height:16px;margin-top:6px;word-break:break-word}' +
       '.bs-sale-pay small{font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hrep-sheet{margin-bottom:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222)}.bs-hrep-sheet[data-st=ok]{color:#22a55a}.bs-hrep-sheet[data-st=err]{color:#e04848}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
