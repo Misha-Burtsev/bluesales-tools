@@ -23,6 +23,10 @@ function doPost(e) {
     const body = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
+    // сверка: какие продажи уже есть в таблице (ничего не пишет)
+    if (body.find) return out({ ok: true, res: body.find.map(s => {
+      try { return findSale(ss, s) || { st: 'miss' }; } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
+    }) });
     const res = (body.sales || []).map(s => {
       try { return addSale(ss, s); } catch (err) { return { st: 'err', msg: String(err && err.message || err) }; }
     });
@@ -92,20 +96,28 @@ function plan(A, O, key) {
   return { row: Math.max(last, lastDate) + 1, date: true };
 }
 
-function addSale(ss, s) {
+// уже есть: тот же чат и сумма на листе этого месяца (продукт руками могли записать по-своему)
+function findSale(ss, s, got) {
   const p = dayOf(s.d);
   if (!p) throw new Error('Нет даты продажи');
-  const sh = pickSheet(ss, p), key = ord(p);
+  const sh = pickSheet(ss, p);
   const n = Math.max(sh.getLastRow(), 2);
   const vals = sh.getRange(1, 1, n, WIDTH).getValues();
   const forms = sh.getRange(1, COL.link, n, 1).getFormulas();
-  // уже есть: тот же чат и сумма (продукт руками могли записать по-своему)
+  if (got) Object.assign(got, { p, sh, n, vals });
   const dlg = 'dialogId=' + s.dlg;
   for (let r = 2; r <= n; r++) {
     const v = vals[r - 1], link = String(v[COL.link - 1]) + forms[r - 1][0];
     if (s.dlg && new RegExp(dlg + '(?!\\d)').test(link) && +v[COL.sum - 1] === +s.sum)
       return { st: 'dup', row: r, sheet: sh.getName() };
   }
+  return null;
+}
+
+function addSale(ss, s) {
+  const got = {}, dup = findSale(ss, s, got);
+  if (dup) return dup;
+  const { p, sh, vals } = got, key = ord(p);
   const A = vals.map(v => v[COL.name - 1]);
   const O = vals.map((v, i) => { if (!i) return null; const x = dayOf(v[COL.date - 1], p.y); return x ? ord(x) : null; });
   const pl = plan(A, O, key);

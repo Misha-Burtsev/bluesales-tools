@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.42.0
+// @version      1.43.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2062,7 +2062,7 @@
       const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
       const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
       const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
-      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k)), sheetOn = !!sheetUrl();
       if (histKeep) { open.add(histKeep); histKeep = null; }
       body.innerHTML =
         statsHtml([['Смен', list.length], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Ссылки', tot('links')], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]) +
@@ -2073,6 +2073,8 @@
             (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
+              (e.now || !sheetOn || !toSheet(x) ? '' : x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
+                '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
               (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
             '<p class="bs-hist-move"><span>Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '</span><button data-a="hrep">Открыть</button></p>' + sheetLine(e) +
             (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
@@ -2090,12 +2092,19 @@
       if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
-      if (a === 'sheet') {
+      if (a === 'sheet' || a === 'sheet1') {
         const f = find(row);
         if (!f) return paintBody();
-        t.disabled = true; t.textContent = 'Переношу…';
-        return sheetSend(f.i, f.h[f.i].end).then(st => { tarHint((st.err.length ? '' : '✓ ') + 'Таблица: ' + sheetMsg(st), !st.err.length); paintBody(); })
+        t.disabled = true; t.textContent = a === 'sheet' ? 'Переношу…' : '…';
+        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { tarHint((st.err.length ? '' : '✓ ') + 'Таблица: ' + sheetMsg(st), !st.err.length); paintBody(); })
           .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintBody(); });
+      }
+      if (a === 'sheetchk') {
+        const f = find(row);
+        if (!f) return paintBody();
+        t.disabled = true; t.textContent = 'Сверяю…';
+        return sheetCheck(f.i, f.h[f.i].end).then(st => { tarHint((st.err.length || st.here < st.n ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n); paintBody(); })
+          .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
       }
       if (a === 'hrep') {
         if (row.dataset.k === 'now') return openSales('rep');
@@ -2265,10 +2274,11 @@
     return j;
   }
   // неотправленные продажи смены из истории – в таблицу; отправленные (и найденные там повторы) помечаем sh
-  async function sheetSend(hi, end) {
+  // only – номер одной продажи (кнопка «+ в табл.» у продажи)
+  async function sheetSend(hi, end, only) {
     const e = histGet()[hi];
     if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
-    const idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh);
+    const idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only));
     const st = { n: idx.length, add: 0, dup: 0, err: [], rows: [] };
     if (!idx.length) return st;
     const j = await sheetPost({ sales: idx.map(i => sheetSale(e.d, e.sales[i])) });
@@ -2284,6 +2294,28 @@
     if (same) histSave(h);
     return st;
   }
+  // сверка с таблицей: какие продажи смены там правда есть (строки могли удалить руками) – правим отметки sh
+  async function sheetCheck(hi, end) {
+    const e = histGet()[hi];
+    if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    const idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]));
+    const j = await sheetPost({ find: idx.map(i => sheetSale(e.d, e.sales[i])) });
+    if (!Array.isArray(j.res) || j.res.length !== idx.length) throw new Error('обнови код скрипта в таблице («📊 Таблица» → «Скопировать код», потом Новая версия развёртывания)');
+    const h = histGet(), e2 = h[hi], same = e2 && String(e2.end) === String(end);
+    const st = { n: idx.length, here: 0, gone: 0, miss: 0, err: [] };
+    idx.forEach((i, k) => {
+      const r = j.res[k], x = same && e2.sales[i];
+      if (r.st === 'err') return void st.err.push(r.msg);
+      const ok = x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name;
+      if (r.st === 'dup') { st.here++; if (ok) x.sh = 1; return; }
+      if (e.sales[i].sh) st.gone++; else st.miss++;
+      if (ok) delete x.sh;
+    });
+    if (same) histSave(h);
+    return st;
+  }
+  const checkMsg = st => [st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.here < st.n - st.err.length && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»'].filter(Boolean).join(' · ');
   const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
     [st.add && 'добавлено ' + st.add + ' (' + st.rows.join('; ') + ')', st.dup && 'уже были в таблице ' + st.dup, st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
   // строка в раскрытой смене истории: сколько продаж уже в таблице
@@ -2292,7 +2324,8 @@
     if (e.now || !sheetUrl() || !xs.length) return '';
     const done = xs.filter(x => x.sh).length;
     return '<p class="bs-hist-move"><span>Таблица: ' + (done === xs.length ? 'все ' + xs.length + ' ✓' : done + ' из ' + xs.length) + '</span>' +
-      (done < xs.length ? '<button data-a="sheet">В таблицу</button>' : '') + '</p>';
+      '<button data-a="sheetchk" title="Посмотреть в таблице, какие продажи смены там правда есть – отметки у продаж обновятся">Сверить</button>' +
+      (done < xs.length ? '<button data-a="sheet" title="Отправить все продажи без ✓">Отправить' + (xs.length - done > 1 ? ' все ' + (xs.length - done) : '') + '</button>' : '') + '</p>';
   }
   function openSheet() {
     closeSale();
@@ -2650,6 +2683,7 @@
       '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
+      '.bs-hist-sales .bs-hist-sh{flex:none;font-size:11px;font-weight:400;white-space:nowrap}b.bs-hist-sh{color:#16a34a}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
       '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
       '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
