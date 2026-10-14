@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.52.1
+// @version      1.53.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1977,7 +1977,7 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
-  // ---------- Окно «Смена»: вкладки «Продажи» (сегодня), «Отчёт» (за день) и «История» (архив смен) ----------
+  // ---------- Окно «Смена»: вкладки «Сегодня» (продажи текущей смены), «Отчёт» (за день) и «История» (архив смен) ----------
   const dmyDate = d => { const [a, b, c] = String(d).split('.'); return new Date(+c, b - 1, +a); };
   const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const fromIso = s => { const [y, m, d] = String(s).split('-'); return y && m && d ? new Date(+y, m - 1, +d) : null; };
@@ -2031,7 +2031,7 @@
     return histSave(h);
   }
   const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
-  const SHIFT_TABS = [['shift', 'Продажи'], ['rep', 'Отчёт'], ['hist', 'История']];
+  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История']];
   function openSales(tab) {
     const keep = histKeep;
     closeSale();
@@ -2039,7 +2039,7 @@
     tab = SHIFT_TABS.some(x => x[0] === tab) ? tab : 'shift';
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
-    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Смена</b>' +
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Смена' + (tab === 'shift' ? '<small class="bs-head-d">' + WD[new Date().getDay()] + ', ' + ddmm(new Date()).slice(0, 5) + '</small>' : '') + '</b>' +
       '<span class="bs-seg">' + SHIFT_TABS.map(([k, t]) => '<em data-tab="' + k + '"' + (tab === k ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>' +
       '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
     document.body.appendChild(wrap);
@@ -2055,12 +2055,12 @@
   function paintShift(box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
     box.innerHTML =
-      statsHtml([['Сегодня', ddmm(now).slice(0, 5) + ', ' + WD[now.getDay()]], ['Продано', r2s(r.bought)], ['Сумма', rub(+r.sum || 0) + ' ₽'], ['Ссылки', +r.links || 0]]) +
+      '<div class="bs-hero"><b>' + rub(+r.sum || 0) + ' ₽</b><span>продано <i>' + r2s(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span></div>' +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
-        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
+        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram через «Импорт из ТГ».</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">' + ico(ICO.user) + ' ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
       '<button data-a="mine" class="bs-ghost bs-mine' + (mine ? ' on' : '') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
         (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
@@ -3305,6 +3305,10 @@
       '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 12px}' +
       '.bs-stats div+div{border-left:1px solid var(--bs-border,#D9E0E7)}.bs-stats span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}' +
       '.bs-stats b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+      '.bs-head-d{margin-left:10px;font-size:13px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hero{display:flex;align-items:baseline;gap:14px;padding:2px 2px 12px;margin-bottom:10px;border-bottom:1px solid var(--bs-border,#D9E0E7)}' +
+      '.bs-hero b{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.3px}' +
+      '.bs-hero span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero i{font-style:normal;color:var(--bs-text,#222);font-weight:600}' +
       '.bs-empty{padding:26px 10px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--bs-muted,#888)}' +
       '.bs-foot{display:flex;align-items:center;gap:8px;margin-top:12px}.bs-foot>span{flex:1}' +
       '.bs-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer;white-space:nowrap}.bs-foot button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
