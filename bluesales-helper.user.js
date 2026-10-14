@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.60.0
+// @version      1.61.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2384,13 +2384,14 @@
       heroHtml(r) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + premTag(x) + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + premTag(x) + (saleDone(x) ? curSh(x) : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram – кнопка со значком самолётика внизу.</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">' + ico(ICO.user) + ' ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
       '<button data-a="mine" class="bs-ghost bs-mine" data-st="' + (mine == null ? 'wait' : mine ? 'on' : 'off') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
         (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
         '<i class="bs-sw"></i>Моя смена</button><span></span>' +
+      (curShN(list) > 1 ? '<button data-a="shall" class="bs-ghost bs-sh-all" title="Отправить в Google Таблицу все заполненные продажи смены, которых там ещё нет">' + ico(ICO.grid) + ' Все в таблицу (' + curShN(list) + ')</button>' : '') +
       '<button data-a="imp" class="bs-icon" title="Импорт из Telegram – вставить тексты продаж, свои доли попадут в отчёт">' + ico(ICON.send, 16) + '</button>' +
       '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
@@ -2419,6 +2420,13 @@
         return closeShift(t);
       }
       const row = t.closest('.bs-sales-row');
+      if (a === 'sh1' || a === 'shall') {
+        const b = t.closest('button');
+        b.disabled = true; b.textContent = 'Отправляю…';
+        return sheetSendCur(a === 'sh1' ? row.dataset.id : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintShift(box); })
+          .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintShift(box); });
+      }
+      if (t.closest('.bs-sales-sh')) return;
       if (row && t.matches('.bs-sales-del')) {
         const x = salesGet().find(s => s.id === row.dataset.id);
         if (!x || !confirm('Удалить продажу «' + (x.who || x.name) + '»? Доля и сумма уйдут из отчёта смены.')) return;
@@ -2953,6 +2961,10 @@
   }
   // в таблицу идут только продажи с моей долей
   const toSheet = x => x.cnt !== false && saleShare(x) > 0;
+  // у продажи на «Сегодня»: уже в таблице – отметка, нет – кнопка; пустые (без ФИО и почты) не шлём
+  const curSh = x => !sheetUrl() || !toSheet(x) ? '' : x.sh ? (shBad(x) ? '<small class="bs-sales-sh bad" title="В таблице записано не то, что тут (сумма, почта или МОП). Исправить можно в «Истории» после закрытия смены">≠ в таблице</small>' :
+    '<small class="bs-sales-sh ok" title="Эта продажа уже есть в Google Таблице">✓ в таблице</small>') : '<button data-a="sh1" class="bs-sales-sh" title="Отправить эту продажу в Google Таблицу">+ в таблицу</button>';
+  const curShN = list => sheetUrl() ? list.filter(x => toSheet(x) && !x.sh && saleDone(x)).length : 0;
   // менеджеров для таблицы – из доли (0.5 → 2)
   const saleMops = x => Math.max(1, Math.round(1 / (+x.share || 1)));
   // shT – что стоит в строке таблицы (по последней сверке/отправке): {sum, email, mops}. Чем отличается от продажи
@@ -2996,11 +3008,19 @@
   async function sheetSend(hi, end, only) {
     const e = histGet()[hi];
     if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
-    let idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only));
+    return sheetSendList(e, only, ap => { const h = histGet(), e2 = h[hi]; if (e2 && String(e2.end) === String(end) && ap(e2.sales)) histSave(h); });
+  }
+  // продажи текущей смены – прямо во время смены; only – id одной продажи
+  function sheetSendCur(only) {
+    const sales = salesGet(), i = only == null ? null : sales.findIndex(x => x.id === only);
+    return sheetSendList({ d: repSaved().d || ddmm(new Date()), sales }, i, ap => { const l = salesGet(); if (ap(l)) salesSet(l); }, saleDone);
+  }
+  // e – {d, sales}; pick – какие ещё можно слать; отметки ставим в свежем списке (пока ждали таблицу, продажи могли поменять) – commit(apply)
+  async function sheetSendList(e, only, commit, pick) {
+    let idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only) && (!pick || pick(e.sales[i])));
     const st = { n: idx.length, add: 0, dup: 0, err: [], rows: [], skip: 0, late: 0 };
     if (!idx.length) return st;
-    const h = histGet(), e2 = h[hi], same = e2 && String(e2.end) === String(end);
-    const mark = (i, f) => { const x = same && e2.sales[i]; if (x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name) f(x); };
+    const marks = [], mark = (i, f) => marks.push([e.sales[i], f]);
     // сначала смотрим, что уже есть: повторы не шлём, а про того же человека – спрашиваем.
     // Сверяем всю смену, отправленные первыми: две оплаты в одном чате на одну сумму – это две строки таблицы
     const all = shOrder(e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i])), i => e.sales[i]);
@@ -3037,7 +3057,11 @@
         mark(i, x => shHere(x, r.st === 'add' ? shSent(x) : r));
       });
     }
-    if (same) histSave(h);
+    if (marks.length) commit(list => marks.reduce((n, [x, f]) => {
+      const y = list.find(y => x.id ? y.id === x.id : y.dlg === x.dlg && y.name === x.name);
+      if (y) f(y);
+      return n + !!y;
+    }, 0));
     return st;
   }
   // сверка с таблицей: какие продажи смены там правда есть (строки могли удалить руками) – правим отметки sh
@@ -3986,6 +4010,10 @@
       '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
       '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
+      '.bs-sales-row .bs-sales-sh{grid-column:2;justify-self:end;margin:2px 0 0;padding:2px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}' +
+      '.bs-sales-row button.bs-sales-sh:hover{background:var(--bs-accent,#3b82f6);color:#fff}.bs-sales-row .bs-sales-sh:disabled{opacity:.6;cursor:default}' +
+      '.bs-sales-row small.bs-sales-sh{border-color:transparent;padding-right:0;color:#16a34a;cursor:default}.bs-sales-row small.bs-sales-sh.bad{color:#e08a1e}' +
+      '.bs-sh-all{display:inline-flex;align-items:center;gap:6px}' +
       '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
       '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
       '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
