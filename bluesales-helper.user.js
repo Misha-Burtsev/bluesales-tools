@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.59.0
+// @version      1.59.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2303,11 +2303,13 @@
     const nsold = gp.reduce((a, x) => a + x[1], 0);
     const pies = gp.length ? '<div class="bs-st-row2">' + card('', 'Типы оплат', donut(gp, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) +
       card('', 'Что продаётся', donut(gk, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) + '</div>' : '';
-    // воронка: лиды → ссылки → купили
-    const fl = [['Лиды', s.leads], ['Ссылки', s.links], ['Купили', s.sold]].filter(x => x[0] !== 'Лиды' || x[1]), f0 = Math.max(1, fl[0][1]);
-    const funnel = card('bs-st-fun', 'Воронка', fl.map(([t, v], i) => '<div><span>' + t + '</span><p><i style="width:' + Math.max(2, v / f0 * 100).toFixed(1) + '%"></i></p><b>' + frac(v) + '</b>' +
-      (i ? '<small>' + (fl[i - 1][1] ? pct(v / fl[i - 1][1] * 100) : '–') + '</small>' : '<small></small>') + '</div>').join('') +
-      '<p class="bs-st-hint">Справа – сколько процентов перешло с прошлого шага</p>');
+    // воронка: лиды → ссылки → купили. Ширина – просто форма воронки, смысл в цифрах и процентах перехода
+    const fl = [['l', s.leads, plural(Math.round(s.leads), 'лид', 'лида', 'лидов')], ['k', s.links, plural(Math.round(s.links), 'ссылка', 'ссылки', 'ссылок')],
+      ['s', s.sold, nSales(s.sold).replace(/^\S+ /, '')]].filter(x => x[0] !== 'l' || x[1]);
+    const fw = fl.length > 2 ? [100, 76, 52] : [100, 66], fx = { k: ['лидов', 'получили ссылку'], s: ['ссылок', 'оплатили'] };
+    const funnel = card('bs-st-fun', 'Воронка', fl.map(([k, v, w], i) => (i ? '<div class="bs-st-fx"><span>↓</span><b>' + (fl[i - 1][1] ? pct(v / fl[i - 1][1] * 100) : '–') + '</b> ' +
+      (fl[i - 1][0] === 'l' ? fx.k : fx.s).join(' ') + '</div>' : '') + '<div class="bs-st-fs ' + k + '" style="width:' + fw[i] + '%"><b>' + frac(v) + '</b> ' + w + '</div>').join('') +
+      (fl[0][0] === 'l' && s.leads ? '<p class="bs-st-hint">Из 100 лидов покупают примерно <b>' + Math.round(s.sold / s.leads * 100) + '</b></p>' : ''));
     // по месяцам – зарплата столбиками: премия + смены; клик – открыть месяц
     const ms = Array.from({ length: 6 }, (_, i) => ymAdd(ym, i - 5)).map(x => x === ym ? s : monthStat(x)), mm = Math.max(1, ...ms.map(x => x.sal));
     const months = card('bs-st-mon', 'Зарплата по месяцам', '<div class="bs-st-mcs">' + ms.map(x => '<div data-ym="' + x.ym + '" class="' + (x.ym === ym ? 'on' : '') + (x.ym > now ? ' fut' : '') + '" title="' +
@@ -3797,10 +3799,9 @@
       '.bs-st-donut li{display:grid;grid-template-columns:9px 1fr auto;grid-template-rows:auto auto;column-gap:8px;align-items:center;font-size:12.5px}' +
       '.bs-st-donut li i{width:9px;height:9px;border-radius:3px}.bs-st-donut li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
       '.bs-st-donut li em{grid-column:2;grid-row:2;font-style:normal;font-size:11px;color:var(--bs-muted,#888);font-variant-numeric:tabular-nums}.bs-st-donut li small{grid-column:3;grid-row:1;font-weight:600;font-variant-numeric:tabular-nums}' +
-      '.bs-st-fun>div{display:grid;grid-template-columns:54px 1fr 40px 38px;align-items:center;gap:8px;padding:5px 0;font-size:12.5px}.bs-st-fun>div>span{color:var(--bs-muted,#888)}' +
-      '.bs-st-fun>div>p{margin:0;height:18px;border-radius:6px;background:var(--bs-hover,rgba(127,127,127,.1))}.bs-st-fun>div>p i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#a78bfa,#7c3aed)}' +
-      '.bs-st-fun>div:nth-child(3)>p i{background:linear-gradient(90deg,#60a5fa,#3b82f6)}.bs-st-fun>div:nth-child(4)>p i{background:linear-gradient(90deg,#4ade80,#16a34a)}' +
-      '.bs-st-fun>div>b{text-align:right;font-variant-numeric:tabular-nums}.bs-st-fun>div>small{text-align:right;font-size:11.5px;font-weight:600;color:#16a34a}' +
+      '.bs-st-fun .bs-st-fs{margin:0 auto;padding:9px 10px;border-radius:12px;text-align:center;font-size:12.5px;color:#fff;white-space:nowrap;box-sizing:border-box;background:linear-gradient(90deg,#a78bfa,#7c3aed)}' +
+      '.bs-st-fun .bs-st-fs b{font-size:16px;font-variant-numeric:tabular-nums}.bs-st-fun .bs-st-fs.k{background:linear-gradient(90deg,#60a5fa,#3b82f6)}.bs-st-fun .bs-st-fs.s{background:linear-gradient(90deg,#4ade80,#16a34a)}' +
+      '.bs-st-fx{display:flex;justify-content:center;align-items:center;gap:5px;padding:5px 0;font-size:12px;color:var(--bs-muted,#888)}.bs-st-fx span{font-size:13px}.bs-st-fx b{color:#16a34a;font-size:13px}' +
       '.bs-st-mcs{display:flex;gap:10px;height:150px}.bs-st-mcs>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;cursor:pointer;border-radius:9px;padding:4px 0 0}' +
       '.bs-st-mcs>div:hover{background:var(--bs-hover,rgba(127,127,127,.08))}.bs-st-mcs>div.fut{opacity:.35;cursor:default}' +
       '.bs-st-mcs>div>b{font-size:11px;font-weight:600;color:var(--bs-muted,#888);white-space:nowrap}.bs-st-mcs>div.on>b{color:var(--bs-text,#222)}' +
