@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.56.0
+// @version      1.56.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2520,8 +2520,8 @@
     const box = wrap.querySelector('#bsSale'), note = box.querySelector('.bs-sale-note');
     ['fio', 'name', 'price', 'disc', 'email'].forEach(k => { box.querySelector('[data-k="' + k + '"]').value = x[k] == null ? '' : x[k]; });
     const paint = () => {
-      // «моя» – если я среди менеджеров (как при импорте)
-      x.cnt = !meSet() || x.mops.includes(meName());
+      // «моя» – если я среди менеджеров (как при импорте); менеджеров нет (пришла из таблицы) – как была
+      x.cnt = x.mops.length ? !meSet() || x.mops.includes(meName()) : old.cnt !== false;
       box.querySelectorAll('[data-g="mops"] em').forEach(m => m.classList.toggle('bs-on', x.mops.includes(m.dataset.v)));
       box.querySelectorAll('[data-g="share"] em').forEach(m => m.classList.toggle('bs-on', +m.dataset.v === +x.share));
       box.querySelector('.bs-sale-share').hidden = !x.cnt;
