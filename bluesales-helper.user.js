@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.57.0
+// @version      1.57.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2068,6 +2068,13 @@
     // KPI из таблицы ОКК пришёл новый – перерисовать премию
     okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); };
     okkSync();
+    wrap.addEventListener('mouseover', ev => {
+      const pm = ev.target.closest && ev.target.closest('.bs-pm'), tip = pm && pm.querySelector('.bs-ptip');
+      if (!tip) return;
+      const r = pm.getBoundingClientRect(), h = tip.offsetHeight, w = tip.offsetWidth;
+      tip.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
+      tip.style.top = (r.bottom + 6 + h < innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + 'px';
+    });
     wrap.addEventListener('click', ev => {
       const t = ev.target;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -2101,13 +2108,22 @@
     const c = p && premK(ym), v = p && Math.round(p.v * c.k * 100) / 100;
     const okF = p && tab != null && Math.abs(v - tab) < 0.5, okB = p && tab != null && !okF && Math.abs(p.v - tab) < 0.5;
     const bad = p && tab != null && !okF && !okB;
-    const tip = (p ? 'Премия по продажам: ' + rubK(p.v) + ' ₽' + (p.miss ? ' (без премии ещё ' + p.miss + ' продаж)' : '') +
-        '\n× ' + kq(c.q) + ' за качество – ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '% (таблица ОКК)' : okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'KPI нет: подключи таблицу ОКК («История» → «Таблицы»)') +
-        '\n× ' + kq(c.p) + ' за план – ' + (c.plan == null ? 'цель на месяц не задана' : 'продано ' + frac(c.sold) + ' из ' + c.goal + ' (' + kq(c.plan) + '%)' + (ym === ymNow() ? ', месяц ещё идёт' : '')) +
-        '\n= ' + rubK(v) + ' ₽' : '') +
-      (tab != null ? (p ? '\n\n' : '') + 'В твоей таблице (ячейка N1): ' + rubK(tab) + ' ₽' + (p ? okF ? ' – сходится' : okB ? ' – сходится без коэффициентов (их ставят в конце месяца)' : ' – не сходится' : '') : '');
-    return '<div title="' + tip + '"><span>' + lbl + '</span><b class="' + (bad || p && p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(p ? v : tab) + ' ₽' + (bad ? ' ≠' : p && p.miss ? ' ?' : '') + '</b>' +
-      (p ? '<small class="bs-kpi">×' + kq(c.q) + ' KPI ' + (c.kpi == null ? '?' : kq(c.kpi) + '%') + ' · ×' + kq(c.p) + ' план' + (c.plan == null ? ' ?' : ' ' + Math.floor(c.plan) + '%') + '</small>' : '') + '</div>';
+    if (!p) return '<div title="В твоей таблице (ячейка N1)"><span>' + lbl + '</span><b class="bs-ok">' + rubK(tab) + ' ₽</b></div>';
+    // подсказка – своя карточка (не серый title): строки «что – сколько», коэффициенты цветом
+    const cls = x => x > 1 ? 'up' : x < 1 ? 'down' : '', row = (a, b, c) => '<p' + (c ? ' class="' + c + '"' : '') + '><i>' + a + '</i><em>' + b + '</em></p>';
+    const pl = c.plan == null ? 'цель не задана' : Math.floor(c.plan) + '% (' + frac(c.sold) + ' из ' + c.goal + (ym === ymNow() ? ', месяц идёт' : '') + ')';
+    const tip = '<section class="bs-ptip">' + row('По продажам', rubK(p.v) + ' ₽') +
+      (p.miss ? '<p class="bs-pt-n">без премии ещё ' + p.miss + ' ' + plural(p.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
+      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q), 'bs-pt-k ' + cls(c.q)) +
+      (c.kpi == null ? '<p class="bs-pt-n">' + (okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'подключи таблицу ОКК в «Таблицах»') + '</p>' : '') +
+      row('План · ' + pl, '×' + kq(c.p), 'bs-pt-k ' + cls(c.p)) +
+      (c.plan == null ? '<p class="bs-pt-n">задай цель – клик по кольцу во вкладке «Сегодня»</p>' : '') +
+      row('Итого', rubK(v) + ' ₽', 'bs-pt-t') +
+      (tab != null ? row('В таблице (N1)', rubK(tab) + ' ₽', 'bs-pt-tab') +
+        '<p class="bs-pt-n ' + (bad ? 'bad' : 'ok') + '">' + (okF ? '✓ сходится' : okB ? '✓ сходится без коэффициентов – их ставят в конце месяца' : '≠ не сходится') + '</p>' : '') + '</section>';
+    const chip = (t, x, none) => '<em class="' + (none ? 'no' : cls(x)) + '">' + t + (none ? ' ?' : ' ×' + kq(x)) + '</em>';
+    return '<div class="bs-pm"><span>' + lbl + '</span><b class="' + (bad || p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') + '</b>' +
+      '<small class="bs-kpi">' + chip('KPI', c.q, c.kpi == null) + chip('план', c.p, c.plan == null) + '</small>' + tip + '</div>';
   }
   function heroHtml(r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
@@ -3559,7 +3575,12 @@
       '.bs-hero-m span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero-g input{width:54px;margin:0 4px;padding:2px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}' +
       '.bs-hero-g button{margin-left:4px;padding:2px 10px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:var(--bs-accent,#3b82f6);color:#fff;font:inherit;cursor:pointer}' +
       '.bs-hero-r{margin-left:auto;display:flex;gap:22px;text-align:right}.bs-hero-r div{display:flex;flex-direction:column;gap:2px}.bs-hero-r span{font-size:11.5px;color:var(--bs-muted,#888)}' +
-      '.bs-kpi{font-size:10.5px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-kpi{display:flex;gap:4px;justify-content:flex-end;margin-top:2px;white-space:nowrap}.bs-kpi em{font-style:normal;font-size:10.5px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(127,127,127,.13);color:var(--bs-muted,#888)}' +
+      '.bs-kpi em.up{background:rgba(22,163,74,.13);color:#16a34a}.bs-kpi em.down{background:rgba(217,119,6,.14);color:#d97706}.bs-kpi em.no{background:none;box-shadow:inset 0 0 0 1px var(--bs-border,#D9E0E7)}.bs-pm{cursor:default}' +
+      '.bs-ptip{display:none;position:fixed;z-index:3200;width:270px;padding:10px 12px;border-radius:12px;pointer-events:none;text-align:left;background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 32px rgba(0,0,0,.2)}.bs-pm:hover>.bs-ptip{display:block}' +
+      '.bs-ptip p{display:flex;gap:10px;justify-content:space-between;align-items:baseline;margin:0;padding:3px 0;font-size:12.5px;line-height:1.35}.bs-ptip i{font-style:normal;color:var(--bs-muted,#888)}.bs-ptip em{font-style:normal;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.bs-ptip .bs-pt-k.up em{color:#16a34a}.bs-ptip .bs-pt-k.down em{color:#d97706}.bs-ptip .bs-pt-t{margin-top:4px;padding-top:7px;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-ptip .bs-pt-t i{color:inherit;font-weight:600}.bs-ptip .bs-pt-t em{font-size:14px}' +
+      '.bs-ptip .bs-pt-tab{margin-top:4px}.bs-ptip .bs-pt-n{display:block;padding:0 0 3px;font-size:11.5px;color:var(--bs-muted,#888)}.bs-ptip .bs-pt-n.ok{color:#16a34a}.bs-ptip .bs-pt-n.bad{color:#d97706}' +
       '.bs-hero-r b{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}.bs-hero-r b.bs-ok{color:#16a34a}' +
       '.bs-sw{position:relative;display:inline-block;width:26px;height:15px;border-radius:8px;background:#c9ced6;margin-right:8px;vertical-align:-3px;transition:background .15s}' +
       '.bs-sw::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}' +
