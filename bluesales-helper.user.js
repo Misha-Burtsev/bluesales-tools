@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.58.0
+// @version      1.59.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2040,6 +2040,8 @@
     const hit = FRACS.find(([v]) => Math.abs(v - f) < 0.015);
     return hit ? (w || '') + hit[1] : r2s(n);
   };
+  // «1 продажа», «1½ продажи», «4 продажи», «5 продаж»
+  const nSales = n => frac(n) + ' ' + (Math.round(n * 100) % 100 ? 'продажи' : plural(Math.round(n), 'продажа', 'продажи', 'продаж'));
   // период истории помнится, пока открыта страница
   const histPer = { p: '7', from: null, to: null };
   function histRange() {
@@ -2078,7 +2080,7 @@
     return histSave(h);
   }
   const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
-  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История']];
+  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История'], ['stat', 'Статистика']];
   function openSales(tab) {
     const keep = histKeep;
     closeSale();
@@ -2092,9 +2094,9 @@
       '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('.bs-tab');
-    ({ shift: paintShift, rep: paintReport, hist: paintHist })[tab](box);
+    ({ shift: paintShift, rep: paintReport, hist: paintHist, stat: paintStat })[tab](box);
     // KPI из таблицы ОКК пришёл новый – перерисовать премию
-    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); };
+    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); if (tab === 'stat') paintStat(box); };
     okkSync();
     wrap.addEventListener('mouseover', ev => {
       const pm = ev.target.closest && ev.target.closest('.bs-pm'), tip = pm && pm.querySelector('.bs-ptip');
@@ -2161,16 +2163,183 @@
     const mb = Math.round(month.reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100, ms = month.reduce((a, e) => a + (+e.rep.sum || 0), 0);
     const goal = goalGet(), p = goal ? Math.min(1, mb / goal) : 0, C = 2 * Math.PI * 34, left = Math.max(0, Math.round((goal - mb) * 100) / 100);
     const pm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y === now.getFullYear() && m.m === now.getMonth() + 1 && m.prem != null);
-    const on = premOn(), pd = premSum(salesGet()), pmo = premSum([].concat(...month.map(e => e.sales || [])));
+    const on = premOn(), pd = premSum(salesGet()), pmo = premSum([].concat(...month.map(e => e.sales || []))), sm = monthStat(ymNow());
     return '<div class="bs-hero"><button data-a="goal" class="bs-goal" title="' + (goal ? 'Продано за ' + mon + ': ' + frac(mb) + ' из ' + goal + '. Нажми, чтобы поменять цель' : 'Задать цель на месяц – сколько продаж') + '">' +
         '<svg viewBox="0 0 80 80" width="80" height="80"><circle cx="40" cy="40" r="34"/>' + (p ? '<circle cx="40" cy="40" r="34" class="bs-goal-on" stroke-dasharray="' + (C * p).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 40 40)"/>' : '') + '</svg>' +
         '<b>' + (goal ? Math.floor(p * 100) + '%' : '–') + '</b><small>' + (goal ? 'цели' : 'цель?') + '</small></button>' +
       '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b>' +
         (on ? '<span class="bs-hero-p" title="Твоя часть премии с продаж за сегодня' + (pd.miss ? '. Без премии ' + pd.miss + ' – открой их и впиши вручную' : '') + '">премия <i>+' + rubK(pd.v) + ' ₽</i>' + (pd.miss ? ' <b class="bs-prem-q">+ ? ×' + pd.miss + '</b>' : '') + '</span>' : '') +
         '<span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
-        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + plural(Math.ceil(left), 'продажа', 'продажи', 'продаж') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
+        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + nSales(left).replace(/^\S+ /, '') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
       '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
-        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon, ymNow()) + '</div></div>';
+        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon, ymNow()) +
+        '<div class="bs-pm bs-sal"><span>зарплата</span><b data-a="stat">' + rub(sm.sal) + ' ₽</b>' + salTip(sm) + '</div></div></div>';
+  }
+  // зарплата = премия за месяц (с коэффициентами) + смены; ставка – сумма за норму смен (10 000 ₽ за 15), смены – дни с отметкой «Моя смена»
+  const PAYR_KEY = 'bsShiftPay';
+  const payRate = () => { const p = jget(PAYR_KEY, {}); return { sum: +p.sum || 10000, n: +p.n || 15 }; };
+  const ymAdd = (ym, k) => { const d = new Date(Math.floor(ym / 100), ym % 100 - 1 + k, 1); return d.getFullYear() * 100 + d.getMonth() + 1; };
+  const ymName = ym => MONTHS[ym % 100 - 1];
+  // всё про месяц – для зарплаты и статистики
+  function monthStat(ym) {
+    const es = histAll().filter(e => ymOf(e.d) === ym), sales = [].concat(...es.map(e => e.sales || []));
+    const tot = k => es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0);
+    const days = new Set(es.filter(shiftMine).map(e => e.d)).size, rate = payRate();
+    const tm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y * 100 + m.m === ym && m.prem != null);
+    const ps = premOn() ? premSum(sales) : null, c = premK(ym);
+    const prem = ps ? Math.round(ps.v * c.k) : tm ? Math.round(tm.prem) : null, shifts = Math.round(rate.sum / rate.n * days);
+    return { ym, es, sales, days, rate, c, ps, prem, fromTab: !ps && !!tm, shifts, sal: (prem || 0) + shifts,
+      sold: Math.round(tot('bought') * 100) / 100, sum: tot('sum'), links: tot('links'), leads: tot('leads') };
+  }
+  // карточка-подсказка к зарплате: из чего сложилась
+  function salTip(s) {
+    const row = (a, b, c) => '<p' + (c ? ' class="' + c + '"' : '') + '><i>' + a + '</i><em>' + b + '</em></p>';
+    return '<section class="bs-ptip">' + row('Премия' + (s.ps ? ' · ×' + kq(s.c.k) : s.fromTab ? ' · из таблицы' : ''), s.prem == null ? 'не считается' : rub(s.prem) + ' ₽') +
+      (s.ps && s.ps.miss ? '<p class="bs-pt-n">без премии ещё ' + s.ps.miss + ' ' + plural(s.ps.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
+      row('Смены · ' + s.days + ' × ' + rub(s.rate.sum / s.rate.n) + ' ₽', rub(s.shifts) + ' ₽') +
+      row('Итого', rub(s.sal) + ' ₽', 'bs-pt-t') +
+      '<p class="bs-pt-n">' + rub(s.rate.sum) + ' ₽ за ' + s.rate.n + ' смен. Смены – дни с отметкой «Моя смена». Подробно – во вкладке «Статистика»</p></section>';
+  }
+  // вкладка «Статистика»: месяц целиком – зарплата, план, KPI, график по дням, из чего продажи, сравнение с прошлыми месяцами
+  let statYm = 0, statMet = 'sum';
+  const PAL = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#94a3b8'];
+  const MONTHS_R = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const pct = n => Math.round(n) + '%';
+  const d1 = n => String(Math.round(n * 10) / 10).replace('.', ',');
+  // разница с прошлым месяцем – зелёным или оранжевым
+  const delta = (a, b, mon) => {
+    if (!b || a == null) return '';
+    const p = Math.round((a - b) / b * 100);
+    return '<small class="bs-st-d' + (p > 0 ? ' up' : p < 0 ? ' down' : '') + '" title="К месяцу ' + mon + '">' + (p > 0 ? '↑ ' : p < 0 ? '↓ ' : '') + Math.abs(p) + '%</small>';
+  };
+  // кольцо-диаграмма с подписями: items – [[название, вес, подпись]]
+  function donut(items, center, sub) {
+    const tot = items.reduce((a, x) => a + x[1], 0), R = 38, C = 2 * Math.PI * R;
+    let off = 0;
+    const arcs = items.map(([, v], i) => {
+      const l = v / tot * C, g = items.length > 1 ? Math.min(2.5, l / 3) : 0;
+      const s = '<circle cx="50" cy="50" r="' + R + '" stroke="' + PAL[i % PAL.length] + '" stroke-dasharray="' + Math.max(0.1, l - g).toFixed(2) + ' ' + C.toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"/>';
+      off += l; return s;
+    }).join('');
+    return '<div class="bs-st-donut"><div class="bs-st-dc"><svg viewBox="0 0 100 100" width="118" height="118"><circle cx="50" cy="50" r="' + R + '" class="bs-st-dtr"/>' +
+      '<g transform="rotate(-90 50 50)">' + arcs + '</g></svg><b>' + center + '</b><small>' + sub + '</small></div>' +
+      '<ul>' + items.map(([n, v, t], i) => '<li><i style="background:' + PAL[i % PAL.length] + '"></i><span>' + esc(n) + '</span><em>' + t + '</em><small>' + pct(v / tot * 100) + '</small></li>').join('') + '</ul></div>';
+  }
+  // группы продаж (свои доли) по ключу: [[название, доля продаж, сумма]], крупные сверху, хвост – в «другое»
+  function groupSales(sales, key) {
+    const m = {};
+    sales.filter(x => saleShare(x) > 0).forEach(x => { const k = key(x), g = m[k] || (m[k] = [k, 0, 0]); g[1] += saleShare(x); g[2] += salePart(x); });
+    const a = Object.values(m).sort((x, y) => y[1] - x[1]);
+    if (a.length > 6) a.splice(5, a.length, a.slice(5).reduce((o, x) => [o[0], o[1] + x[1], o[2] + x[2]], ['другое', 0, 0]));
+    return a.map(([n, k, s]) => [n, k, frac(k) + ' · ' + rub(s) + ' ₽']);
+  }
+  const card = (cls, title, body, right) => '<section class="bs-st-c ' + cls + '"><header><h4>' + title + '</h4>' + (right || '') + '</header>' + body + '</section>';
+  function paintStat(box) {
+    const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
+    statYm = Math.min(Math.max(statYm || now, first), now);
+    const ym = statYm, s = monthStat(ym), pv = monthStat(ymAdd(ym, -1)), pmon = ymName(ymAdd(ym, -1)), cur = ym === now, y = Math.floor(ym / 100), m = ym % 100;
+    const MON = ymName(ym)[0].toUpperCase() + ymName(ym).slice(1), r = s.rate, per = r.sum / r.n;
+    const top = '<div class="bs-st-top"><div class="bs-st-nav"><button data-a="prev"' + (ym <= first ? ' disabled' : '') + ' title="Прошлый месяц">' + ico(ICO.back, 16) + '</button>' +
+      '<b>' + MON + ' ' + y + '</b><button data-a="next"' + (cur ? ' disabled' : '') + ' title="Следующий месяц">' + ico(ICO.back, 16) + '</button></div>' +
+      '<span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span></div>';
+    if (!s.es.length) { box.innerHTML = top + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
+    // зарплата
+    const sp = s.prem || 0, all = Math.max(1, sp + s.shifts);
+    const fc = cur && s.prem != null && s.days && s.days < r.n ? Math.round(s.prem / s.days * r.n + r.sum) : 0;
+    const sal = card('bs-st-sal', 'Зарплата за ' + ymName(ym),
+      '<div class="bs-st-big bs-pm"><b>' + rub(s.sal) + ' ₽</b>' + (cur ? '' : delta(s.sal, pv.sal, pmon)) + salTip(s) + '</div>' +
+      '<div class="bs-st-stack"><i class="p" style="width:' + (sp / all * 100).toFixed(1) + '%"></i><i class="s" style="width:' + (s.shifts / all * 100).toFixed(1) + '%"></i></div>' +
+      '<p class="bs-st-leg"><i class="p"></i>Премия' + (s.ps ? ' <small>×' + kq(s.c.k) + '</small>' : s.fromTab ? ' <small>таблица</small>' : '') + '<em>' + (s.prem == null ? 'не считается' : rub(s.prem) + ' ₽') + '</em></p>' +
+      '<p class="bs-st-leg"><i class="s"></i>Смены <small>' + s.days + ' × ' + rub(per) + '</small><em>' + rub(s.shifts) + ' ₽</em></p>' +
+      (fc ? '<p class="bs-st-fc">Если так же до конца месяца – около <b>' + rub(fc) + ' ₽</b></p>' : ''));
+    // план: шкала с порогами коэффициента
+    const g = s.c.goal, pl = g ? s.sold / g * 100 : 0, mx = Math.max(160, Math.ceil((pl + 10) / 10) * 10), at = v => (v / mx * 100).toFixed(1) + '%';
+    const left = Math.max(0, r.n - s.days), next = [[80, '×1'], [100, ''], [150, '×1,1']].find(([t]) => pl < t);
+    const need = next && Math.max(0, g * next[0] / 100 - s.sold);
+    const plan = card('bs-st-plan', 'План', !g ? '<p class="bs-st-hint">Цель на ' + ymName(ym) + ' не задана – нажми на кольцо во вкладке «Сегодня».</p>' :
+      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + '</em></em></div>' +
+      '<div class="bs-st-track" style="--z1:' + at(80) + ';--z2:' + at(150) + '"><i style="width:' + at(Math.min(pl, mx)) + '"></i>' +
+        [80, 100, 150].map(t => '<s style="left:' + at(t) + '"><small>' + t + '</small></s>').join('') + '</div>' +
+      '<p class="bs-st-hint">' + (!next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
+        plural(Math.ceil(need - 0.001), 'продажа', 'продажи', 'продаж') + (cur && left ? ' – по <b>' + d1(need / left) + '</b> за смену, осталось ' + left + ' ' + plural(left, 'смена', 'смены', 'смен') : '')) + '</p>');
+    // KPI: полукруг с зонами коэффициента
+    const k = s.c.kpi, L = Math.PI * 40, arc = 'M10 50 A40 40 0 0 1 90 50', zc = k == null ? '' : k < 70 ? 'down' : k < 97 ? '' : 'up';
+    const tick = v => { const a = Math.PI * (1 - v / 100); return '<line x1="' + (50 + 33 * Math.cos(a)).toFixed(1) + '" y1="' + (50 - 33 * Math.sin(a)).toFixed(1) + '" x2="' + (50 + 47 * Math.cos(a)).toFixed(1) + '" y2="' + (50 - 47 * Math.sin(a)).toFixed(1) + '"/>'; };
+    const kpi = card('bs-st-kpi', 'Качество', '<div class="bs-st-gauge ' + zc + '"><svg viewBox="0 0 100 56" width="150" height="84"><path d="' + arc + '" class="bs-st-gtr"/>' +
+      (k != null ? '<path d="' + arc + '" class="bs-st-gv" stroke-dasharray="' + (L * Math.min(100, k) / 100).toFixed(1) + ' ' + L.toFixed(1) + '"/>' : '') + '<g class="bs-st-gt">' + tick(70) + tick(97) + '</g></svg>' +
+      '<b>' + (k != null ? kq(k) + '%' : '–') + '</b><small>KPI из таблицы ОКК</small></div>' +
+      '<p class="bs-st-kz"><span' + (k != null && k < 70 ? ' class="on down"' : '') + '>&lt;70 ×0,9</span><span' + (k != null && k >= 70 && k < 97 ? ' class="on"' : '') + '>70–96 ×1</span><span' + (k != null && k >= 97 ? ' class="on up"' : '') + '>97+ ×1,1</span></p>' +
+      (k == null ? '<p class="bs-st-hint">' + (okkOn() ? 'В таблице ОКК нет KPI за ' + ymName(ym) : 'Подключи таблицу ОКК в «Таблицах»') + '</p>' : ''));
+    // график по дням
+    const dim = new Date(y, m, 0).getDate(), td = new Date(), pOn = premOn();
+    const days = Array.from({ length: dim }, (_, i) => {
+      const d = String(i + 1).padStart(2, '0') + '.' + String(m).padStart(2, '0') + '.' + y, es = s.es.filter(e => e.d === d);
+      const tot = k => es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0);
+      return { n: i + 1, wd: new Date(y, m - 1, i + 1).getDay(), mine: es.some(shiftMine), now: cur && td.getDate() === i + 1, sum: tot('sum'), bought: Math.round(tot('bought') * 100) / 100,
+        prem: pOn ? Math.round(premSum([].concat(...es.map(e => e.sales || []))).v) : 0 };
+    });
+    const mets = [['sum', 'Сумма'], ['bought', 'Продажи']].concat(pOn ? [['prem', 'Премия']] : []);
+    if (!mets.some(x => x[0] === statMet)) statMet = 'sum';
+    const fv = v => statMet === 'bought' ? nSales(v) : rub(v) + ' ₽';
+    const mxv = Math.max(1, ...days.map(x => x[statMet])), md = days.filter(x => x.mine), avg = md.length ? md.reduce((a, x) => a + x[statMet], 0) / md.length : 0;
+    const best = days.reduce((a, x) => x[statMet] > (a ? a[statMet] : 0) ? x : a, null);
+    const bars = card('bs-st-days', 'По дням', '<div class="bs-st-bars">' + days.map(x => {
+      const v = x[statMet], h = v / mxv;
+      return '<div class="' + [x.mine ? 'mine' : '', x.now ? 'now' : '', x.wd === 0 || x.wd === 6 ? 'we' : '', best === x ? 'best' : ''].join(' ') + '" style="--h:' + h.toFixed(3) + '">' +
+        '<p><i' + (v ? '' : ' class="z"') + '></i></p><span>' + x.n + '</span><b>' + x.n + ' ' + MONTHS_R[m - 1] + '<em>' + fv(v) + '</em>' + (x.mine ? '' : '<small>не твоя смена</small>') + '</b></div>';
+    }).join('') + (avg ? '<s style="--h:' + (avg / mxv).toFixed(3) + '"><small>в среднем ' + (statMet === 'bought' ? d1(avg) : fv(avg)) + '</small></s>' : '') + '</div>' +
+      '<p class="bs-st-lg"><span><i class="mine"></i>твоя смена</span><span><i></i>не твоя</span>' + (best ? '<span>лучший день – <b>' + best.n + ' ' + MONTHS_R[m - 1] + '</b>, ' + fv(best[statMet]) + '</span>' : '') + '</p>',
+      '<span class="bs-seg bs-st-met">' + mets.map(([k, t]) => '<em data-m="' + k + '"' + (statMet === k ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>');
+    // средние за смену
+    const sd = x => Math.max(1, x.days), tile = (t, v, a, b) => '<div><span>' + t + '</span><b>' + v + '</b>' + delta(a, b, pmon) + '</div>';
+    const avgs = '<div class="bs-st-tiles">' +
+      tile('Средний чек', s.sold ? rub(s.sum / s.sold) + ' ₽' : '–', s.sold ? s.sum / s.sold : null, pv.sold ? pv.sum / pv.sold : 0) +
+      tile('Продаж за смену', d1(s.sold / sd(s)), s.sold / sd(s), pv.days ? pv.sold / pv.days : 0) +
+      tile('Сумма за смену', rub(s.sum / sd(s)) + ' ₽', s.sum / sd(s), pv.days ? pv.sum / pv.days : 0) +
+      (s.prem != null ? tile('Премия за смену', rub(s.prem / sd(s)) + ' ₽', s.prem / sd(s), pv.days && pv.prem ? pv.prem / pv.days : 0) :
+        tile('Ссылок за смену', d1(s.links / sd(s)), s.links / sd(s), pv.days ? pv.links / pv.days : 0)) + '</div>';
+    // из чего продажи
+    const gp = groupSales(s.sales, x => (PAYS.find(p => p[0] === salePay(x)) || [0, salePay(x)])[1]), gk = groupSales(s.sales, saleKind);
+    const nsold = gp.reduce((a, x) => a + x[1], 0);
+    const pies = gp.length ? '<div class="bs-st-row2">' + card('', 'Типы оплат', donut(gp, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) +
+      card('', 'Что продаётся', donut(gk, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) + '</div>' : '';
+    // воронка: лиды → ссылки → купили
+    const fl = [['Лиды', s.leads], ['Ссылки', s.links], ['Купили', s.sold]].filter(x => x[0] !== 'Лиды' || x[1]), f0 = Math.max(1, fl[0][1]);
+    const funnel = card('bs-st-fun', 'Воронка', fl.map(([t, v], i) => '<div><span>' + t + '</span><p><i style="width:' + Math.max(2, v / f0 * 100).toFixed(1) + '%"></i></p><b>' + frac(v) + '</b>' +
+      (i ? '<small>' + (fl[i - 1][1] ? pct(v / fl[i - 1][1] * 100) : '–') + '</small>' : '<small></small>') + '</div>').join('') +
+      '<p class="bs-st-hint">Справа – сколько процентов перешло с прошлого шага</p>');
+    // по месяцам – зарплата столбиками: премия + смены; клик – открыть месяц
+    const ms = Array.from({ length: 6 }, (_, i) => ymAdd(ym, i - 5)).map(x => x === ym ? s : monthStat(x)), mm = Math.max(1, ...ms.map(x => x.sal));
+    const months = card('bs-st-mon', 'Зарплата по месяцам', '<div class="bs-st-mcs">' + ms.map(x => '<div data-ym="' + x.ym + '" class="' + (x.ym === ym ? 'on' : '') + (x.ym > now ? ' fut' : '') + '" title="' +
+      (x.sal ? ymName(x.ym) + ': премия ' + (x.prem == null ? '–' : rub(x.prem) + ' ₽') + ', смены ' + x.days + ' – ' + rub(x.shifts) + ' ₽' : 'Нет смен') + '">' +
+      '<b>' + (x.sal ? rub(x.sal / 1000) + ' тыс.' : '') + '</b>' +
+      '<p style="height:' + (x.sal / mm * 100).toFixed(1) + '%"><i class="p" style="flex:' + (x.prem || 0) + '"></i><i class="s" style="flex:' + x.shifts + '"></i></p><span>' + ymName(x.ym).slice(0, 3) + '</span></div>').join('') + '</div>' +
+      '<p class="bs-st-lg"><span><i class="p"></i>премия</span><span><i class="s"></i>смены</span></p>');
+    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
+    statClick(box);
+  }
+  function statClick(box) {
+    box.onclick = ev => {
+      const t = ev.target, b = t.closest('[data-a],[data-m],[data-ym]');
+      if (!b || b.disabled) return;
+      if (b.dataset.m) { statMet = b.dataset.m; return paintStat(box); }
+      if (b.dataset.ym) { statYm = +b.dataset.ym; return paintStat(box); }
+      const a = b.dataset.a;
+      if (a === 'prev' || a === 'next') { statYm = ymAdd(statYm, a === 'prev' ? -1 : 1); return paintStat(box); }
+      if (a === 'rate') {
+        const sp = box.querySelector('.bs-st-rate'), r = payRate();
+        sp.innerHTML = '<input type="number" min="1" value="' + r.sum + '"> ₽ за <input type="number" min="1" max="31" value="' + r.n + '"> смен <button data-a="rateok">ок</button>';
+        const [a1, a2] = sp.querySelectorAll('input');
+        a1.focus(); a1.select();
+        sp.onkeydown = e => { if (e.key === 'Enter') sp.querySelector('button').click(); if (e.key === 'Escape') { e.stopPropagation(); paintStat(box); } };
+        return;
+      }
+      if (a === 'rateok') {
+        const [a1, a2] = box.querySelectorAll('.bs-st-rate input'), v = Math.round(+a1.value), n = Math.round(+a2.value);
+        if (v > 0 && n > 0) jset(PAYR_KEY, { sum: v, n });
+        return paintStat(box);
+      }
+    };
   }
   function paintShift(box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
@@ -2206,6 +2375,7 @@
       }
       if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: mine == null ? true : !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
+      if (a === 'stat') return openSales('stat');
       if (a === 'shift') {
         if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.' +
           (teamOn() ? '\n\nЦифры дня (лиды, чаты, ссылки, продано, сумма) запишутся в таблицу отдела – только в пустые клетки.' : ''))) return;
@@ -2313,7 +2483,7 @@
         return '<span class="bs-hist-prem' + (bad || p.miss ? ' bs-warn' : '') + '" title="' + tip + '">' + txt + '</span>';
       };
       body.innerHTML =
-        statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Продано', frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
+        statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды · чаты', tot('leads') + '<small> · ' + tot('chats') + '</small>'], ['Продано', bought >= 10 ? rub(bought) : frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
           .concat(pOn ? [['Премия', '<i title="Посчитано помощником по продажам' + (ps.miss ? ', без премии ' + ps.miss + ' – их надо вписать вручную' : '') + (tab ? '\nВ таблице за эти дни: ' + rubK(prem) + ' ₽' : '') + '">' + rubK(ps.v) + ' ₽' + (ps.miss ? '<small class="bs-prem-q"> ?' + ps.miss + '</small>' : '') + '</i>']] :
             tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
         syncCard(from, to, cnt, tcnt) +
@@ -2328,9 +2498,9 @@
           const chip = e.tab ? '<i class="bs-hist-mine bs-warn">нет смены в истории</i>' :
             '<i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i>';
           return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + tmark + '</b>' +
-            '<em><span>' + (zero || e.tab ? '–' : frac(e.rep.bought) + ' прод.') + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
+            '<em><span>' + (zero || e.tab ? '–' : nSales(+e.rep.bought || 0)) + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
             (tab || pOn ? premCell(e, f) : '') +
-            '<span>' + (+e.rep.links ? +e.rep.links + ' ссыл.' : '') + '</span></em>' +
+            '<span>' + (+e.rep.links ? +e.rep.links + ' ' + plural(+e.rep.links, 'ссылка', 'ссылки', 'ссылок') : '') + '</span></em>' +
             (e.now || e.tab ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + (e.tab ? '' : histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + premTag(x) + '</span>' +
@@ -2676,7 +2846,7 @@
     const c = premCfgs(), ks = Object.keys(c).map(Number).sort((a, b) => a - b);
     return c[ym] || (ks.length ? c[ks.filter(k => k <= ym).pop() || ks[0]] : null);
   };
-  const rubK = n => { const v = Math.round((+n || 0) * 100); return rub(Math.floor(v / 100)) + (v % 100 ? ',' + ('0' + v % 100).slice(-2) : ''); };
+  const rubK = n => rub(n);   // копейки не показываем – целые рубли
   // формула N: Месяц, Высшая, доплата за месяц – сумма × T1; Год – цена за месяц (H) × T2; Летняя школа – H × T1;
   // доплата за год – T3; бронь – T4; вычет ЛШ – цена тарифа за месяц × T2. H – цена за месяц по сумме оплаты (столбец H), не нашлась – нестандарт
   function premCalc(x, c) {
@@ -2931,7 +3101,7 @@
   // маленькие иконки линией – вместо смайликов
   const ico = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
   const ICO = { box: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
-    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
+    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
   // строка карточки сверки: точка-статус, что за таблица, как дела, кнопки
   const syncRow = (lbl, st, txt, btns) => '<div class="bs-sync-r"><i class="bs-dot" data-st="' + st + '"></i><b>' + lbl + '</b><span>' + txt + '</span>' + (btns || '') + '</div>';
   // карточка над списком смен: своя таблица и таблица отдела – по строке, справа премия за месяц (N1) и «обновить».
@@ -3570,6 +3740,74 @@
       '#bsSale{width:760px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
       '#bsSale.bs-sales{width:800px}#bsSale [hidden]{display:none!important}' +
+      '.bs-sal b[data-a]{cursor:pointer}.bs-sal b[data-a]:hover{text-decoration:underline dotted;text-underline-offset:3px}' +
+      '#bsSale .bs-tab>.bs-st-top{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}' +
+      '.bs-st-nav{display:flex;align-items:center;gap:6px}.bs-st-nav b{min-width:128px;text-align:center;font-size:16px;font-weight:600}' +
+      '.bs-st-nav button,.bs-st-rate>button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:8px;background:none;color:var(--bs-muted,#888);cursor:pointer}' +
+      '.bs-st-nav button:hover:not([disabled]),.bs-st-rate>button:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}.bs-st-nav button[disabled]{opacity:.3;cursor:default}' +
+      '.bs-st-nav button:last-child svg{transform:scaleX(-1)}' +
+      '.bs-st-rate{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-rate b{color:var(--bs-text,#222);font-weight:600}.bs-st-rate small{font-size:12px}' +
+      '.bs-st-rate input{width:64px;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}.bs-st-rate input+input,.bs-st-rate input:nth-of-type(2){width:44px}' +
+      '.bs-st-rate button[data-a=rateok]{width:auto;height:auto;padding:3px 10px;margin-left:4px;background:var(--bs-accent,#3b82f6);color:#fff;border-radius:6px}.bs-st-rate button[data-a=rateok]:hover{background:var(--bs-accent,#3b82f6);color:#fff;filter:brightness(1.1)}' +
+      '.bs-st-c{position:relative;padding:12px 14px 14px;border:1px solid var(--bs-border,#D9E0E7);border-radius:14px;min-width:0}' +
+      '.bs-st-c>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:8px}.bs-st-c h4{margin:0;font-size:12.5px;font-weight:500;color:var(--bs-muted,#888)}' +
+      '.bs-st-row1{display:grid;grid-template-columns:1.25fr 1fr .85fr;gap:12px;margin-bottom:12px}.bs-st-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}' +
+      '.bs-st-row3{display:grid;grid-template-columns:1fr 1.2fr;gap:12px}' +
+      '.bs-st-big{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}.bs-st-big>b{font-size:28px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1}' +
+      '.bs-st-d{font-size:11.5px;font-weight:600;padding:1px 6px;border-radius:7px;background:rgba(127,127,127,.12);color:var(--bs-muted,#888);white-space:nowrap}.bs-st-d.up{background:rgba(22,163,74,.12);color:#16a34a}.bs-st-d.down{background:rgba(217,119,6,.13);color:#d97706}' +
+      '.bs-st-stack{display:flex;gap:3px;height:10px;margin-bottom:10px}.bs-st-stack i{border-radius:5px;min-width:3px}' +
+      '.bs-st-stack .p,.bs-st-leg i.p,.bs-st-lg i.p,.bs-st-mcs i.p{background:linear-gradient(90deg,#22c55e,#16a34a)}.bs-st-stack .s,.bs-st-leg i.s,.bs-st-lg i.s,.bs-st-mcs i.s{background:linear-gradient(90deg,#60a5fa,#3b82f6)}' +
+      '.bs-st-leg{display:flex;align-items:center;gap:7px;margin:0;padding:3px 0;font-size:12.5px}.bs-st-leg i{width:9px;height:9px;border-radius:3px}.bs-st-leg small{color:var(--bs-muted,#888);font-size:11.5px}' +
+      '.bs-st-leg em{margin-left:auto;font-style:normal;font-weight:600;font-variant-numeric:tabular-nums}' +
+      '.bs-st-fc{margin:8px 0 0;padding:7px 10px;border-radius:9px;background:var(--bs-hover,#f5f7fa);font-size:12px;color:var(--bs-muted,#888)}.bs-st-fc b{color:var(--bs-text,#222);white-space:nowrap}' +
+      '.bs-st-hint{margin:8px 0 0;font-size:12px;line-height:1.45;color:var(--bs-muted,#888)}.bs-st-hint b{color:var(--bs-text,#222)}' +
+      '.bs-st-pv{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:14px}.bs-st-pv>b{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1}.bs-st-pv>span{font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-pv .bs-kpi{margin:0 0 0 auto}' +
+      '.bs-st-track{position:relative;height:10px;margin-bottom:22px;border-radius:5px;background:linear-gradient(90deg,rgba(245,158,11,.22) var(--z1),rgba(59,130,246,.16) var(--z1) var(--z2),rgba(34,197,94,.22) var(--z2))}' +
+      '.bs-st-track>i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,#60a5fa,#3b82f6);box-shadow:0 1px 4px rgba(59,130,246,.4)}' +
+      '.bs-st-track>s{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--bs-panel,#fff);text-decoration:none}' +
+      '.bs-st-track>s small{position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-st-gauge{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:-2px}.bs-st-gauge svg{overflow:visible}' +
+      '.bs-st-gtr,.bs-st-gv{fill:none;stroke-width:9;stroke-linecap:round}.bs-st-gtr{stroke:var(--bs-hover,rgba(127,127,127,.15))}.bs-st-gv{stroke:#3b82f6}.bs-st-gauge.up .bs-st-gv{stroke:#22c55e}.bs-st-gauge.down .bs-st-gv{stroke:#f59e0b}' +
+      '.bs-st-gt line{stroke:var(--bs-panel,#fff);stroke-width:2}' +
+      '.bs-st-gauge>b{margin-top:-30px;font-size:22px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.bs-st-gauge>small{font-size:11px;color:var(--bs-muted,#888)}' +
+      '.bs-st-kz{display:flex;justify-content:center;gap:4px;margin:10px 0 0}.bs-st-kz span{font-size:10.5px;padding:1px 6px;border-radius:7px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-st-kz span.on{background:rgba(59,130,246,.13);color:#3b82f6;font-weight:600}.bs-st-kz span.on.up{background:rgba(22,163,74,.13);color:#16a34a}.bs-st-kz span.on.down{background:rgba(217,119,6,.14);color:#d97706}' +
+      '.bs-st-days{margin-bottom:12px}.bs-st-met em{padding:3px 10px;font-size:12px}' +
+      '.bs-st-bars{position:relative;display:flex;gap:3px;height:170px;padding-top:6px}' +
+      '.bs-st-bars>div{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column}.bs-st-bars p{position:relative;flex:1;margin:0;border-radius:5px}' +
+      '.bs-st-bars>div:hover p{background:var(--bs-hover,rgba(127,127,127,.08))}' +
+      '.bs-st-bars p i{position:absolute;left:0;right:0;bottom:0;height:calc(var(--h) * 100%);min-height:3px;border-radius:5px 5px 3px 3px;background:rgba(148,163,184,.55);transition:height .35s}' +
+      '.bs-st-bars .mine p i{background:linear-gradient(180deg,#60a5fa,#3b82f6)}.bs-st-bars .best p i{background:linear-gradient(180deg,#4ade80,#16a34a)}.bs-st-bars p i.z{min-height:0;height:0}' +
+      '.bs-st-bars span{height:18px;line-height:18px;text-align:center;font-size:9.5px;color:var(--bs-muted,#888);font-variant-numeric:tabular-nums}.bs-st-bars .we span{opacity:.55}' +
+      '.bs-st-bars .now span{color:#fff;background:var(--bs-accent,#3b82f6);border-radius:5px;font-weight:600}' +
+      '.bs-st-bars>div>b{display:none;position:absolute;z-index:2;left:50%;bottom:calc(18px + (100% - 18px) * var(--h) + 8px);transform:translateX(-50%);padding:6px 9px;border-radius:9px;white-space:nowrap;font-size:11.5px;font-weight:400;color:var(--bs-muted,#888);background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 6px 18px rgba(0,0,0,.16);pointer-events:none}' +
+      '.bs-st-bars>div:hover>b{display:block}.bs-st-bars>div>b em{display:block;font-style:normal;font-size:13px;font-weight:600;color:var(--bs-text,#222)}.bs-st-bars>div>b small{display:block;font-size:10.5px}' +
+      '.bs-st-bars>div:nth-child(-n+3)>b{left:0;transform:none}.bs-st-bars>div:nth-last-child(-n+4)>b{left:auto;right:0;transform:none}' +
+      '.bs-st-bars>s{position:absolute;left:0;right:0;bottom:calc(18px + (100% - 24px) * var(--h));border-top:1.5px dashed rgba(59,130,246,.55);text-decoration:none;pointer-events:none}' +
+      '.bs-st-bars>s small{position:absolute;right:0;bottom:2px;padding:0 5px;border-radius:5px;font-size:10.5px;color:#3b82f6;background:var(--bs-panel,#fff)}' +
+      '.bs-st-lg{display:flex;flex-wrap:wrap;gap:4px 16px;margin:10px 0 0;font-size:11.5px;color:var(--bs-muted,#888)}.bs-st-lg span{display:flex;align-items:center;gap:6px}.bs-st-lg b{color:var(--bs-text,#222);font-weight:600}' +
+      '.bs-st-lg i{width:9px;height:9px;border-radius:3px;background:rgba(148,163,184,.55)}.bs-st-lg i.mine{background:#3b82f6}.bs-st-lg span:nth-child(3){display:block;margin-left:auto}' +
+      '.bs-st-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}' +
+      '.bs-st-tiles div{display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-radius:14px;background:var(--bs-hover,#f5f7fa)}.bs-st-tiles span{font-size:12px;color:var(--bs-muted,#888)}' +
+      '.bs-st-tiles b{font-size:19px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.bs-st-tiles .bs-st-d{align-self:flex-start}' +
+      '.bs-st-donut{display:flex;align-items:center;gap:16px}.bs-st-dc{position:relative;flex:none;width:118px;height:118px;display:flex;flex-direction:column;align-items:center;justify-content:center}' +
+      '.bs-st-dc svg{position:absolute;inset:0}.bs-st-dc circle{fill:none;stroke-width:13}.bs-st-dtr{stroke:var(--bs-hover,rgba(127,127,127,.12))}' +
+      '.bs-st-dc b{font-size:22px;font-weight:700;line-height:1.1}.bs-st-dc small{font-size:11px;color:var(--bs-muted,#888)}' +
+      '.bs-st-donut ul{flex:1;min-width:0;margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}' +
+      '.bs-st-donut li{display:grid;grid-template-columns:9px 1fr auto;grid-template-rows:auto auto;column-gap:8px;align-items:center;font-size:12.5px}' +
+      '.bs-st-donut li i{width:9px;height:9px;border-radius:3px}.bs-st-donut li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.bs-st-donut li em{grid-column:2;grid-row:2;font-style:normal;font-size:11px;color:var(--bs-muted,#888);font-variant-numeric:tabular-nums}.bs-st-donut li small{grid-column:3;grid-row:1;font-weight:600;font-variant-numeric:tabular-nums}' +
+      '.bs-st-fun>div{display:grid;grid-template-columns:54px 1fr 40px 38px;align-items:center;gap:8px;padding:5px 0;font-size:12.5px}.bs-st-fun>div>span{color:var(--bs-muted,#888)}' +
+      '.bs-st-fun>div>p{margin:0;height:18px;border-radius:6px;background:var(--bs-hover,rgba(127,127,127,.1))}.bs-st-fun>div>p i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,#a78bfa,#7c3aed)}' +
+      '.bs-st-fun>div:nth-child(3)>p i{background:linear-gradient(90deg,#60a5fa,#3b82f6)}.bs-st-fun>div:nth-child(4)>p i{background:linear-gradient(90deg,#4ade80,#16a34a)}' +
+      '.bs-st-fun>div>b{text-align:right;font-variant-numeric:tabular-nums}.bs-st-fun>div>small{text-align:right;font-size:11.5px;font-weight:600;color:#16a34a}' +
+      '.bs-st-mcs{display:flex;gap:10px;height:150px}.bs-st-mcs>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;cursor:pointer;border-radius:9px;padding:4px 0 0}' +
+      '.bs-st-mcs>div:hover{background:var(--bs-hover,rgba(127,127,127,.08))}.bs-st-mcs>div.fut{opacity:.35;cursor:default}' +
+      '.bs-st-mcs>div>b{font-size:11px;font-weight:600;color:var(--bs-muted,#888);white-space:nowrap}.bs-st-mcs>div.on>b{color:var(--bs-text,#222)}' +
+      '.bs-st-mcs p{width:62%;max-width:44px;display:flex;flex-direction:column;gap:2px;margin:0;opacity:.45;transition:height .35s}.bs-st-mcs .on p{opacity:1}' +
+      '.bs-st-mcs p i{min-height:0;border-radius:4px}.bs-st-mcs p i:first-child{border-radius:7px 7px 4px 4px}' +
+      '.bs-st-mcs span{font-size:11px;color:var(--bs-muted,#888)}.bs-st-mcs .on span{color:var(--bs-text,#222);font-weight:600}' +
+      '@media (max-width:760px){.bs-st-row1,.bs-st-row2,.bs-st-row3{grid-template-columns:1fr}.bs-st-tiles{grid-template-columns:1fr 1fr}}' +
       // форма продажи: блоки с подписями, поля парами, справа – пузырь с текстом для Telegram, кнопки прилипают к низу
       '#bsSale.bs-sform{width:800px}.bs-sform .bs-sale-cols{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px}.bs-sform .bs-sale-form textarea{font-family:inherit;font-size:13px}.bs-sform .bs-sale-form{gap:0}' +
       '.bs-sf-sec{display:flex;flex-direction:column;gap:8px;padding:11px 0;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-sf-sec:first-child{padding-top:2px;border-top:0}' +
@@ -3642,9 +3880,9 @@
       '.bs-hist-row>b span{margin-left:6px;font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hist-row>b .bs-hist-mine{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:400;font-style:normal;color:var(--bs-muted,#888);background:var(--bs-hover,rgba(0,0,0,.06))}.bs-hist-row>b .bs-hist-mine.on{color:#16a34a;background:rgba(22,163,74,.1)}' +
       '.bs-foot button.bs-mine.on{color:#16a34a}.bs-stats small{font-size:12px;font-weight:400;color:var(--bs-muted,#888)}' +
-      '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-row em{display:grid;grid-template-columns:96px 104px 76px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
-      '.bs-prem .bs-hist-row em{grid-template-columns:72px 104px 104px 64px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
+      '.bs-prem .bs-hist-row em{grid-template-columns:96px 104px 96px 76px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
       '.bs-stats b i{font-style:normal}.bs-hist-row em span.bs-hist-prem.bs-warn,.bs-sync-p b.bs-warn,.bs-hero-r b.bs-warn{color:#d97706}' +
       '.bs-prem-v,.bs-prem-q{font-weight:500;font-size:11.5px;color:#16a34a;margin-left:6px;white-space:nowrap}.bs-prem-q,.bs-sale-prem small.bs-prem-q{color:#d97706}' +
       '.bs-sales-row .bs-prem-v,.bs-sales-row .bs-prem-q{grid-column:2;text-align:right;margin:0}' +
