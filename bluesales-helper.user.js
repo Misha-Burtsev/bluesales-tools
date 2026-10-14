@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.53.0
+// @version      1.54.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2052,24 +2052,58 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
+  // цель на месяц – сколько продаж (доли считаются); помнится по месяцам, новый месяц берёт прошлую цель
+  const GOAL_KEY = 'bsGoal';
+  const ymNow = () => { const d = new Date(); return d.getFullYear() * 100 + d.getMonth() + 1; };
+  const goalGet = () => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ymNow()]) || +g.n || 0; };
+  const goalSet = n => { const g = jget(GOAL_KEY, {}); g.m = g.m || {}; g.m[ymNow()] = n; g.n = n; jset(GOAL_KEY, g); };
+  // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
+  function heroHtml(r) {
+    const now = new Date(), mon = MONTHS[now.getMonth()];
+    const month = histAll().filter(e => { const x = dmyDate(e.d); return x.getFullYear() === now.getFullYear() && x.getMonth() === now.getMonth(); });
+    const mb = Math.round(month.reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100, ms = month.reduce((a, e) => a + (+e.rep.sum || 0), 0);
+    const goal = goalGet(), p = goal ? Math.min(1, mb / goal) : 0, C = 2 * Math.PI * 34, left = Math.max(0, Math.round((goal - mb) * 100) / 100);
+    const pm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y === now.getFullYear() && m.m === now.getMonth() + 1 && m.prem != null);
+    return '<div class="bs-hero"><button data-a="goal" class="bs-goal" title="' + (goal ? 'Продано за ' + mon + ': ' + frac(mb) + ' из ' + goal + '. Нажми, чтобы поменять цель' : 'Задать цель на месяц – сколько продаж') + '">' +
+        '<svg viewBox="0 0 80 80" width="80" height="80"><circle cx="40" cy="40" r="34"/>' + (p ? '<circle cx="40" cy="40" r="34" class="bs-goal-on" stroke-dasharray="' + (C * p).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 40 40)"/>' : '') + '</svg>' +
+        '<b>' + (goal ? Math.floor(p * 100) + '%' : '–') + '</b><small>' + (goal ? 'цели' : 'цель?') + '</small></button>' +
+      '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b><span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
+        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + plural(Math.ceil(left), 'продажа', 'продажи', 'продаж') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
+      '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
+        (pm ? '<div title="Из твоей таблицы (ячейка N1), обновляется при открытии «Истории»"><span>премия за ' + mon + '</span><b class="bs-ok">' + rub(pm.prem) + ' ₽</b></div>' : '') + '</div></div>';
+  }
   function paintShift(box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
     box.innerHTML =
-      '<div class="bs-hero"><b>' + rub(+r.sum || 0) + ' ₽</b><span>продано <i>' + r2s(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span></div>' +
+      heroHtml(r) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
         '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
-        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram через «Импорт из ТГ».</div>') +
+        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram – кнопка со значком самолётика внизу.</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">' + ico(ICO.user) + ' ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
-      '<button data-a="mine" class="bs-ghost bs-mine' + (mine ? ' on' : '') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
+      '<button data-a="mine" class="bs-ghost bs-mine" data-st="' + (mine == null ? 'wait' : mine ? 'on' : 'off') + '" title=""Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
         (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
-        '<i class="bs-dot" data-st="' + (mine == null ? 'wait' : mine ? 'ok' : '') + '"></i>' + (mine == null ? 'Моя смена?' : mine ? 'Моя смена' : 'Не моя смена') + '</button><span></span>' +
-      '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
+        '<i class="bs-sw"></i>Моя смена</button><span></span>' +
+      '<button data-a="imp" class="bs-icon" title="Импорт из Telegram – вставить тексты продаж, свои доли попадут в отчёт">' + ico(ICON.send, 16) + '</button>' +
       '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
-      const t = ev.target, a = t.dataset.a;
+      const t = ev.target, a = (t.closest('[data-a]') || t).dataset.a;
       if (a === 'me') return askMe();
+      if (a === 'goal') {
+        const g = box.querySelector('.bs-hero-g');
+        if (g.querySelector('input')) return;
+        g.innerHTML = 'цель на месяц <input type="number" min="1" max="999" value="' + (goalGet() || '') + '" placeholder="63"> продаж <button data-a="goalok">ок</button>';
+        const inp = g.querySelector('input');
+        inp.focus(); inp.select();
+        inp.onkeydown = e => { if (e.key === 'Enter') g.querySelector('button').click(); if (e.key === 'Escape') { e.stopPropagation(); paintShift(box); } };
+        return;
+      }
+      if (a === 'goalok') {
+        const n = Math.round(+box.querySelector('.bs-hero-g input').value);
+        if (n > 0) goalSet(n);
+        return paintShift(box);
+      }
       if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: mine == null ? true : !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
       if (a === 'shift') {
@@ -3306,9 +3340,21 @@
       '.bs-stats div+div{border-left:1px solid var(--bs-border,#D9E0E7)}.bs-stats span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}' +
       '.bs-stats b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
       '.bs-head-d{margin-left:10px;font-size:13px;font-weight:400;color:var(--bs-muted,#888)}' +
-      '.bs-hero{display:flex;align-items:baseline;gap:14px;padding:2px 2px 12px;margin-bottom:10px;border-bottom:1px solid var(--bs-border,#D9E0E7)}' +
-      '.bs-hero b{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.3px}' +
-      '.bs-hero span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero i{font-style:normal;color:var(--bs-text,#222);font-weight:600}' +
+      '.bs-hero{display:flex;align-items:center;gap:18px;padding:0 2px 14px;margin-bottom:10px;border-bottom:1px solid var(--bs-border,#D9E0E7)}' +
+      '.bs-hero i{font-style:normal;color:var(--bs-text,#222);font-weight:600}' +
+      '.bs-goal{position:relative;flex:none;width:80px;height:80px;padding:0;border:0;background:none;cursor:pointer;color:var(--bs-text,#222);display:flex;flex-direction:column;align-items:center;justify-content:center}' +
+      '.bs-goal svg{position:absolute;inset:0}.bs-goal circle{fill:none;stroke:var(--bs-border,#D9E0E7);stroke-width:7}.bs-goal circle.bs-goal-on{stroke:var(--bs-accent,#3b82f6);stroke-linecap:round;transition:stroke-dasharray .4s}' +
+      '.bs-goal b{font-size:18px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}.bs-goal small{font-size:11px;color:var(--bs-muted,#888);margin-top:2px}.bs-goal:hover circle:first-child{stroke:var(--bs-hover,rgba(0,0,0,.1))}' +
+      '.bs-hero-m{display:flex;flex-direction:column;gap:3px;min-width:0}.bs-hero-m b{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.3px;line-height:1.15}' +
+      '.bs-hero-m span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero-g input{width:54px;margin:0 4px;padding:2px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}' +
+      '.bs-hero-g button{margin-left:4px;padding:2px 10px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:var(--bs-accent,#3b82f6);color:#fff;font:inherit;cursor:pointer}' +
+      '.bs-hero-r{margin-left:auto;display:flex;gap:22px;text-align:right}.bs-hero-r div{display:flex;flex-direction:column;gap:2px}.bs-hero-r span{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-hero-r b{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}.bs-hero-r b.bs-ok{color:#16a34a}' +
+      '.bs-sw{position:relative;display:inline-block;width:26px;height:15px;border-radius:8px;background:#c9ced6;margin-right:8px;vertical-align:-3px;transition:background .15s}' +
+      '.bs-sw::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}' +
+      '.bs-mine[data-st=on] .bs-sw{background:#22a55a}.bs-mine[data-st=on] .bs-sw::after{left:13px}.bs-mine[data-st=on]{color:var(--bs-text,#222)}' +
+      '.bs-mine[data-st=wait] .bs-sw{background:none;box-shadow:inset 0 0 0 1.5px #9aa3af}.bs-mine[data-st=wait] .bs-sw::after{background:#9aa3af;left:2px;top:2px}' +
+      '.bs-foot button.bs-icon{padding:6px 9px}.bs-foot button.bs-icon svg{margin:0;vertical-align:-3px}' +
       '.bs-empty{padding:26px 10px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--bs-muted,#888)}' +
       '.bs-foot{display:flex;align-items:center;gap:8px;margin-top:12px}.bs-foot>span{flex:1}' +
       '.bs-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer;white-space:nowrap}.bs-foot button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
