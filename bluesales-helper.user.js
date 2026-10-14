@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.55.0
+// @version      1.55.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2626,8 +2626,12 @@
     if (ch) histSave(h);
     if (s.some(todo)) { const ym = ymOf(repSaved().d || ddmm(new Date())); s.forEach(x => { if (todo(x)) premSave(x, null, ym); }); salesSet(s); }
   }
+  // премия делится на число менеджеров: доля 0.33 – это ровно ⅓ (÷3), а не ×0,33
+  const premShare = s => Math.abs(s * 3 - Math.round(s * 3)) < 0.02 ? Math.round(s * 3) / 3 : s;
+  const premDiv = s => { const n = Math.round(1 / s); return Math.abs(1 / n - premShare(s)) < 1e-9 ? n : 0; };
   // моя часть премии (по доле); null – не посчитана
-  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * saleShare(x) * 100) / 100;
+  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * premShare(saleShare(x)) * 100) / 100;
+  const premHow = x => { const n = premDiv(x.share); return n === 1 ? '' : n ? ' ÷ ' + n : ' × ' + r2s(x.share); };
   // премия по продажам: v – сумма моих частей, miss – сколько моих продаж без премии
   const premSum = sales => (sales || []).reduce((a, x) => { const p = premPart(x); if (p == null) a.miss++; else a.v = Math.round((a.v + p) * 100) / 100; return a; }, { v: 0, miss: 0 });
   const premWhy = x => x.prem === null ? 'сумма не по тарифу (доплата, скидка…) – открой продажу и впиши премию вручную' : 'ещё нет ставок из таблицы – подключи свою таблицу и открой «Историю»';
@@ -2636,7 +2640,7 @@
     if (x.cnt === false || !premOn() && x.prem === undefined) return '';
     const p = premPart(x);
     return p == null ? '<b class="bs-prem-q" title="Премия не рассчитана: ' + premWhy(x) + '">премия?</b>' :
-      '<b class="bs-prem-v" title="Премия' + (x.premM ? ' (вписана вручную)' : '') + ': ' + rubK(x.prem) + ' ₽ × ' + r2s(x.share) + '">+' + rubK(p) + ' ₽</b>';
+      '<b class="bs-prem-v" title="Премия' + (x.premM ? ' (вписана вручную)' : '') + ': ' + rubK(x.prem) + ' ₽' + premHow(x) + '">+' + rubK(p) + ' ₽</b>';
   };
   // поле «Премия» в форме продажи: пусто – считается сама (подсказка в placeholder), вписал – вручную
   function premPaint(box, x, was, ym, mine) {
@@ -2648,7 +2652,7 @@
     i.placeholder = auto.v ? 'сама: ' + rubK(auto.v) : auto.v === null ? 'не считается – впиши' : 'нет ставок из таблицы';
     sm.className = n.v == null ? 'bs-prem-q' : '';
     sm.textContent = n.v == null ? '(' + (n.v === null ? 'сумма не по тарифу – впиши вручную' : 'посчитается, когда будут ставки из таблицы') + ')' :
-      '(твоя: ' + rubK(n.v * x.share) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
+      '(твоя: ' + rubK(Math.round(n.v * premShare(x.share) * 100) / 100) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
   }
   // в таблицу идут только продажи с моей долей
   const toSheet = x => x.cnt !== false && saleShare(x) > 0;
