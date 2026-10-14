@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.56.2
+// @version      1.57.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2065,6 +2065,9 @@
     document.body.appendChild(wrap);
     const box = wrap.querySelector('.bs-tab');
     ({ shift: paintShift, rep: paintReport, hist: paintHist })[tab](box);
+    // KPI из таблицы ОКК пришёл новый – перерисовать премию
+    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); };
+    okkSync();
     wrap.addEventListener('click', ev => {
       const t = ev.target;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -2078,13 +2081,33 @@
   const goalGet = () => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ymNow()]) || +g.n || 0; };
   const goalSet = n => { const g = jget(GOAL_KEY, {}); g.m = g.m || {}; g.m[ymNow()] = n; g.n = n; jset(GOAL_KEY, g); };
   // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
-  // премия за месяц: посчитанная помощником (p = premSum) и из таблицы (N1) – если обе, сверяем
-  function premMonHtml(p, tab, lbl) {
+  // коэффициенты к премии за месяц (как в таблице, перемножаются): за качество – KPI из таблицы ОКК (bsKpi – последнее, что прочитали),
+  // за выполнение плана – продано за месяц / цель месяца в помощнике
+  const KPI_KEY = 'bsKpi';
+  const goalFor = ym => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ym]) || +g.n || 0; };
+  const kpiGet = ym => { const v = jget(KPI_KEY, {})[ym]; return v == null ? null : +v; };
+  const kq = n => String(n).replace('.', ',');
+  function premK(ym) {
+    const kpi = kpiGet(ym), goal = goalFor(ym);
+    const sold = Math.round(histAll().filter(e => ymOf(e.d) === ym).reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100;
+    const plan = goal ? Math.round(sold / goal * 1000) / 10 : null;
+    const q = kpi == null ? 1 : kpi < 70 ? 0.9 : kpi < 97 ? 1 : 1.1, pl = plan == null ? 1 : plan < 80 ? 0.9 : plan < 150 ? 1 : 1.1;
+    return { kpi, plan, sold, goal, q, p: pl, k: Math.round(q * pl * 100) / 100 };
+  }
+  // премия за месяц: посчитанная помощником (p = premSum) × коэффициенты и из таблицы (N1) – если обе, сверяем
+  // (в таблице коэффициенты появляются в конце месяца – сходится и без них)
+  function premMonHtml(p, tab, lbl, ym) {
     if (!p && tab == null) return '';
-    const bad = p && tab != null && Math.abs(p.v - tab) >= 0.5;
-    const tip = (p ? 'Посчитано помощником по продажам: ' + rubK(p.v) + ' ₽' + (p.miss ? ', без премии ещё ' + p.miss + ' продаж' : '') : '') +
-      (tab != null ? (p ? '\n' : '') + 'В твоей таблице (ячейка N1): ' + rubK(tab) + ' ₽' + (p ? bad ? ' – не сходится' : ' – сходится' : '') : '');
-    return '<div title="' + tip + '"><span>' + lbl + '</span><b class="' + (bad || p && p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(p ? p.v : tab) + ' ₽' + (bad ? ' ≠' : p && p.miss ? ' ?' : '') + '</b></div>';
+    const c = p && premK(ym), v = p && Math.round(p.v * c.k * 100) / 100;
+    const okF = p && tab != null && Math.abs(v - tab) < 0.5, okB = p && tab != null && !okF && Math.abs(p.v - tab) < 0.5;
+    const bad = p && tab != null && !okF && !okB;
+    const tip = (p ? 'Премия по продажам: ' + rubK(p.v) + ' ₽' + (p.miss ? ' (без премии ещё ' + p.miss + ' продаж)' : '') +
+        '\n× ' + kq(c.q) + ' за качество – ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '% (таблица ОКК)' : okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'KPI нет: подключи таблицу ОКК («История» → «Таблицы»)') +
+        '\n× ' + kq(c.p) + ' за план – ' + (c.plan == null ? 'цель на месяц не задана' : 'продано ' + frac(c.sold) + ' из ' + c.goal + ' (' + kq(c.plan) + '%)' + (ym === ymNow() ? ', месяц ещё идёт' : '')) +
+        '\n= ' + rubK(v) + ' ₽' : '') +
+      (tab != null ? (p ? '\n\n' : '') + 'В твоей таблице (ячейка N1): ' + rubK(tab) + ' ₽' + (p ? okF ? ' – сходится' : okB ? ' – сходится без коэффициентов (их ставят в конце месяца)' : ' – не сходится' : '') : '');
+    return '<div title="' + tip + '"><span>' + lbl + '</span><b class="' + (bad || p && p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(p ? v : tab) + ' ₽' + (bad ? ' ≠' : p && p.miss ? ' ?' : '') + '</b>' +
+      (p ? '<small class="bs-kpi">×' + kq(c.q) + ' KPI ' + (c.kpi == null ? '?' : kq(c.kpi) + '%') + ' · ×' + kq(c.p) + ' план' + (c.plan == null ? ' ?' : ' ' + Math.floor(c.plan) + '%') + '</small>' : '') + '</div>';
   }
   function heroHtml(r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
@@ -2101,7 +2124,7 @@
         '<span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
         '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + plural(Math.ceil(left), 'продажа', 'продажи', 'продаж') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
       '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
-        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon) + '</div></div>';
+        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon, ymNow()) + '</div></div>';
   }
   function paintShift(box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
@@ -2286,6 +2309,7 @@
       const key = [from && isoOf(from), to && isoOf(to), sheetUrl(), teamOn() && JSON.stringify(teamCfg())].join('|');
       if (lazy && sheetLast && sheetLast.key === key && Date.now() - sheetLast.t < 60000) return;
       sheetLast = { key, t: Date.now() };
+      if (!lazy) { okkLast = 0; okkSync(); }
       const tok = ++sheetTok;
       // таблица отдела – после своей таблицы (скрипт один, запросы всё равно идут по очереди)
       teamBusy = teamOn();
@@ -2875,7 +2899,7 @@
       const months = sheetTab.months.filter(m => m.y * 100 + m.m >= lo && m.y * 100 + m.m <= hi && (from || m.sheet));
       const nos = months.filter(m => !m.sheet).map(m => MONTHS[m.m - 1]);
       prem = months.filter(m => m.sheet && m.prem != null).map(m => premMonHtml(premOn() ? premSum([].concat(...histAll().filter(e => ymOf(e.d) === m.y * 100 + m.m).map(e => e.sales || []))) : null,
-        m.prem, 'премия за ' + MONTHS[m.m - 1])).join('');
+        m.prem, 'премия за ' + MONTHS[m.m - 1], m.y * 100 + m.m)).join('');
       const bad = [cnt.miss && 'не отправлено ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean);
       mine = syncRow('Своя таблица', bad.length || nos.length ? 'warn' : 'ok', (bad.length ? bad.join(' · ') : 'всё сходится') + (nos.length ? ' · нет листа за ' + nos.join(', ') : ''),
         (cnt.imp ? '<button data-a="tabimp" title="Все оплаты за период, которых нет в помощнике, – в историю, каждую в смену своего дня">Забрать ' + cnt.imp + '</button>' : '') +
@@ -2977,13 +3001,22 @@
       '<div class="bs-sheet-2"><label><span>Имя, как в столбце A</span><input data-k="tname" placeholder="Имя"></label>' +
       '<label title="Пусто – с месяца первой смены в истории"><span>Брать с</span><input data-k="tfrom" type="date"></label></div>' +
       '<div class="bs-sale-note bs-team-note"></div>' +
-      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="team" class="bs-main">Сохранить</button></div></section></div>';
+      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="team" class="bs-main">Сохранить</button></div></section>' +
+      '<section class="bs-team-set"><h4>Таблица ОКК <small>необязательно</small></h4><p class="bs-sheet-sub">Оттуда – KPI за месяц: премия умножается на 0,9 / 1 / 1,1. Хватит доступа на просмотр.</p>' +
+      '<details><summary>Подробнее</summary><div class="bs-tar-help">Помощник ищет лист с твоим именем: месяцы – в шапке, KPI – в строке «KPI за день». Если такого листа нет – берёт KPI за текущий месяц со сводного листа (имя в столбце A). ' +
+      'Ничего туда не пишет. Работает через тот же скрипт – если он старый, обнови код и сделай новую версию развёртывания.</div></details>' +
+      '<label><span>Ссылка на таблицу</span><input data-k="ourl" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label>' +
+      '<label><span>Имя, как в таблице ОКК</span><input data-k="oname" placeholder="Имя"></label>' +
+      '<div class="bs-sale-note bs-okk-note"></div>' +
+      '<div class="bs-rep-btns">' + (okkCfg().url ? '<button data-a="okkoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="okk" class="bs-main">Сохранить</button></div></section></div>';
     document.body.appendChild(wrap);
     const inp = wrap.querySelector('[data-k=url]'), note = wrap.querySelector('.bs-sale-note');
     const tUrl = wrap.querySelector('[data-k=turl]'), tName = wrap.querySelector('[data-k=tname]'), tNote = wrap.querySelector('.bs-team-note');
     inp.value = sheetUrl();
     const tFrom = wrap.querySelector('[data-k=tfrom]');
     tUrl.value = teamCfg().url || ''; tName.value = teamCfg().name || ''; tFrom.value = teamCfg().from || '';
+    const oUrl = wrap.querySelector('[data-k=ourl]'), oName = wrap.querySelector('[data-k=oname]'), oNote = wrap.querySelector('.bs-okk-note');
+    oUrl.value = okkCfg().url || ''; oName.value = okkCfg().name || '';
     wrap.addEventListener('click', async ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'back') return openSales('hist');
@@ -3009,6 +3042,27 @@
         localStorage.removeItem(TEAM_KEY);
         teamTab = null;
         return openSales('hist');
+      }
+      if (a === 'okkoff') {
+        if (!confirm('Отключить таблицу ОКК? Ссылка и имя удалятся из помощника, KPI в премии больше не учитывается.')) return;
+        localStorage.removeItem(OKK_KEY);
+        localStorage.removeItem(KPI_KEY);
+        return openSales('hist');
+      }
+      if (a === 'okk') {
+        const surl = SHEET_RX.test(inp.value.trim()) ? inp.value.trim() : sheetUrl(), url = oUrl.value.trim(), name = oName.value.trim();
+        if (!surl) return void (oNote.textContent = 'Сначала подключи свою таблицу выше – ОКК читается через тот же скрипт');
+        if (!/\/spreadsheets\/d\/[\w-]{20,}/.test(url)) return void (oNote.textContent = 'Нужна ссылка вида https://docs.google.com/spreadsheets/d/…');
+        if (!name) return void (oNote.textContent = 'Впиши имя, как оно стоит в таблице ОКК (название листа)');
+        t.disabled = true; oNote.textContent = 'Проверяю…';
+        try {
+          const j = await okkRead({ url, name }, surl);
+          jset(OKK_KEY, { url, name });
+          const ms = Object.keys(j.months).sort();
+          oNote.textContent = '✓ Подключено. Лист «' + j.sheet + '», KPI: ' + (ms.length ? ms.map(k => MONTHS[k % 100 - 1] + ' ' + kq(j.months[k]) + '%').join(', ') : 'пока нет');
+        } catch (err) { oNote.textContent = 'Не вышло: ' + err.message; }
+        t.disabled = false;
+        return;
       }
       if (a === 'team') {
         const surl = SHEET_RX.test(inp.value.trim()) ? inp.value.trim() : sheetUrl(), url = tUrl.value.trim(), name = tName.value.trim();
@@ -3042,6 +3096,25 @@
       t.disabled = false;
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Таблица ОКК: KPI за месяц для премии. Только читаем, через тот же скрипт ----------
+  // Ссылка и имя – только в этом браузере (bsOkk). Прочитанное – в bsKpi {гггг*100+мм: KPI в %}: KPI меняется по ходу месяца,
+  // перечитываем при открытии «Смены» не чаще раза в 10 минут
+  const OKK_KEY = 'bsOkk';
+  const okkCfg = () => jget(OKK_KEY, {});
+  const okkOn = () => !!(sheetUrl() && okkCfg().url && okkCfg().name);
+  let okkPaint = () => {}, okkLast = 0, okkBusy = false;
+  async function okkRead(c, url) {
+    const j = await sheetPost({ okk: { url: c.url, name: c.name } }, url);
+    if (!j.months) throw new Error('обнови код скрипта в таблице («Таблицы» → «Скопировать код», потом новая версия развёртывания)');
+    jset(KPI_KEY, j.months);
+    return j;
+  }
+  function okkSync() {
+    if (!okkOn() || okkBusy || Date.now() - okkLast < 6e5) return;
+    okkBusy = true; okkLast = Date.now();
+    const was = localStorage.getItem(KPI_KEY);
+    okkRead(okkCfg()).catch(() => {}).then(() => { okkBusy = false; if (localStorage.getItem(KPI_KEY) !== was) okkPaint(); });
   }
   // ---------- Таблица отдела (общая): свой блок по дням – лиды, чаты, ссылки, продано, сумма. Через тот же скрипт ----------
   // Ссылка на таблицу отдела и имя в ней – только в этом браузере (bsTeam). Лиды, чаты и ссылки там – правда (их вписывают руками):
@@ -3486,6 +3559,7 @@
       '.bs-hero-m span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero-g input{width:54px;margin:0 4px;padding:2px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}' +
       '.bs-hero-g button{margin-left:4px;padding:2px 10px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:var(--bs-accent,#3b82f6);color:#fff;font:inherit;cursor:pointer}' +
       '.bs-hero-r{margin-left:auto;display:flex;gap:22px;text-align:right}.bs-hero-r div{display:flex;flex-direction:column;gap:2px}.bs-hero-r span{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-kpi{font-size:10.5px;color:var(--bs-muted,#888);white-space:nowrap}' +
       '.bs-hero-r b{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}.bs-hero-r b.bs-ok{color:#16a34a}' +
       '.bs-sw{position:relative;display:inline-block;width:26px;height:15px;border-radius:8px;background:#c9ced6;margin-right:8px;vertical-align:-3px;transition:background .15s}' +
       '.bs-sw::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}' +

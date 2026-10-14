@@ -15,6 +15,9 @@
 // в столбцах дат («дд.мм» в строке 1) – лиды, чаты, ссылки, продано, сумма. Формулы и чужие блоки не трогает.
 // Поэтому скрипту нужен доступ к таблицам, но работает он только с одной таблицей отдела: её id запоминается
 // при первом подключении, другие отклоняются. Сменить: Apps Script → Настройки проекта → Свойства скрипта → удалить TEAM.
+//
+// Таблица ОКК (если подключена): только читает KPI – лист с твоим именем, строка «KPI за день», столбцы с названием месяца
+// в шапке; запасной вариант – сводный лист (имя в A, KPI рядом). Тоже одна таблица: id запоминается в OKK.
 
 const COL = { name: 1, kind: 2, link: 5, pay: 6, sum: 7, email: 9, mops: 11, date: 15 };
 const WIDTH = 15;   // A…O – строки продаж; правее (справочник продуктов) не трогаем
@@ -31,6 +34,7 @@ function doPost(e) {
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
     if (body.team) return out(Object.assign({ ok: true }, teamRead(body.team)));
     if (body.teamPut) return out({ ok: true, res: teamPut(body.teamPut) });
+    if (body.okk) return out(Object.assign({ ok: true }, okkRead(body.okk)));
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
     // (две оплаты в одном чате на одну сумму – это две строки)
@@ -359,4 +363,54 @@ function teamPut(q) {
     cell.setValue(+c.v || 0);
     return 'ok';
   });
+}
+
+// ---------- Таблица ОКК: KPI по месяцам (только читаем) ----------
+const okkPct = v => { const t = String(v || '').trim(), x = num(t); return x == null ? null : Math.round((/%/.test(t) || x > 1.5 ? x : x * 100) * 10) / 10; };
+// q: {url, name} → { sheet, months: {гггг*100+мм: KPI в %} }
+function okkRead(q) {
+  const id = (String(q.url || '').match(/\/spreadsheets\/d\/([\w-]{20,})/) || [])[1];
+  if (!id) throw new Error('нужна ссылка на таблицу ОКК (docs.google.com/spreadsheets/d/…)');
+  const props = PropertiesService.getScriptProperties(), was = props.getProperty('OKK');
+  if (was && was !== id) throw new Error('скрипт уже работает с другой таблицей ОКК. Сменить: Apps Script → Настройки проекта → Свойства скрипта → удалить OKK');
+  let ss;
+  try { ss = SpreadsheetApp.openById(id); } catch (e) { throw new Error('таблица ОКК не открылась – проверь ссылку и доступ хотя бы на просмотр'); }
+  const name = String(q.name || '').trim().toLowerCase();
+  if (!name) throw new Error('не указано имя в таблице ОКК');
+  const now = new Date(), nm = now.getMonth() + 1, months = {};
+  let sheet = '';
+  // свой лист: в шапке (одна из первых строк) – «Сентябрь», «Октябрь»…, итог – строка, подписанная «KPI за день»
+  const own = ss.getSheets().find(sh => sh.getName().trim().toLowerCase() === name);
+  if (own && own.getLastRow() > 1) {
+    const v = own.getRange(1, 1, own.getLastRow(), own.getLastColumn()).getDisplayValues();
+    let kr = -1;
+    v.forEach((r, i) => { if (r.slice(0, 3).some(c => /^\s*kpi/i.test(c))) kr = i; });
+    const hr = v.slice(0, 3).findIndex(r => r.some(c => MONTH_NAMES.indexOf(String(c).trim().toLowerCase().split(/\s+/)[0]) >= 0));
+    if (kr > 0 && hr >= 0) {
+      let y = null, pm = null;
+      for (let c = v[hr].length - 1; c >= 0; c--) {
+        const w = String(v[hr][c]).trim().toLowerCase().match(/^([а-яё]+)\s*(\d{4})?$/), m = w ? MONTH_NAMES.indexOf(w[1]) + 1 : 0;
+        if (!m) continue;
+        // года в шапке нет – самый правый месяц в этом году (или прошлом, если он «впереди»), левее год убывает на переходе через январь
+        if (w[2]) y = +w[2];
+        else if (y == null) y = now.getFullYear() - (m - nm > 1 ? 1 : 0);
+        else if (m > pm) y--;
+        pm = m;
+        const k = okkPct(v[kr][c]);
+        if (k != null && months[y * 100 + m] == null) months[y * 100 + m] = k;
+      }
+      sheet = own.getName();
+    }
+  }
+  // сводный лист (имя в A, KPI в следующих столбцах) – KPI за текущий месяц, если на своём листе его нет
+  const ym = now.getFullYear() * 100 + nm;
+  if (months[ym] == null) for (const sh of ss.getSheets()) {
+    if (sh === own || sh.getLastRow() < 2 || sh.getLastColumn() < 2) continue;
+    const v = sh.getRange(1, 1, Math.min(sh.getLastRow(), 60), Math.min(sh.getLastColumn(), 5)).getDisplayValues();
+    const r = v.find(x => String(x[0]).trim().toLowerCase() === name), k = r && r.slice(1).map(okkPct).find(x => x != null);
+    if (k != null) { months[ym] = k; sheet = sheet || sh.getName(); break; }
+  }
+  if (!sheet) throw new Error('в таблице ОКК нет листа «' + String(q.name).trim() + '» со строкой KPI и нет этого имени в столбце A');
+  if (!was) props.setProperty('OKK', id);
+  return { sheet, months };
 }
