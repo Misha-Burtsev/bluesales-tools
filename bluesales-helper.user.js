@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.55.1
+// @version      1.56.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1731,7 +1731,23 @@
     return Math.round(Math.min(p, Math.max(0, v)));
   }
   const saleTotal = s => Math.max(0, (+s.price || 0) - saleDisc(s));
-  const salePart = s => s ? Math.round(saleTotal(s) * saleShare(s)) : 0;
+  // доля 0.33 / 0.67 – это ровно ⅓ / ⅔: сумму и премию делим на число менеджеров, а не умножаем на 0,33
+  const shareX = s => Math.abs(s * 3 - Math.round(s * 3)) < 0.02 ? Math.round(s * 3) / 3 : +s || 0;
+  const shareHow = s => { if (!(s > 0)) return ''; const n = Math.round(1 / s); return n === 1 ? '' : Math.abs(1 / n - shareX(s)) < 1e-9 ? ' ÷ ' + n : ' × ' + r2s(s); };
+  const salePart = s => s ? Math.round(saleTotal(s) * shareX(saleShare(s))) : 0;
+  // один раз: суммы смен, посчитанные раньше как × 0,33, переводим на ÷ 3 (история и текущая смена)
+  try {
+    if (!localStorage.getItem('bsShareFix')) {
+      const fix = list => (list || []).reduce((a, x) => a + (x && x.cnt !== false ? salePart(x) - Math.round(saleTotal(x) * (+x.share || 0)) : 0), 0);
+      const h = jget(HIST_KEY, []);
+      let ch = 0;
+      h.forEach(e => { const d = fix(e.sales); if (d && e.rep && e.rep.sum != null) { e.rep.sum = Math.max(0, (+e.rep.sum || 0) + d); ch = 1; } });
+      if (ch) jset(HIST_KEY, h);
+      const r = jget(REP_KEY, {}), sl = jget(SALES_KEY, {}), d = r.d && r.d === sl.d ? fix(sl.list) : 0;
+      if (d && r.sum != null) jset(REP_KEY, Object.assign(r, { sum: Math.max(0, (+r.sum || 0) + d) }));
+      localStorage.setItem('bsShareFix', '1');
+    }
+  } catch (e) {}
   // закрыли окно совсем – раскрытую смену истории не запоминаем (её держит только переход «смена → продажа/отчёт → назад»)
   function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); histKeep = null; }
   // id – открыть сохранённую продажу; без id – новая в текущем чате
@@ -1793,7 +1809,7 @@
       payPaint(box, x, mine);
       premPaint(box, x, old, ymOf(day), mine);
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
-      const part = Math.round(saleTotal(x) * x.share);
+      const part = Math.round(saleTotal(x) * shareX(x.share));
       note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + (past() ? 'В смену ' + day.slice(0, 5) + ' в истории' : 'В отчёт смены') + ': продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
     box.addEventListener('input', ev => {
@@ -2512,7 +2528,7 @@
       payPaint(box, x, x.cnt);
       premPaint(box, x, old, ymOf(e.d), x.cnt);
       const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
-      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
+      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽' + (shareHow(x.share) || ' × 1') + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
         (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '') +
         (x.sh ? ' · уже в таблице: сумму, почту и число менеджеров там поправишь кнопкой «↻ табл.»' : '');
     };
@@ -2626,12 +2642,9 @@
     if (ch) histSave(h);
     if (s.some(todo)) { const ym = ymOf(repSaved().d || ddmm(new Date())); s.forEach(x => { if (todo(x)) premSave(x, null, ym); }); salesSet(s); }
   }
-  // премия делится на число менеджеров: доля 0.33 – это ровно ⅓ (÷3), а не ×0,33
-  const premShare = s => Math.abs(s * 3 - Math.round(s * 3)) < 0.02 ? Math.round(s * 3) / 3 : s;
-  const premDiv = s => { const n = Math.round(1 / s); return Math.abs(1 / n - premShare(s)) < 1e-9 ? n : 0; };
   // моя часть премии (по доле); null – не посчитана
-  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * premShare(saleShare(x)) * 100) / 100;
-  const premHow = x => { const n = premDiv(x.share); return n === 1 ? '' : n ? ' ÷ ' + n : ' × ' + r2s(x.share); };
+  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * shareX(saleShare(x)) * 100) / 100;
+  const premHow = x => shareHow(x.share);
   // премия по продажам: v – сумма моих частей, miss – сколько моих продаж без премии
   const premSum = sales => (sales || []).reduce((a, x) => { const p = premPart(x); if (p == null) a.miss++; else a.v = Math.round((a.v + p) * 100) / 100; return a; }, { v: 0, miss: 0 });
   const premWhy = x => x.prem === null ? 'сумма не по тарифу (доплата, скидка…) – открой продажу и впиши премию вручную' : 'ещё нет ставок из таблицы – подключи свою таблицу и открой «Историю»';
@@ -2652,7 +2665,7 @@
     i.placeholder = auto.v ? 'сама: ' + rubK(auto.v) : auto.v === null ? 'не считается – впиши' : 'нет ставок из таблицы';
     sm.className = n.v == null ? 'bs-prem-q' : '';
     sm.textContent = n.v == null ? '(' + (n.v === null ? 'сумма не по тарифу – впиши вручную' : 'посчитается, когда будут ставки из таблицы') + ')' :
-      '(твоя: ' + rubK(Math.round(n.v * premShare(x.share) * 100) / 100) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
+      '(твоя: ' + rubK(Math.round(n.v * shareX(x.share) * 100) / 100) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
   }
   // в таблицу идут только продажи с моей долей
   const toSheet = x => x.cnt !== false && saleShare(x) > 0;
@@ -3359,7 +3372,7 @@
         '<u' + (x.warn || x.seen ? ' class="bs-warn"' : '') + '>' + (x.bad ? x.bad + ' – пропущу' : x.seen ? x.seen + (x.dup ? ' – повтор, пропущу' : ' – добавлю ещё раз') : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') + ' (другая оплата – нажми)' : x.dup ? 'уже в списке (другая оплата – нажми)' : [x.warn, !x.mine && 'не твоя – без учёта в сумме'].filter(Boolean).join(' · ')) + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
       btn.disabled = !ok.length && !fills.length;
-      btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить') +
+      btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareX(shareFor(x.mops.length)), 0)) + ' ₽' : 'Добавить') +
         (fills.length ? ' · дописать ' + fills.length : '');
     };
     ta.addEventListener('input', paint);
