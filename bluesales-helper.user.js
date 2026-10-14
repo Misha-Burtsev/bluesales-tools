@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.57.1
+// @version      1.58.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1110,16 +1110,21 @@
   ];
   const repFem = m => (MANAGERS.find(x => x[0] === (m || meId())) || [])[2];
   // отчёт – вкладка раздела «Смена»: смотреть и копировать можно по ходу дня, при закрытии смены он сохраняется сам
+  // плитка с цифрой: подпись сверху, само число – крупно, правится прямо в плитке
+  const REP_SHORT = { links: 'Ссылок', bought: 'Купили', sum: 'Сумма, ₽', blocks: 'Блоков' };
+  const repTile = ([k, label, auto]) => '<label class="bs-rp-t' + (auto ? ' bs-auto' : '') + '"><span>' + (REP_SHORT[k] || label) + '</span><input type="number" min="0" data-k="' + k + '"></label>';
   function paintReport(host) {
     host.innerHTML =
       '<div id="bsRep">' +
-      '<div class="bs-rep-top"><div class="bs-rep-range">' + MANAGERS.map(([id, n]) => '<span data-m="' + id + '">' + n + '</span>').join('') + '</div>' +
+      '<div class="bs-rep-top"><span class="bs-seg">' + MANAGERS.map(([id, n]) => '<em data-m="' + id + '">' + n + '</em>').join('') + '</span>' +
       '<input type="date" class="bs-rep-date" title="Дата отчёта"></div>' +
-      '<div class="bs-rep-grid">' + REP_FIELDS.map(([k, label, auto]) =>
-        '<label' + (auto ? ' class="bs-auto"' : '') + '><span>' + label + '</span><input type="number" min="0" data-k="' + k + '"></label>').join('') + '</div>' +
-      '<div class="bs-rep-status"></div>' +
-      '<textarea spellcheck="false"></textarea>' +
-      '<div class="bs-rep-btns"><span class="bs-rep-edited">Текст правлен вручную</span><button data-a="rebuild" class="bs-rep-edited" title="Собрать текст из цифр заново">Собрать заново</button><button data-a="reload">Обновить цифры</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
+      '<div class="bs-rp-cols"><div class="bs-rp-l">' +
+      '<section class="bs-rp-card"><header><b>Из CRM</b><small class="bs-rp-auto">авто</small><div class="bs-rep-status"></div><button data-a="reload" class="bs-rp-re" title="Посчитать заново">' + ico(ICO.sync, 14) + '</button></header>' +
+      '<div class="bs-rp-g3">' + REP_FIELDS.slice(0, 3).map(repTile).join('') + '</div></section>' +
+      '<section class="bs-rp-card"><header><b>За смену</b><small>ссылки и продажи считаются сами</small></header>' +
+      '<div class="bs-rp-g2">' + REP_FIELDS.slice(3).map(repTile).join('') + '</div></section></div>' +
+      '<div class="bs-rp-r"><header><b>Текст отчёта</b><span class="bs-rep-edited">правлен вручную ·</span><button data-a="rebuild" class="bs-rep-edited" title="Собрать текст из цифр заново">собрать заново</button></header>' +
+      '<textarea spellcheck="false"></textarea><button data-a="copy" class="bs-rp-copy">Скопировать отчёт</button></div></div></div>';
     const box = host.querySelector('#bsRep'), ta = box.querySelector('textarea'), status = box.querySelector('.bs-rep-status');
     const inputs = {};
     box.querySelectorAll('input[data-k]').forEach(i => { inputs[i.dataset.k] = i; });
@@ -1140,22 +1145,24 @@
       status.querySelector('span').textContent = text;
     };
     const values = () => { const v = {}; for (const k in inputs) v[k] = inputs[k].value; return v; };
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
     const update = () => {
       if (!box.isConnected) return;   // вкладку закрыли или смену уже закрыли – старые цифры не записываем
       if (!edited) ta.value = repText(values(), repFem(manager));
+      fit();
       box.classList.toggle('bs-edited', edited);
       // ручные цифры за сегодня запоминаются, автоматические пересчитываются при каждом открытии
       jset(REP_KEY, Object.assign({ d: ddmm(new Date()) }, values(), edited ? { text: ta.value } : {}));
     };
     if (edited) ta.value = saved.text;
-    const paintRange = () => box.querySelectorAll('[data-m]').forEach(s => s.classList.toggle('bs-on', s.dataset.m === manager));
+    const paintRange = () => box.querySelectorAll('[data-m]').forEach(s => s.classList.toggle('on', s.dataset.m === manager));
     let run = 0;
     // reset – пересчёт запросил сам пользователь (кнопка, дата, менеджер): ручную правку текста сбрасываем
     async function load(reset) {
       if (reset === true) edited = false;
       const t = repDate(), m = manager, my = ++run;
       const who = MANAGERS.find(x => x[0] === m)[1];
-      setStatus('load', 'Считаю лиды и чаты – ' + who + ', ' + t.slice(0, 5) + '…');
+      setStatus('load', 'считаю – ' + who + ', ' + t.slice(0, 5) + '…');
       box.classList.add('bs-loading');
       try {
         const form = await clientsForm();
@@ -1166,11 +1173,11 @@
         ]);
         if (my !== run || !box.isConnected) return;   // пока считали, переключили менеджера или закрыли вкладку
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
-        setStatus('ok', 'Посчитано: ' + who + ', ' + t.slice(0, 5) + ' · остальное вручную');
+        setStatus('ok', who + ', ' + t.slice(0, 5));
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        setStatus('err', 'Не посчиталось – впиши цифры вручную');
+        setStatus('err', 'не посчиталось – впиши сам');
       }
       box.classList.remove('bs-loading');
       update();
@@ -1181,7 +1188,7 @@
     });
     dateInp.addEventListener('change', () => load(true));
     box.addEventListener('click', ev => {
-      const r = ev.target.dataset.m, a = ev.target.dataset.a;
+      const r = ev.target.dataset.m, a = ev.target.closest('[data-a]') && ev.target.closest('[data-a]').dataset.a;
       if (r) { manager = r; paintRange(); load(true); }
       else if (a === 'reload') load(true);
       else if (a === 'rebuild') { edited = false; update(); }
@@ -1189,7 +1196,7 @@
         update();
         navigator.clipboard.writeText(ta.value).then(() => {
           ev.target.textContent = 'Скопировано ✓';
-          setTimeout(() => { ev.target.textContent = 'Скопировать'; }, 1500);
+          setTimeout(() => { ev.target.textContent = 'Скопировать отчёт'; }, 1500);
         });
       }
     });
@@ -1211,6 +1218,21 @@
       '.bs-rep-head i{font-style:normal;font-size:20px;color:var(--bs-muted,#888);cursor:pointer}' +
       '.bs-rep-top{display:flex;align-items:center;gap:8px;margin-bottom:10px}' +
       '.bs-rep-date{margin-left:auto;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:transparent;color:var(--bs-text,#222);font-size:12px;color-scheme:light dark}' +
+      // вкладка «Отчёт»: слева плитки с цифрами (из CRM и за смену), справа – текст отчёта пузырём по высоте текста
+      '.bs-tab #bsRep .bs-rep-top{justify-content:space-between;margin-bottom:12px}.bs-rp-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}@media (max-width:700px){.bs-rp-cols{grid-template-columns:1fr}}' +
+      '.bs-rp-l{display:flex;flex-direction:column;gap:12px}.bs-rp-card{padding:10px 12px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:12px}' +
+      '.bs-rp-card header,.bs-rp-r header{display:flex;align-items:center;gap:8px;min-height:24px;margin-bottom:8px}.bs-rp-card header b,.bs-rp-r header b{font-size:13px;font-weight:600}' +
+      '.bs-rp-auto{padding:0 6px;border-radius:6px;line-height:16px;background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)!important;margin-left:0!important}.bs-rp-card header small{margin-left:auto;font-size:11px;color:var(--bs-muted,#888)}' +
+      '#bsRep .bs-rep-status{flex:1;min-width:0;justify-content:flex-end;gap:6px;margin:0;padding:0;background:none!important;font-size:11.5px;font-weight:400;color:var(--bs-muted,#888)!important}' +
+      '#bsRep .bs-rep-status i{width:12px;height:12px;font-size:8px}#bsRep .bs-rep-status[data-st=ok] i{order:-1}#bsRep .bs-rep-status[data-st=err]{color:#e04848!important}#bsRep .bs-rep-status[data-st=load] i{display:none}' +
+      '.bs-rp-re{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:7px;background:none;color:var(--bs-muted,#888);cursor:pointer}.bs-rp-re:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}#bsRep.bs-loading .bs-rp-re svg{animation:bsSpin 1s linear infinite}' +
+      '.bs-rp-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.bs-rp-g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}' +
+      '.bs-rp-t{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--bs-hover,#f5f7fa);border:1px solid transparent;cursor:text;transition:border-color .15s}.bs-rp-t:focus-within{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rp-t span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#bsRep .bs-rp-t input{width:100%;min-width:0;padding:0;border:0;background:none;color:var(--bs-text,#222);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;-moz-appearance:textfield}#bsRep .bs-rp-t input::-webkit-inner-spin-button,#bsRep .bs-rp-t input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}' +
+      '.bs-rp-r{display:flex;flex-direction:column}.bs-rp-r header button{padding:0;border:0;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}.bs-rp-r header span{margin-left:auto;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '#bsRep .bs-rp-r textarea{height:auto;min-height:120px;max-height:56vh;padding:11px 13px;border:1px solid transparent;border-radius:14px 14px 14px 4px;background:rgba(59,130,246,.09);font-family:inherit;font-size:12.5px;line-height:1.5;resize:none;outline:none}#bsRep .bs-rp-r textarea:focus{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rp-copy{align-self:flex-end;margin-top:10px;padding:7px 16px;border:0;border-radius:9px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:13px;font-weight:500;cursor:pointer}.bs-rp-copy:hover{filter:brightness(1.08)}' +
       '.bs-rep-edited{display:none!important}#bsRep.bs-edited .bs-rep-edited{display:inline-block!important}' +
       'span.bs-rep-edited{margin-right:auto;align-self:center;font-size:11.5px;color:var(--bs-muted,#888)}' +
       '.bs-rep-range{display:inline-flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;overflow:hidden}' +
@@ -1222,10 +1244,10 @@
       '.bs-rep-grid input{padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:transparent;color:var(--bs-text,#222);font-size:13px;outline:none}' +
       '.bs-rep-grid input:focus{border-color:var(--bs-accent,#3b82f6)}' +
       // пока считаем – поля «авто» переливаются, кнопки копирования и пересчёта неактивны
-      '#bsRep.bs-loading .bs-auto input{color:transparent!important;background-image:linear-gradient(var(--bs-border,#D9E0E7),var(--bs-border,#D9E0E7))!important;background-repeat:no-repeat!important;background-position:9px center!important;background-size:22px 8px;animation:bsBar .9s ease-in-out infinite alternate}' +
-      '@keyframes bsBar{from{background-size:22px 8px}to{background-size:58px 8px}}' +
-      '#bsRep.bs-loading .bs-rep-btns button[data-a=copy],#bsRep.bs-loading .bs-rep-btns button[data-a=reload]{opacity:.45;pointer-events:none}' +
-      '#bsRep.bs-done .bs-auto input{animation:bsOk 1.4s ease-out}' +
+      '#bsRep.bs-loading .bs-auto input{color:transparent!important;background-image:linear-gradient(var(--bs-border,#D9E0E7),var(--bs-border,#D9E0E7))!important;background-repeat:no-repeat!important;background-position:0 center!important;background-size:22px 10px;animation:bsBar .9s ease-in-out infinite alternate}' +
+      '@keyframes bsBar{from{background-size:22px 10px}to{background-size:64px 10px}}' +
+      '#bsRep.bs-loading button[data-a=copy],#bsRep.bs-loading button[data-a=reload]{opacity:.45;pointer-events:none}' +
+      '#bsRep.bs-done .bs-auto{animation:bsOk 1.4s ease-out}' +
       '@keyframes bsOk{0%,40%{border-color:#22a55a;box-shadow:0 0 0 3px rgba(34,165,90,.18)}100%{box-shadow:0 0 0 0 rgba(34,165,90,0)}}' +
       '.bs-rep-status{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:500}' +
       '.bs-rep-status:empty{display:none}' +
@@ -1780,20 +1802,24 @@
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
+    // форма – блоками: покупка, кто продал, оплата, клиент; справа текст для Telegram (высота по тексту)
+    const sec = (t, body, cls) => '<section class="bs-sf-sec' + (cls ? ' ' + cls : '') + '"><h4>' + t + '</h4>' + body + '</section>';
+    const row = (...a) => '<div class="bs-sf-row">' + a.join('') + '</div>';
     wrap.innerHTML =
-      '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
+      '<div id="bsSale" class="bs-sform"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
       (twins.length ? '<div class="bs-sale-dup bs-sale-dups"><span>По этому чату уже ' + (twins.length > 1 ? 'есть продажи' : 'есть продажа') + '. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.</span>' +
         twins.slice(0, 3).map(o => '<p><span><b>' + (o.d === curD ? 'сегодня' : o.d.slice(0, 5)) + '</b> – ' + esc(o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽</span>' + twinBtn(o) + '</p>').join('') +
         (twins.length > 3 ? '<p><span>и ещё ' + (twins.length - 3) + ' – в «Истории»</span></p>' : '') + '</div>' : '') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
-      (old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
-      '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
-      field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') + field('disc', 'Скидка', '0 – в рублях или 10%') +
-      '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
-      '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
-      payChips() + field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
-      field('src', 'Источник', 'из тегов или вручную') + field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta') +
-      '</div><div class="bs-sale-prev"><span>Текст для Telegram</span><textarea readonly spellcheck="false"></textarea><div class="bs-sale-note"></div></div></div>' +
+      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>',
+        old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
+        field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + row(field('price', 'Цена, ₽', '0'), field('disc', 'Скидка', '₽ или 10%'))) +
+      sec('Кто продал', '<div class="bs-sf-team"><label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+        '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label></div>') +
+      sec('Оплата и премия', payChips(), 'bs-sf-pay') +
+      sec('Клиент', row(field('fio', 'Имя и фамилия', 'когда пришлёт'), field('email', 'Почта', 'когда пришлёт')) + row(field('nick', 'Ник', '@…'), field('src', 'Источник', 'из тегов или вручную')) +
+        field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta')) +
+      '</div><div class="bs-sale-prev"><h4>Текст для Telegram</h4><textarea readonly spellcheck="false" rows="4"></textarea><div class="bs-sale-note"></div></div></div>' +
       '<div class="bs-rep-btns">' + (old ? '<button data-a="del" class="bs-sale-del">Удалить</button>' : '') + '<span class="bs-tar-st"></span>' + (fromList ? '<button data-a="back">Назад</button>' : '') + '<button data-a="save">Сохранить</button><button data-a="copy" class="bs-main">Сохранить и скопировать</button></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), prev = box.querySelector('.bs-sale-prev textarea'), note = box.querySelector('.bs-sale-note');
@@ -1804,8 +1830,10 @@
       box.querySelectorAll('[data-g="mops"] em').forEach(e => e.classList.toggle('bs-on', x.mops.includes(e.dataset.v)));
       box.querySelectorAll('[data-g="share"] em').forEach(e => e.classList.toggle('bs-on', +e.dataset.v === x.share));
       prev.value = saleText(x);
+      prev.style.height = 'auto'; prev.style.height = prev.scrollHeight + 2 + 'px';
       const mine = saleMine(x);
       box.querySelector('.bs-sale-share').hidden = !mine;
+      box.querySelector('.bs-sf-pay').hidden = !mine;
       payPaint(box, x, mine);
       premPaint(box, x, old, ymOf(day), mine);
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
@@ -2073,7 +2101,9 @@
       if (!tip) return;
       const r = pm.getBoundingClientRect(), h = tip.offsetHeight, w = tip.offsetWidth;
       tip.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
-      tip.style.top = (r.bottom + 6 + h < innerHeight - 8 ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + 'px';
+      const down = r.bottom + 6 + h < innerHeight - 8;
+      tip.style.top = (down ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + 'px';
+      tip.classList.toggle('bs-up', !down);
     });
     wrap.addEventListener('click', ev => {
       const t = ev.target;
@@ -2625,7 +2655,9 @@
   const payGuess = x => /высш/i.test(x.name) ? PAYS[2][0] : /летн/i.test(x.name) ? PAYS[3][0] : saleTotal(x) >= 15000 ? PAYS[1][0] : PAYS[0][0];
   const salePay = x => PAYS.some(p => p[0] === x.pay) ? x.pay : payGuess(x);
   const saleKind = x => /высш/i.test(x.name) ? 'Высшая' : /комбо|математика \+ русский/i.test(x.name) ? 'Комбо' : '1 предмет';
-  const payChips = () => '<label class="bs-sale-pay"><span>Оплата <small>(для таблицы и премии)</small></span><div class="bs-chips" data-g="pay">' + PAYS.map(([v, t]) => '<em data-v="' + v + '" title="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+  const PAY_GR = { 5: 'Доплата', 7: 'Вычет ЛШ' };
+  const payChips = () => '<label class="bs-sale-pay"><span>Оплата <small>(для таблицы и премии)</small></span><div class="bs-chips bs-pay" data-g="pay">' +
+    PAYS.map(([v, t], i) => (PAY_GR[i] ? '<b></b><i>' + PAY_GR[i] + '</i>' : '') + '<em data-v="' + v + '" title="' + v + '">' + t.replace(/^(Доплата|Вычет ЛШ) /, '') + '</em>').join('') + '</div></label>' +
     '<label class="bs-sale-prem"><span>Премия за продажу <small></small></span><input data-k="premIn" inputmode="decimal"></label>';
   function payPaint(box, x, mine) {
     const l = box.querySelector('.bs-sale-pay');
@@ -3537,7 +3569,19 @@
       '#bsSaleWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
       '#bsSale{width:760px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
-      '#bsSale.bs-sales{width:880px}' +
+      '#bsSale.bs-sales{width:800px}#bsSale [hidden]{display:none!important}' +
+      // форма продажи: блоки с подписями, поля парами, справа – пузырь с текстом для Telegram, кнопки прилипают к низу
+      '#bsSale.bs-sform{width:800px}.bs-sform .bs-sale-cols{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px}.bs-sform .bs-sale-form textarea{font-family:inherit;font-size:13px}.bs-sform .bs-sale-form{gap:0}' +
+      '.bs-sf-sec{display:flex;flex-direction:column;gap:8px;padding:11px 0;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-sf-sec:first-child{padding-top:2px;border-top:0}' +
+      '.bs-sform h4{margin:0;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bs-muted,#888)}' +
+      '.bs-sf-row{display:flex;gap:8px}.bs-sf-row>label{flex:1 1 0;min-width:0}.bs-sf-row>.bs-sf-w2{flex-grow:2}' +
+      '.bs-sf-team{display:flex;flex-wrap:wrap;gap:8px 18px}.bs-sf-team .bs-chips em{padding:4px 10px}.bs-sform .bs-sale-pay>span{display:none}' +
+      '#bsSale .bs-sale-prem{flex-direction:row;align-items:center;gap:10px}.bs-sale-prem span{flex:1;min-width:0;line-height:1.35}.bs-sale-prem input{flex:none;width:150px}.bs-sale-prem small{display:block;font-size:11px}' +
+      '.bs-sform .bs-sale-prev{position:sticky;top:0;align-self:start;gap:8px}' +
+      '.bs-sform .bs-sale-prev textarea{flex:none;min-height:0;max-height:52vh;padding:11px 13px;border:0;border-radius:14px 14px 14px 4px;background:rgba(59,130,246,.09);font-family:inherit;font-size:12.5px;line-height:1.5;overflow:auto}' +
+      '.bs-sform .bs-sale-note{padding:8px 11px;border-radius:10px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font-size:12px;line-height:1.45}' +
+      '.bs-sform .bs-rep-btns{position:sticky;bottom:-14px;z-index:1;margin:6px -16px -14px;padding:10px 16px 14px;border-top:1px solid var(--bs-border,#D9E0E7);background:var(--bs-panel,#fff)}.bs-sform .bs-tar-st{margin-right:auto;align-self:center}' +
+      '.bs-pay{gap:5px}.bs-pay b{flex-basis:100%;height:0}.bs-pay i{display:flex;align-items:center;min-width:64px;font-style:normal;font-size:11.5px;color:var(--bs-muted,#888)}.bs-pay em{padding:3px 10px;font-size:12px}' +
       '.bs-sale-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:700px){.bs-sale-cols{grid-template-columns:1fr}}' +
       '.bs-sale-form{display:flex;flex-direction:column;gap:7px}' +
       '#bsSale label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--bs-muted,#888)}' +
@@ -3562,7 +3606,7 @@
       '.bs-hist-per{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}' +
       '.bs-range{display:inline-flex;align-items:center;gap:5px;color:var(--bs-muted,#888)}#bsSale .bs-range input{padding:3px 6px;font-size:12.5px}#bsSale .bs-range.on input{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-stats{display:flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:10px;margin-bottom:10px}' +
-      '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 12px}' +
+      '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 10px}' +
       '.bs-stats div+div{border-left:1px solid var(--bs-border,#D9E0E7)}.bs-stats span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}' +
       '.bs-stats b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
       '.bs-head-d{margin-left:10px;font-size:13px;font-weight:400;color:var(--bs-muted,#888)}' +
@@ -3577,7 +3621,8 @@
       '.bs-hero-r{margin-left:auto;display:flex;gap:22px;text-align:right}.bs-hero-r div{display:flex;flex-direction:column;gap:2px}.bs-hero-r span{font-size:11.5px;color:var(--bs-muted,#888)}' +
       '.bs-kpi{display:flex;gap:4px;justify-content:flex-end;margin-top:2px;white-space:nowrap}.bs-kpi em{font-style:normal;font-size:10.5px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(127,127,127,.13);color:var(--bs-muted,#888)}' +
       '.bs-kpi em.up{background:rgba(22,163,74,.13);color:#16a34a}.bs-kpi em.down{background:rgba(217,119,6,.14);color:#d97706}.bs-kpi em.no{background:none;box-shadow:inset 0 0 0 1px var(--bs-border,#D9E0E7)}.bs-pm{cursor:default}' +
-      '.bs-ptip{display:none;position:fixed;z-index:3200;width:270px;padding:10px 12px;border-radius:12px;pointer-events:none;text-align:left;background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 32px rgba(0,0,0,.2)}.bs-pm:hover>.bs-ptip{display:block}' +
+      '.bs-ptip{display:block;visibility:hidden;opacity:0;transition:opacity .12s .2s,visibility 0s .32s;position:fixed;z-index:3200;width:270px;padding:10px 12px;border-radius:12px;cursor:text;user-select:text;-webkit-user-select:text;text-align:left;background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 32px rgba(0,0,0,.2)}.bs-pm:hover>.bs-ptip{visibility:visible;opacity:1;transition-delay:.05s,0s}' +
+      '.bs-ptip::before{content:"";position:absolute;left:-12px;right:-12px;top:-12px;height:12px}.bs-ptip.bs-up::before{top:auto;bottom:-12px}' +
       '.bs-ptip p{display:flex;gap:10px;justify-content:space-between;align-items:baseline;margin:0;padding:3px 0;font-size:12.5px;line-height:1.35}.bs-ptip i{font-style:normal;color:var(--bs-muted,#888)}.bs-ptip em{font-style:normal;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-ptip .bs-pt-k.up em{color:#16a34a}.bs-ptip .bs-pt-k.down em{color:#d97706}.bs-ptip .bs-pt-t{margin-top:4px;padding-top:7px;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-ptip .bs-pt-t i{color:inherit;font-weight:600}.bs-ptip .bs-pt-t em{font-size:14px}' +
       '.bs-ptip .bs-pt-tab{margin-top:4px}.bs-ptip .bs-pt-n{display:block;padding:0 0 3px;font-size:11.5px;color:var(--bs-muted,#888)}.bs-ptip .bs-pt-n.ok{color:#16a34a}.bs-ptip .bs-pt-n.bad{color:#d97706}' +
