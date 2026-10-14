@@ -8,7 +8,8 @@
 // Формулы (C, D, H, J, L, N) не трогает. День в таблице – это строки от даты в O до следующей даты,
 // поэтому продажа за день, который уже есть, встаёт в конец этого дня, а новый день – по порядку дат.
 // Одну и ту же продажу (тот же чат и сумма на этом листе, в том числе внесённую руками) второй раз не добавляет.
-// Для «Истории» отдаёт строки оплат за месяцы периода и премию: N у первой строки дня (где дата в O) – за день, N1 – за месяц.
+// Для «Истории» отдаёт строки оплат за месяцы периода и премию: N у первой строки дня (где дата в O) – за день, N1 – за месяц,
+// а ещё ставки и цены тарифов из справочника листа (P3:R8, T1:T4) – по ним помощник сам считает премию каждой продажи.
 //
 // Таблица отдела (общая, если подключена в помощнике): читает и пишет только свой блок (имя в A, подписи строк в B) и только
 // в столбцах дат («дд.мм» в строке 1) – лиды, чаты, ссылки, продано, сумма. Формулы и чужие блоки не трогает.
@@ -181,14 +182,13 @@ function sheetRows(ss, q, memo) {
   const a = dayOf(q.from), b = dayOf(q.to);
   if (!a || !b) throw new Error('Нет периода');
   const z = x => ('0' + x).slice(-2), dmy = p => z(p.d) + '.' + z(p.m) + '.' + p.y;
-  const num = v => { if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(',', '.')); return isNaN(x) ? null : x; };
   const months = [], rows = [], days = {};
   for (let y = a.y, m = a.m; y * 100 + m <= b.y * 100 + b.m;) {
     let c = null;
     try { c = monthSheet(ss, { y, m, d: 1 }, memo); } catch (err) { months.push({ y, m, err: String(err && err.message || err) }); }
     if (c) {
       const { sh, n, vals, forms } = c, name = sh.getName();
-      months.push({ y, m, sheet: name, prem: num(vals[0][PREM - 1]) });
+      months.push({ y, m, sheet: name, prem: num(vals[0][PREM - 1]), cfg: premCfg(sh) });
       let day = '';   // дата пишется только у первой продажи дня – там и премия за день
       for (let r = 2; r <= n; r++) {
         const v = vals[r - 1];
@@ -206,6 +206,15 @@ function sheetRows(ss, q, memo) {
     if (++m > 12) { m = 1; y++; }
   }
   return { months, rows, days };
+}
+
+const num = v => { if (typeof v === 'number') return v; const x = parseFloat(String(v).replace(/[^\d,.-]/g, '').replace(',', '.')); return isNaN(x) ? null : x; };
+
+// справочник для премии (правее продаж, только читаем): T1 – % с оплаты за месяц, T2 – % с оплаты за год,
+// T3 – за доплату на тариф (год), T4 – за бронь; P3:R8 – продукт, цена за месяц, цена за курс
+function premCfg(sh) {
+  const v = sh.getRange('P1:T8').getValues();
+  return { t: [0, 1, 2, 3].map(i => num(v[i][4])), p: v.slice(2).map(r => [String(r[0]).trim(), num(r[1]), num(r[2])]) };
 }
 
 const dayKey = d => { const p = dayOf(d); return p.y * 100 + p.m; };

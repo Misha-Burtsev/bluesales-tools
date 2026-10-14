@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.54.0
+// @version      1.55.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1646,7 +1646,7 @@
   const curMine = () => { const m = jget(MINE_KEY, {}); return m.d === ddmm(new Date()) ? !!m.v : null; };
   const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
   // в архив – только то, что нужно для статистики, без лишних полей
-  const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, sh: x.sh, shT: x.shT, shAlso: x.shAlso });
+  const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, prem: x.prem, premM: x.premM, sh: x.sh, shT: x.shT, shAlso: x.shAlso });
   const histRep = r => { const o = {}; ['leads', 'blocks', 'chats', 'links', 'bought', 'sum', 'rem'].forEach(k => { if (r[k] != null && r[k] !== '') o[k] = +r[k] || 0; }); return o; };
   // true – если запись получилась (если место в браузере кончилось – выкидываем самые старые смены)
   function histPush(e) {
@@ -1791,6 +1791,7 @@
       const mine = saleMine(x);
       box.querySelector('.bs-sale-share').hidden = !mine;
       payPaint(box, x, mine);
+      premPaint(box, x, old, ymOf(day), mine);
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
       const part = Math.round(saleTotal(x) * x.share);
       note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + (past() ? 'В смену ' + day.slice(0, 5) + ' в истории' : 'В отчёт смены') + ': продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
@@ -1820,12 +1821,14 @@
         '\n\nЕсли это та же оплата – нажми «Отмена» и открой её. Добавить ещё одну (доплата, бронь)?')) return false;
       if (past()) {
         x.cnt = saleMine(x);
+        premSave(x, null, ymOf(day));
         if (!histAddDay(day, [x])) return false;
         box.querySelector('.bs-tar-st').textContent = 'Добавлено в ' + day.slice(0, 5);
         return true;
       }
       const all = salesGet(), i = all.findIndex(s => s.id === x.id), was = i >= 0 ? all[i] : null;
       x.cnt = saleMine(x);
+      premSave(x, was, ymOf(day));
       const dShare = r2(saleShare(x) - saleShare(was));
       if (dShare) soldAdd(dShare);
       sumAdd(salePart(x) - salePart(was));
@@ -2037,6 +2040,7 @@
     closeSale();
     histKeep = tab === 'hist' ? keep : null;
     tab = SHIFT_TABS.some(x => x[0] === tab) ? tab : 'shift';
+    premAll();
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Смена' + (tab === 'shift' ? '<small class="bs-head-d">' + WD[new Date().getDay()] + ', ' + ddmm(new Date()).slice(0, 5) + '</small>' : '') + '</b>' +
@@ -2058,19 +2062,30 @@
   const goalGet = () => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ymNow()]) || +g.n || 0; };
   const goalSet = n => { const g = jget(GOAL_KEY, {}); g.m = g.m || {}; g.m[ymNow()] = n; g.n = n; jset(GOAL_KEY, g); };
   // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
+  // премия за месяц: посчитанная помощником (p = premSum) и из таблицы (N1) – если обе, сверяем
+  function premMonHtml(p, tab, lbl) {
+    if (!p && tab == null) return '';
+    const bad = p && tab != null && Math.abs(p.v - tab) >= 0.5;
+    const tip = (p ? 'Посчитано помощником по продажам: ' + rubK(p.v) + ' ₽' + (p.miss ? ', без премии ещё ' + p.miss + ' продаж' : '') : '') +
+      (tab != null ? (p ? '\n' : '') + 'В твоей таблице (ячейка N1): ' + rubK(tab) + ' ₽' + (p ? bad ? ' – не сходится' : ' – сходится' : '') : '');
+    return '<div title="' + tip + '"><span>' + lbl + '</span><b class="' + (bad || p && p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(p ? p.v : tab) + ' ₽' + (bad ? ' ≠' : p && p.miss ? ' ?' : '') + '</b></div>';
+  }
   function heroHtml(r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
     const month = histAll().filter(e => { const x = dmyDate(e.d); return x.getFullYear() === now.getFullYear() && x.getMonth() === now.getMonth(); });
     const mb = Math.round(month.reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100, ms = month.reduce((a, e) => a + (+e.rep.sum || 0), 0);
     const goal = goalGet(), p = goal ? Math.min(1, mb / goal) : 0, C = 2 * Math.PI * 34, left = Math.max(0, Math.round((goal - mb) * 100) / 100);
     const pm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y === now.getFullYear() && m.m === now.getMonth() + 1 && m.prem != null);
+    const on = premOn(), pd = premSum(salesGet()), pmo = premSum([].concat(...month.map(e => e.sales || [])));
     return '<div class="bs-hero"><button data-a="goal" class="bs-goal" title="' + (goal ? 'Продано за ' + mon + ': ' + frac(mb) + ' из ' + goal + '. Нажми, чтобы поменять цель' : 'Задать цель на месяц – сколько продаж') + '">' +
         '<svg viewBox="0 0 80 80" width="80" height="80"><circle cx="40" cy="40" r="34"/>' + (p ? '<circle cx="40" cy="40" r="34" class="bs-goal-on" stroke-dasharray="' + (C * p).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 40 40)"/>' : '') + '</svg>' +
         '<b>' + (goal ? Math.floor(p * 100) + '%' : '–') + '</b><small>' + (goal ? 'цели' : 'цель?') + '</small></button>' +
-      '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b><span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
+      '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b>' +
+        (on ? '<span class="bs-hero-p" title="Твоя часть премии с продаж за сегодня' + (pd.miss ? '. Без премии ' + pd.miss + ' – открой их и впиши вручную' : '') + '">премия <i>+' + rubK(pd.v) + ' ₽</i>' + (pd.miss ? ' <b class="bs-prem-q">+ ? ×' + pd.miss + '</b>' : '') + '</span>' : '') +
+        '<span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
         '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + plural(Math.ceil(left), 'продажа', 'продажи', 'продаж') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
       '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
-        (pm ? '<div title="Из твоей таблицы (ячейка N1), обновляется при открытии «Истории»"><span>премия за ' + mon + '</span><b class="bs-ok">' + rub(pm.prem) + ' ₽</b></div>' : '') + '</div></div>';
+        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon) + '</div></div>';
   }
   function paintShift(box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
@@ -2078,11 +2093,11 @@
       heroHtml(r) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + premTag(x) + (saleDone(x) ? '' : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
         : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram – кнопка со значком самолётика внизу.</div>') +
       '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">' + ico(ICO.user) + ' ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
-      '<button data-a="mine" class="bs-ghost bs-mine" data-st="' + (mine == null ? 'wait' : mine ? 'on' : 'off') + '" title=""Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
+      '<button data-a="mine" class="bs-ghost bs-mine" data-st="' + (mine == null ? 'wait' : mine ? 'on' : 'off') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
         (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
         '<i class="bs-sw"></i>Моя смена</button><span></span>' +
       '<button data-a="imp" class="bs-icon" title="Импорт из Telegram – вставить тексты продаж, свои доли попадут в отчёт">' + ico(ICON.send, 16) + '</button>' +
@@ -2199,11 +2214,25 @@
         return o;
       });
       const prem = tab ? Object.keys(tab.days).filter(inR).reduce((a, d) => a + tab.days[d], 0) : null;
+      // премия, посчитанная помощником: за период и по дням (за день сверяем с таблицей – там она у первой продажи дня)
+      const pOn = premOn(), ps = premSum([].concat(...shifts.map(e => e.sales || []))), pDay = {};
+      shifts.forEach(e => { const p = premSum(e.sales), d = pDay[e.d] = pDay[e.d] || { v: 0, miss: 0 }; d.v = Math.round((d.v + p.v) * 100) / 100; d.miss += p.miss; });
+      const premCell = (e, f) => {
+        if (!pOn) return '<span class="bs-hist-prem" title="Премия за день – из таблицы (столбец N в строке с датой)">' + (f.prem ? '+' + rub(f.prem) + ' ₽' : '') + '</span>';
+        const p = e.tab ? null : premSum(e.sales), d = pDay[e.d] || { v: 0, miss: 0 }, t = f.prem, bad = t != null && Math.abs(d.v - t) >= 0.5;
+        const tip = (p ? 'Премия за смену – посчитана помощником: ' + rubK(p.v) + ' ₽' + (p.miss ? '. Без премии ' + p.miss + ' – раскрой день и открой их' : '') : 'Смены нет в помощнике') +
+          (t != null ? '\nВ таблице за день: ' + rubK(t) + ' ₽' + (p ? bad ? ' – не сходится (у помощника за день ' + rubK(d.v) + ' ₽)' : ' – сходится' : '') : '');
+        // список продаж не вёлся (старые смены) – премию за день показываем из таблицы
+        if (!p || !e.sales.length) return '<span class="bs-hist-prem" title="' + (p ? 'Список продаж за смену не вёлся – премия за день из таблицы' : tip) + '">' + (t ? '+' + rubK(t) + ' ₽' : '') + '</span>';
+        const txt = p.v || p.miss ? '+' + rubK(p.v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') : '';
+        return '<span class="bs-hist-prem' + (bad || p.miss ? ' bs-warn' : '') + '" title="' + tip + '">' + txt + '</span>';
+      };
       body.innerHTML =
         statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды', tot('leads')], ['Чаты', tot('chats')], ['Продано', frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
-          .concat(tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
+          .concat(pOn ? [['Премия', '<i title="Посчитано помощником по продажам' + (ps.miss ? ', без премии ' + ps.miss + ' – их надо вписать вручную' : '') + (tab ? '\nВ таблице за эти дни: ' + rubK(prem) + ' ₽' : '') + '">' + rubK(ps.v) + ' ₽' + (ps.miss ? '<small class="bs-prem-q"> ?' + ps.miss + '</small>' : '') + '</i>']] :
+            tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
         syncCard(from, to, cnt, tcnt) +
-        (list.length ? '<div class="bs-hist-list' + (tab ? ' bs-prem' : '') + '">' + list.map((e, li) => {
+        (list.length ? '<div class="bs-hist-list' + (tab || pOn ? ' bs-prem' : '') + '">' + list.map((e, li) => {
           const k = e.now ? 'now' : e.tab ? 'tab:' + e.d : e.hi + ':' + e.end, f = info[li];
           const zero = !+e.rep.bought && !+e.rep.sum && !f.only.length && !f.prem;
           const issues = f.miss + f.bad + f.only.length;
@@ -2215,11 +2244,11 @@
             '<i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i>';
           return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + tmark + '</b>' +
             '<em><span>' + (zero || e.tab ? '–' : frac(e.rep.bought) + ' прод.') + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
-            (tab ? '<span class="bs-hist-prem" title="Премия за день – из таблицы (столбец N в строке с датой)">' + (f.prem ? '+' + rub(f.prem) + ' ₽' : '') + '</span>' : '') +
+            (tab || pOn ? premCell(e, f) : '') +
             '<span>' + (+e.rep.links ? +e.rep.links + ' ссыл.' : '') + '</span></em>' +
             (e.now || e.tab ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + (e.tab ? '' : histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
-              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + '</span>' +
+              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + premTag(x) + '</span>' +
               (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице записано по-другому: ' + esc(shDiff(x).join('; ')) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
                 x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
@@ -2481,6 +2510,7 @@
       box.querySelectorAll('[data-g="share"] em').forEach(m => m.classList.toggle('bs-on', +m.dataset.v === +x.share));
       box.querySelector('.bs-sale-share').hidden = !x.cnt;
       payPaint(box, x, x.cnt);
+      premPaint(box, x, old, ymOf(e.d), x.cnt);
       const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
       note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
         (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '') +
@@ -2514,6 +2544,7 @@
       } else {
         x.price = String(x.price).replace(/\s/g, '');
         x.who = x.fio || x.who;
+        premSave(x, old, ymOf(e.d));
         f.e2.sales[si] = histSale(x);
       }
       r.bought = Math.max(0, Math.round(((+r.bought || 0) + saleShare(x) - saleShare(old)) * 100) / 100);
@@ -2530,15 +2561,94 @@
   const SHEET_CODE = 'https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/beta/bluesales-sheet.gs';
   const sheetUrl = () => jget(SHEET_KEY, {}).url || '';
   // «Оплата» (столбец F): сама угадывается по тарифу и сумме, можно поменять в продаже
-  const PAYS = [['Месяц', 'Месяц'], ['Год', 'Год'], ['Высшая математика', 'Высшая']];
-  const payGuess = x => /высш/i.test(x.name) ? PAYS[2][0] : saleTotal(x) >= 15000 ? PAYS[1][0] : PAYS[0][0];
+  // [что пишется в F (как в выпадашке таблицы), подпись]
+  const PAYS = [['Месяц', 'Месяц'], ['Год', 'Год'], ['Высшая математика', 'Высшая'], ['Летняя школа', 'Летняя школа'], ['Бронь', 'Бронь'],
+    ['Доплата на лучш тариф (месяц)', 'Доплата мес.'], ['Доплата на лучш тариф (год)', 'Доплата год'],
+    ['ВЫЧЕТ ЛШ: 1 предмет куратор', 'Вычет ЛШ 1 кур.'], ['ВЫЧЕТ ЛШ: 1 предмет самоподготовка', 'Вычет ЛШ 1 сам.'],
+    ['ВЫЧЕТ ЛШ: комбо куратор', 'Вычет ЛШ комбо кур.'], ['ВЫЧЕТ ЛШ: комбо самоподготовка', 'Вычет ЛШ комбо сам.']];
+  const payGuess = x => /высш/i.test(x.name) ? PAYS[2][0] : /летн/i.test(x.name) ? PAYS[3][0] : saleTotal(x) >= 15000 ? PAYS[1][0] : PAYS[0][0];
   const salePay = x => PAYS.some(p => p[0] === x.pay) ? x.pay : payGuess(x);
   const saleKind = x => /высш/i.test(x.name) ? 'Высшая' : /комбо|математика \+ русский/i.test(x.name) ? 'Комбо' : '1 предмет';
-  const payChips = () => '<label class="bs-sale-pay"><span>Оплата <small>(для таблицы)</small></span><div class="bs-chips" data-g="pay">' + PAYS.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>';
+  const payChips = () => '<label class="bs-sale-pay"><span>Оплата <small>(для таблицы и премии)</small></span><div class="bs-chips" data-g="pay">' + PAYS.map(([v, t]) => '<em data-v="' + v + '" title="' + v + '">' + t + '</em>').join('') + '</div></label>' +
+    '<label class="bs-sale-prem"><span>Премия за продажу <small></small></span><input data-k="premIn" inputmode="decimal"></label>';
   function payPaint(box, x, mine) {
     const l = box.querySelector('.bs-sale-pay');
     l.hidden = !mine;
     l.querySelectorAll('em').forEach(e => e.classList.toggle('bs-on', e.dataset.v === salePay(x)));
+  }
+  // ---------- Премия: как столбец N своей таблицы – по ставкам и ценам из справочника листа месяца (T1:T4, P3:R8) ----------
+  // Посчитанная премия запоминается в продаже (prem – вся, до деления) и сама не пересчитывается, даже если в таблице
+  // поменяются цены или ставки: заново – только если в продаже поменяли сумму или оплату. premM – вписана руками.
+  // prem === null – сумма нестандартная (доплата, скидка), премию надо вписать руками; undefined – ещё не считали (нет ставок)
+  const PREM_KEY = 'bsPremCfg';   // { ГГГГММ: { t: [T1, T2, T3, T4], p: [[продукт, за месяц, за курс] × 6] } }
+  const premCfgs = () => jget(PREM_KEY, {});
+  const premOn = () => Object.keys(premCfgs()).length > 0;
+  // ставки месяца продажи; листа за этот месяц не видели – ближайшего прошлого, иначе самого раннего
+  const premCfgFor = ym => {
+    const c = premCfgs(), ks = Object.keys(c).map(Number).sort((a, b) => a - b);
+    return c[ym] || (ks.length ? c[ks.filter(k => k <= ym).pop() || ks[0]] : null);
+  };
+  const rubK = n => { const v = Math.round((+n || 0) * 100); return rub(Math.floor(v / 100)) + (v % 100 ? ',' + ('0' + v % 100).slice(-2) : ''); };
+  // формула N: Месяц, Высшая, доплата за месяц – сумма × T1; Год – цена за месяц (H) × T2; Летняя школа – H × T1;
+  // доплата за год – T3; бронь – T4; вычет ЛШ – цена тарифа за месяц × T2. H – цена за месяц по сумме оплаты (столбец H), не нашлась – нестандарт
+  function premCalc(x, c) {
+    if (!c || !c.t || !c.p || c.p.length < 6) return undefined;
+    const g = saleTotal(x), t = c.t.map((v, i) => i < 2 && v > 1 ? v / 100 : +v || 0), p = c.p, ege = p.slice(2);
+    const h = !g ? null : g === p[0][1] ? p[0][2] : g === p[1][1] ? p[1][2] : (ege.find(r => g === r[2]) || ege.find(r => g === r[1]) || [])[1];
+    const v = {
+      'Месяц': g * t[0], 'Высшая математика': g * t[0], 'Год': h && h * t[1], 'Летняя школа': h && h * t[0],
+      'Доплата на лучш тариф (год)': t[2], 'Доплата на лучш тариф (месяц)': g * t[0], 'Бронь': t[3],
+      'ВЫЧЕТ ЛШ: 1 предмет куратор': p[2][1] * t[1], 'ВЫЧЕТ ЛШ: 1 предмет самоподготовка': p[3][1] * t[1],
+      'ВЫЧЕТ ЛШ: комбо куратор': p[4][1] * t[1], 'ВЫЧЕТ ЛШ: комбо самоподготовка': p[5][1] * t[1],
+    }[salePay(x)];
+    return v > 0 ? Math.round(v * 100) / 100 : null;
+  }
+  const premKey = x => saleTotal(x) + '|' + salePay(x);
+  // какая премия будет у продажи после сохранения: вписанная руками, прежняя (сумма и оплата не менялись) или посчитанная заново
+  function premNext(x, was, ym) {
+    const s = String(x.premIn != null ? x.premIn : x.premM ? x.prem : '').replace(/\s/g, '').replace(',', '.');
+    if (s !== '' && isFinite(+s)) return { v: Math.round(+s * 100) / 100, man: 1 };
+    if (was && !was.premM && was.prem !== undefined && premKey(was) === premKey(x)) return { v: was.prem };
+    return { v: premCalc(x, premCfgFor(ym)) };
+  }
+  function premSave(x, was, ym) {
+    const n = premNext(x, was, ym);
+    delete x.premIn; delete x.premM; delete x.prem;
+    if (n.man) x.premM = 1;
+    if (n.v !== undefined) x.prem = n.v;
+  }
+  // всем продажам без премии – посчитать и запомнить (ставки пришли позже продажи, импорт, старые смены)
+  function premAll() {
+    if (!premOn()) return;
+    const h = histGet(), s = salesGet(), todo = x => x.prem === undefined && !x.premM;
+    let ch = false;
+    h.forEach(e => (e.sales || []).forEach(x => { if (todo(x)) { premSave(x, null, ymOf(e.d)); ch = ch || x.prem !== undefined; } }));
+    if (ch) histSave(h);
+    if (s.some(todo)) { const ym = ymOf(repSaved().d || ddmm(new Date())); s.forEach(x => { if (todo(x)) premSave(x, null, ym); }); salesSet(s); }
+  }
+  // моя часть премии (по доле); null – не посчитана
+  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * saleShare(x) * 100) / 100;
+  // премия по продажам: v – сумма моих частей, miss – сколько моих продаж без премии
+  const premSum = sales => (sales || []).reduce((a, x) => { const p = premPart(x); if (p == null) a.miss++; else a.v = Math.round((a.v + p) * 100) / 100; return a; }, { v: 0, miss: 0 });
+  const premWhy = x => x.prem === null ? 'сумма не по тарифу (доплата, скидка…) – открой продажу и впиши премию вручную' : 'ещё нет ставок из таблицы – подключи свою таблицу и открой «Историю»';
+  // метка у продажи в списках: моя часть премии или «премия?»
+  const premTag = x => {
+    if (x.cnt === false || !premOn() && x.prem === undefined) return '';
+    const p = premPart(x);
+    return p == null ? '<b class="bs-prem-q" title="Премия не рассчитана: ' + premWhy(x) + '">премия?</b>' :
+      '<b class="bs-prem-v" title="Премия' + (x.premM ? ' (вписана вручную)' : '') + ': ' + rubK(x.prem) + ' ₽ × ' + r2s(x.share) + '">+' + rubK(p) + ' ₽</b>';
+  };
+  // поле «Премия» в форме продажи: пусто – считается сама (подсказка в placeholder), вписал – вручную
+  function premPaint(box, x, was, ym, mine) {
+    const l = box.querySelector('.bs-sale-prem'), i = l.querySelector('input'), sm = l.querySelector('small');
+    l.hidden = !mine;
+    if (!mine) return;
+    if (document.activeElement !== i && x.premIn == null) i.value = x.premM ? String(x.prem).replace('.', ',') : '';
+    const n = premNext(x, was, ym), auto = n.man ? premNext(Object.assign({}, x, { premIn: '', premM: 0 }), was, ym) : n;
+    i.placeholder = auto.v ? 'сама: ' + rubK(auto.v) : auto.v === null ? 'не считается – впиши' : 'нет ставок из таблицы';
+    sm.className = n.v == null ? 'bs-prem-q' : '';
+    sm.textContent = n.v == null ? '(' + (n.v === null ? 'сумма не по тарифу – впиши вручную' : 'посчитается, когда будут ставки из таблицы') + ')' :
+      '(твоя: ' + rubK(n.v * x.share) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
   }
   // в таблицу идут только продажи с моей долей
   const toSheet = x => x.cnt !== false && saleShare(x) > 0;
@@ -2680,6 +2790,10 @@
     const j = await sheetPost({ rows: { from: ddmm(a), to: ddmm(to) } });
     if (!Array.isArray(j.rows)) return false;
     sheetTab = { months: j.months || [], rows: j.rows, days: j.days || {} };
+    const pc = premCfgs();
+    let pch = false;
+    sheetTab.months.forEach(m => { if (m.cfg && m.cfg.t) { pc[m.y * 100 + m.m] = m.cfg; pch = true; } });
+    if (pch) { jset(PREM_KEY, pc); premAll(); }
     tabMatch(true);
     return true;
   }
@@ -2738,7 +2852,8 @@
       const lo = from ? from.getFullYear() * 100 + from.getMonth() + 1 : 0, hi = to ? to.getFullYear() * 100 + to.getMonth() + 1 : 1e9;
       const months = sheetTab.months.filter(m => m.y * 100 + m.m >= lo && m.y * 100 + m.m <= hi && (from || m.sheet));
       const nos = months.filter(m => !m.sheet).map(m => MONTHS[m.m - 1]);
-      prem = months.filter(m => m.sheet && m.prem != null).map(m => '<div><span>премия за ' + MONTHS[m.m - 1] + '</span><b>' + rub(m.prem) + ' ₽</b></div>').join('');
+      prem = months.filter(m => m.sheet && m.prem != null).map(m => premMonHtml(premOn() ? premSum([].concat(...histAll().filter(e => ymOf(e.d) === m.y * 100 + m.m).map(e => e.sales || []))) : null,
+        m.prem, 'премия за ' + MONTHS[m.m - 1])).join('');
       const bad = [cnt.miss && 'не отправлено ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean);
       mine = syncRow('Своя таблица', bad.length || nos.length ? 'warn' : 'ok', (bad.length ? bad.join(' · ') : 'всё сходится') + (nos.length ? ' · нет листа за ' + nos.join(', ') : ''),
         (cnt.imp ? '<button data-a="tabimp" title="Все оплаты за период, которых нет в помощнике, – в историю, каждую в смену своего дня">Забрать ' + cnt.imp + '</button>' : '') +
@@ -3367,7 +3482,11 @@
       '.bs-foot button.bs-mine.on{color:#16a34a}.bs-stats small{font-size:12px;font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
-      '.bs-prem .bs-hist-row em{grid-template-columns:72px 104px 88px 64px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
+      '.bs-prem .bs-hist-row em{grid-template-columns:72px 104px 104px 64px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
+      '.bs-stats b i{font-style:normal}.bs-hist-row em span.bs-hist-prem.bs-warn,.bs-sync-p b.bs-warn,.bs-hero-r b.bs-warn{color:#d97706}' +
+      '.bs-prem-v,.bs-prem-q{font-weight:500;font-size:11.5px;color:#16a34a;margin-left:6px;white-space:nowrap}.bs-prem-q,.bs-sale-prem small.bs-prem-q{color:#d97706}' +
+      '.bs-sales-row .bs-prem-v,.bs-sales-row .bs-prem-q{grid-column:2;text-align:right;margin:0}' +
+      '.bs-hero-m .bs-hero-p i{font-style:normal;color:#16a34a}.bs-hero-m .bs-hero-p b{font-size:12px;margin-left:2px}' +
       '.bs-hist-zero>b,.bs-hist-zero>em{opacity:.45}.bs-hist-zero.open>b,.bs-hist-zero:hover>b{opacity:1}' +
       '.bs-hist-row>b .bs-hist-tabm{margin-left:6px;font-size:11px;font-weight:400;font-style:normal;color:#16a34a}.bs-hist-row>b .bs-hist-tabm.bs-warn{color:#d97706}' +
       '.bs-hist-row>b .bs-hist-mine.bs-warn{color:#d97706;background:rgba(245,158,11,.12)}' +
