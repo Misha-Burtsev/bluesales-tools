@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.56.1
+// @version      1.56.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2610,10 +2610,12 @@
   function premCalc(x, c) {
     if (!c || !c.t || !c.p || c.p.length < 6) return undefined;
     const g = saleTotal(x), t = c.t.map((v, i) => i < 2 && v > 1 ? v / 100 : +v || 0), p = c.p, ege = p.slice(2);
+    // «за месяц» от 15 000 ₽ (как в угадывании оплаты) – это не месяц (например, годовая доплата): считать вручную
+    const big = g >= 15000;
     const h = !g ? null : g === p[0][1] ? p[0][2] : g === p[1][1] ? p[1][2] : (ege.find(r => g === r[2]) || ege.find(r => g === r[1]) || [])[1];
     const v = {
-      'Месяц': g * t[0], 'Высшая математика': g * t[0], 'Год': h && h * t[1], 'Летняя школа': h && h * t[0],
-      'Доплата на лучш тариф (год)': t[2], 'Доплата на лучш тариф (месяц)': g * t[0], 'Бронь': t[3],
+      'Месяц': !big && g * t[0], 'Высшая математика': g * t[0], 'Год': h && h * t[1], 'Летняя школа': h && h * t[0],
+      'Доплата на лучш тариф (год)': t[2], 'Доплата на лучш тариф (месяц)': !big && g * t[0], 'Бронь': t[3],
       'ВЫЧЕТ ЛШ: 1 предмет куратор': p[2][1] * t[1], 'ВЫЧЕТ ЛШ: 1 предмет самоподготовка': p[3][1] * t[1],
       'ВЫЧЕТ ЛШ: комбо куратор': p[4][1] * t[1], 'ВЫЧЕТ ЛШ: комбо самоподготовка': p[5][1] * t[1],
     }[salePay(x)];
@@ -2636,11 +2638,14 @@
   // всем продажам без премии – посчитать и запомнить (ставки пришли позже продажи, импорт, старые смены)
   function premAll() {
     if (!premOn()) return;
-    const h = histGet(), s = salesGet(), todo = x => x.prem === undefined && !x.premM;
+    // один раз (1.56.2): пересчитать авто-премии «за месяц» – раньше большая сумма с оплатой «Месяц» считалась × 10%
+    const redo = !localStorage.getItem('bsPremFix'), monthy = x => /^(Месяц|Доплата на лучш тариф \(месяц\))$/.test(salePay(x));
+    const h = histGet(), s = salesGet(), todo = x => !x.premM && (x.prem === undefined || redo && x.prem != null && monthy(x));
     let ch = false;
     h.forEach(e => (e.sales || []).forEach(x => { if (todo(x)) { premSave(x, null, ymOf(e.d)); ch = ch || x.prem !== undefined; } }));
     if (ch) histSave(h);
     if (s.some(todo)) { const ym = ymOf(repSaved().d || ddmm(new Date())); s.forEach(x => { if (todo(x)) premSave(x, null, ym); }); salesSet(s); }
+    if (redo) try { localStorage.setItem('bsPremFix', '1'); } catch (e) {}
   }
   // моя часть премии (по доле); null – не посчитана
   const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * shareX(saleShare(x)) * 100) / 100;
