@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.61.0
+// @version      1.61.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -4005,17 +4005,17 @@
       '.bs-sale-pay small{font-weight:400;color:var(--bs-muted,#888)}' +
       '.bs-hrep-sheet{margin-bottom:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222)}.bs-hrep-sheet[data-st=ok]{color:#22a55a}.bs-hrep-sheet[data-st=err]{color:#e04848}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
-      '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
+      '.bs-sales-row{display:grid;grid-template-columns:1fr auto auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
       '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
-      '.bs-sales-row .bs-sales-sh{grid-column:2;justify-self:end;margin:2px 0 0;padding:2px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11.5px;cursor:pointer;white-space:nowrap}' +
+      '.bs-sales-row .bs-sales-sh{grid-column:3;grid-row:1/span 2;align-self:center;justify-self:stretch;min-width:84px;text-align:center;box-sizing:border-box;height:22px!important;min-height:0!important;margin:0!important;padding:0 9px!important;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11px!important;line-height:20px!important;font-weight:500;cursor:pointer;white-space:nowrap}' +
       '.bs-sales-row button.bs-sales-sh:hover{background:var(--bs-accent,#3b82f6);color:#fff}.bs-sales-row .bs-sales-sh:disabled{opacity:.6;cursor:default}' +
-      '.bs-sales-row small.bs-sales-sh{border-color:transparent;padding-right:0;color:#16a34a;cursor:default}.bs-sales-row small.bs-sales-sh.bad{color:#e08a1e}' +
+      '.bs-sales-row small.bs-sales-sh{border-color:transparent;padding-right:0!important;text-align:right;color:#16a34a;cursor:default}.bs-sales-row small.bs-sales-sh.bad{color:#e08a1e}' +
       '.bs-sh-all{display:inline-flex;align-items:center;gap:6px}' +
-      '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
-      '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
+      '.bs-sales-row u{grid-column:3;grid-row:1/span 2;align-self:center;min-width:84px;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '.bs-sales-del{grid-column:4;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
       '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
       '.bs-sales-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}' +
       '#bsSale.bs-me{width:360px}#bsSale.bs-me .bs-tar-help{margin:6px 0 12px}#bsSale.bs-me .bs-chips em{padding:6px 14px;font-size:13.5px}' +
