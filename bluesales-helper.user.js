@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.61.1
+// @version      1.62.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1771,7 +1771,8 @@
     }
   } catch (e) {}
   // закрыли окно совсем – раскрытую смену истории не запоминаем (её держит только переход «смена → продажа/отчёт → назад»)
-  function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); histKeep = null; }
+  function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); histKeep = null; saleBack = null; }
+  let saleBack = null;   // карточку продажи открыли из «Продаж» – туда и возвращаемся
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   // fromList – открыли из списка продаж: есть «Назад», после сохранения/удаления – обратно в список
   function openSale(id, fromList) {
@@ -1893,10 +1894,10 @@
         } else if (g === 'pay') x.pay = v;
         else x.share = +v;
         paint();
-      } else if (a === 'back') openSales();
+      } else if (a === 'back') openSales(saleBack || undefined);
       else if (a === 'twin') openSale(ev.target.dataset.id, fromList);
       else if (a === 'htwin') openHistSale(+ev.target.dataset.hi, ev.target.dataset.end, +ev.target.dataset.si);
-      else if (a === 'save') { if (!x.name) return inp('tar').focus(); if (!save()) return; fromList ? openSales() : closeSale(); tarHint(saved(), true); }
+      else if (a === 'save') { if (!x.name) return inp('tar').focus(); if (!save()) return; fromList ? openSales(saleBack || undefined) : closeSale(); tarHint(saved(), true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
         if (!save()) return;
@@ -1904,7 +1905,7 @@
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
-        fromList ? openSales() : closeSale();
+        fromList ? openSales(saleBack || undefined) : closeSale();
       }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
@@ -2084,7 +2085,7 @@
     return histSave(h);
   }
   const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
-  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История'], ['stat', 'Статистика']];
+  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История'], ['find', 'Продажи'], ['stat', 'Статистика']];
   function openSales(tab) {
     const keep = histKeep;
     closeSale();
@@ -2098,9 +2099,9 @@
       '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('.bs-tab');
-    ({ shift: paintShift, rep: paintReport, hist: paintHist, stat: paintStat })[tab](box);
+    ({ shift: paintShift, rep: paintReport, hist: paintHist, find: paintFind, stat: paintStat })[tab](box);
     // KPI из таблицы ОКК пришёл новый – перерисовать премию
-    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); if (tab === 'stat') paintStat(box); };
+    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); if (tab === 'stat') paintStat(box); if (tab === 'find') paintFind(box); };
     okkSync();
     wrap.addEventListener('mouseover', ev => {
       const pm = ev.target.closest && ev.target.closest('.bs-pm'), tip = pm && pm.querySelector('.bs-ptip');
@@ -2433,6 +2434,75 @@
         saleDel(x.id); return openSales();
       }
       if (row) openSale(row.dataset.id, true);
+    };
+  });
+  // ---------- «Продажи»: все продажи из истории и текущей смены, поиск по имени, почте, тарифу, ссылке на чат ----------
+  let findQ = '', findF = 'all';   // помним поиск и фильтр, пока открыт сайт
+  const findNorm = s => String(s == null ? '' : s).toLowerCase().replace(/ё/g, 'е');
+  // подсветка найденных слов (ищем уже в экранированном тексте)
+  const findHl = (s, ws) => {
+    const h = esc(s || '');
+    return ws.length ? h.replace(new RegExp('(' + ws.map(w => esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi'), '<mark>$1</mark>') : h;
+  };
+  const paintFind = withHist(function (box) {
+    const yr = String(new Date().getFullYear()), all = [];
+    histAll().forEach(e => (e.sales || []).map((x, si) => ({ e, x, si })).reverse().forEach(o => {
+      const x = o.x;
+      o.hay = findNorm([x.who, x.fio, x.email, x.name, x.pay, (x.mops || []).join(' '), x.dlg, o.e.d, x.price, saleTotal(x)].join(' '));
+      all.push(o);
+    }));
+    if (findF === 'nosh' && !sheetUrl()) findF = 'all';
+    box.innerHTML = '<div class="bs-find-top"><div class="bs-find-q">' + ico('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>') +
+      '<input type="search" placeholder="Имя, почта, тариф, менеджер, дата или ссылка на чат" value="' + esc(findQ) + '"></div>' +
+      '<span class="bs-seg">' + [['all', 'Все'], ['mine', 'Мои']].concat(sheetUrl() ? [['nosh', 'Не в таблице']] : []).map(([v, t]) => '<em data-f="' + v + '">' + t + '</em>').join('') + '</span></div>' +
+      '<div class="bs-find-body"></div>';
+    const body = box.querySelector('.bs-find-body'), q = box.querySelector('input');
+    let shown = [];
+    const paintBody = () => {
+      box.querySelectorAll('[data-f]').forEach(em => em.classList.toggle('on', em.dataset.f === findF));
+      // вставили ссылку на чат – ищем по номеру чата
+      const raw = findQ.trim(), id = (/dialogId=(\d+)/i.exec(raw) || [])[1], ws = id ? [] : findNorm(raw).split(/\s+/).filter(Boolean);
+      const hit = all.filter(o => (findF !== 'mine' || o.x.cnt !== false) && (findF !== 'nosh' || toSheet(o.x) && !o.x.sh) &&
+        (id ? String(o.x.dlg) === id : ws.every(w => o.hay.includes(w))));
+      shown = hit.slice(0, 150);
+      const sum = hit.reduce((a, o) => a + saleTotal(o.x), 0), mine = hit.reduce((a, o) => a + saleShare(o.x), 0);
+      const row = (o, n) => {
+        const x = o.x, d = o.e.d;
+        return '<div class="bs-sales-row bs-find-row' + (x.cnt === false ? ' bs-find-other' : '') + '" data-n="' + n + '" title="Открыть и поправить">' +
+          '<b>' + findHl(x.who || x.fio || 'чат ' + x.dlg, ws) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+          '<span>' + (x.fio && x.fio !== x.who ? findHl(x.fio, ws) + ' · ' : '') + (x.email ? '<a class="bs-find-mail" data-a="mail" title="Скопировать почту">' + findHl(x.email, ws) + '</a> · ' : '') + findHl(x.name, ws) + '</span>' +
+          '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</em>' +
+          '<small class="bs-find-d">' + (o.e.now ? 'сегодня' : WD[dmyDate(d).getDay()] + ', ' + d.slice(0, 5) + (d.slice(6) !== yr ? '.' + d.slice(8) : '')) + '</small>' +
+          (!sheetUrl() ? '' : !toSheet(x) ? '<small class="bs-sales-sh"></small>' : x.sh || saleDone(x) ? curSh(x) : '<u>не заполнено</u>') +
+          (x.dlg ? '<i class="bs-sales-del bs-find-chat" data-a="chat" title="Открыть чат">' + ico(ICO.chat) + '</i>' : '<i></i>') + '</div>';
+      };
+      body.innerHTML = !all.length ? '<div class="bs-empty">Продаж пока нет – они появятся здесь, как только отметишь первую.</div>' :
+        !hit.length ? '<div class="bs-empty">Ничего не нашлось' + (findF !== 'all' ? ' – попробуй «Все»' : '') + '.</div>' :
+        '<div class="bs-find-sum">' + (raw || findF !== 'all' ? 'Нашлось ' : 'Всего ') + plural(hit.length, hit.length + ' продажа', hit.length + ' продажи', hit.length + ' продаж') + ' на ' + rub(sum) + ' ₽' +
+          (findF !== 'mine' && Math.abs(mine - hit.length) > 0.001 ? ' · твоих ' + frac(mine) : '') + '</div>' +
+        '<div class="bs-sales-list">' + shown.map(row).join('') + '</div>' +
+        (hit.length > shown.length ? '<div class="bs-empty">Показаны первые ' + shown.length + ' из ' + hit.length + ' – уточни поиск</div>' : '');
+    };
+    paintBody();
+    q.oninput = () => { findQ = q.value; paintBody(); };
+    setTimeout(() => { q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
+    box.onclick = ev => {
+      const t = ev.target, a = (t.closest('[data-a]') || t).dataset.a, f = t.closest('[data-f]');
+      if (f) { findF = f.dataset.f; return paintBody(); }
+      const r = t.closest('.bs-find-row'), o = r && shown[+r.dataset.n];
+      if (!o) return;
+      const x = o.x, e = o.e;
+      if (a === 'mail') return navigator.clipboard.writeText(x.email).then(() => tarHint('✓ Почта скопирована', true));
+      if (a === 'chat') { closeSale(); return openChat(x.dlg); }
+      if (a === 'sh1') {
+        const b = t.closest('button');
+        b.disabled = true; b.textContent = 'Отправляю…';
+        return (e.now ? sheetSendCur(x.id) : sheetSend(e.hi, e.end, o.si)).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintFind(box); })
+          .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintFind(box); });
+      }
+      if (t.closest('.bs-sales-sh')) return;
+      if (e.now) openSale(x.id, true); else openHistSale(e.hi, e.end, o.si);
+      if (document.querySelector('#bsSaleWrap .bs-sale-form')) saleBack = 'find';
     };
   });
   // перенос смены на другую дату; если в истории уже есть смена этой даты – сливаем в неё
@@ -2833,10 +2903,10 @@
         else x.share = +v;
         return paint();
       }
-      if (a === 'back') return openSales('hist');
+      if (a === 'back') return openSales(saleBack || 'hist');
       if (a !== 'save' && a !== 'del') return;
       const f = fresh();
-      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales('hist'); }
+      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales(saleBack || 'hist'); }
       const r = f.e2.rep;
       if (a === 'del') {
         if (!confirm('Удалить продажу из смены ' + e.d + '? Продано и сумма этой смены уменьшатся.')) return;
@@ -2851,7 +2921,7 @@
       r.bought = Math.max(0, Math.round(((+r.bought || 0) + saleShare(x) - saleShare(old)) * 100) / 100);
       r.sum = Math.max(0, (+r.sum || 0) + salePart(x) - salePart(old));
       if (!histSave(f.h2)) return;
-      openSales('hist');
+      openSales(saleBack || 'hist');
       tarHint(a === 'del' ? '✓ Продажа удалена из смены ' + e.d : '✓ Продажа за ' + e.d + ' сохранена', true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
@@ -3162,7 +3232,7 @@
   // маленькие иконки линией – вместо смайликов
   const ico = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
   const ICO = { box: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
-    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', flame: '<path d="M12 22c3.9 0 7-2.9 7-7 0-3.5-2.2-5.9-4-8-.4 2.1-1.4 3.6-3 4.5C12 8.3 10.7 5.4 8.5 3 8.3 6.7 5 9.4 5 15c0 4.1 3.1 7 7 7z"/>',
+    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', chat: '<path d="M21 12a8 8 0 0 1-11.7 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/>', flame: '<path d="M12 22c3.9 0 7-2.9 7-7 0-3.5-2.2-5.9-4-8-.4 2.1-1.4 3.6-3 4.5C12 8.3 10.7 5.4 8.5 3 8.3 6.7 5 9.4 5 15c0 4.1 3.1 7 7 7z"/>',
     trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v1a4 4 0 0 1-3.6 4M7 5H4v1a4 4 0 0 0 3.6 4"/>', star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
     receipt: '<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM9 8h6M9 12h6"/>', cal: '<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>', pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
   // строка карточки сверки: точка-статус, что за таблица, как дела, кнопки
@@ -4016,6 +4086,15 @@
       '.bs-sh-all{display:inline-flex;align-items:center;gap:6px}' +
       '.bs-sales-row u{grid-column:3;grid-row:1/span 2;align-self:center;min-width:84px;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
       '.bs-sales-del{grid-column:4;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
+      '.bs-find-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}.bs-find-top .bs-seg{margin:0}' +
+      '.bs-find-q{flex:1;min-width:0;position:relative;display:flex;align-items:center}.bs-find-q svg{position:absolute;left:10px;color:var(--bs-muted,#888);pointer-events:none}' +
+      '#bsSale .bs-find-q input{flex:1;width:100%;min-width:0;padding:7px 10px 7px 32px;font-size:13px;border-radius:9px}' +
+      '.bs-find-sum{margin:0 2px 8px;font-size:12px;color:var(--bs-muted,#888)}' +
+      '.bs-find-row .bs-find-d{grid-column:2;text-align:right;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-find-row .bs-find-mail{color:inherit;text-decoration:none;border-bottom:1px dashed currentColor;cursor:copy}.bs-find-row .bs-find-mail:hover{color:var(--bs-accent,#3b82f6)}' +
+      '.bs-find-row mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px}' +
+      '.bs-find-other b,.bs-find-other em{opacity:.6}' +
+      '.bs-sales-del.bs-find-chat:hover{background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)}' +
       '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
       '.bs-sales-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}' +
       '#bsSale.bs-me{width:360px}#bsSale.bs-me .bs-tar-help{margin:6px 0 12px}#bsSale.bs-me .bs-chips em{padding:6px 14px;font-size:13.5px}' +
