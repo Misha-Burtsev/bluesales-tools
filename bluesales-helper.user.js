@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.59.1
+// @version      1.60.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2054,7 +2054,11 @@
     return [histPer.from, histPer.to];
   }
   // все смены (архив + текущая), новые сверху
+  // пока рисуется одна вкладка, история не меняется – читаем её из браузера один раз (withHist)
+  let histMemo = null;
+  const withHist = f => function () { if (histMemo) return f.apply(this, arguments); histMemo = histAll(); try { return f.apply(this, arguments); } finally { histMemo = null; } };
   function histAll() {
+    if (histMemo) return histMemo;
     const cur = repSaved(), curSales = salesGet();
     const all = histGet().map((e, hi) => Object.assign({ hi }, e));
     if (repHas(cur) || curSales.length || curMine() != null) all.push(Object.assign({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales }, curMine() != null ? { mine: curMine() } : {}));
@@ -2157,7 +2161,7 @@
     return '<div class="bs-pm"><span>' + lbl + '</span><b class="' + (bad || p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') + '</b>' +
       '<small class="bs-kpi">' + chip('KPI', c.q, c.kpi == null) + chip('план', c.p, c.plan == null) + '</small>' + tip + '</div>';
   }
-  function heroHtml(r) {
+  const heroHtml = withHist(function (r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
     const month = histAll().filter(e => { const x = dmyDate(e.d); return x.getFullYear() === now.getFullYear() && x.getMonth() === now.getMonth(); });
     const mb = Math.round(month.reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100, ms = month.reduce((a, e) => a + (+e.rep.sum || 0), 0);
@@ -2170,11 +2174,11 @@
       '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b>' +
         (on ? '<span class="bs-hero-p" title="Твоя часть премии с продаж за сегодня' + (pd.miss ? '. Без премии ' + pd.miss + ' – открой их и впиши вручную' : '') + '">премия <i>+' + rubK(pd.v) + ' ₽</i>' + (pd.miss ? ' <b class="bs-prem-q">+ ? ×' + pd.miss + '</b>' : '') + '</span>' : '') +
         '<span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
-        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + nSales(left).replace(/^\S+ /, '') : 'цель на ' + mon + ' выполнена') + '</span></div>' +
+        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + nSales(left).replace(/^\S+ /, '') : 'цель на ' + mon + ' выполнена') + '</span>' + recLine() + '</div>' +
       '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
         premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon, ymNow()) +
         '<div class="bs-pm bs-sal"><span>зарплата</span><b data-a="stat">' + rub(sm.sal) + ' ₽</b>' + salTip(sm) + '</div></div></div>';
-  }
+  });
   // зарплата = премия за месяц (с коэффициентами) + смены; ставка – сумма за норму смен (10 000 ₽ за 15), смены – дни с отметкой «Моя смена»
   const PAYR_KEY = 'bsShiftPay';
   const payRate = () => { const p = jget(PAYR_KEY, {}); return { sum: +p.sum || 10000, n: +p.n || 15 }; };
@@ -2201,6 +2205,28 @@
       '<p class="bs-pt-n">' + rub(s.rate.sum) + ' ₽ за ' + s.rate.n + ' смен. Смены – дни с отметкой «Моя смена». Подробно – во вкладке «Статистика»</p></section>';
   }
   // вкладка «Статистика»: месяц целиком – зарплата, план, KPI, график по дням, из чего продажи, сравнение с прошлыми месяцами
+  // рекорды за всё время – по своим сменам, две смены за день складываем
+  function recStat(full) {
+    const by = {}, mine = histAll().filter(shiftMine);
+    mine.forEach(e => { const x = by[e.d] = by[e.d] || { d: e.d, sum: 0, sold: 0 }; x.sum += +(e.rep || {}).sum || 0; x.sold += +(e.rep || {}).bought || 0; if (e.now) x.now = true; });
+    const days = Object.values(by).sort((a, b) => dmyDate(a.d) - dmyDate(b.d)), best = k => days.reduce((a, x) => x[k] > (a ? a[k] : 0) ? x : a, null);
+    let big = null;
+    mine.forEach(e => (e.sales || []).forEach(x => { if (saleShare(x) && saleTotal(x) > (big ? big.v : 0)) big = { v: saleTotal(x), d: e.d }; }));
+    // серия – смен подряд с продажей; сегодняшняя без продаж серию ещё не обрывает
+    let run = 0, top = 0;
+    days.forEach(x => { if (x.sold > 0) top = Math.max(top, ++run); else if (!x.now) run = 0; });
+    const mon = full && [...new Set(days.map(x => ymOf(x.d)))].map(monthStat).reduce((a, m) => m.sal > (a ? a.sal : 0) ? m : a, null);
+    const today = days.find(x => x.now), prev = Math.max(0, ...days.filter(x => !x.now).map(x => x.sum));
+    return { sum: best('sum'), sold: best('sold'), big, run, top, mon, today, prev };
+  }
+  const dayName = d => { const x = dmyDate(d); return x.getDate() + ' ' + MONTHS_R[x.getMonth()] + (x.getFullYear() !== new Date().getFullYear() ? ' ' + x.getFullYear() : ''); };
+  // строчка на «Сегодня»: побил рекорд дня или идёт серия
+  function recLine() {
+    const r = recStat(), t = r.today;
+    if (t && t.sum > r.prev && r.prev > 0) return '<span class="bs-hero-rec gold">' + ico(ICO.trophy, 13) + 'новый рекорд дня!</span>';
+    if (r.run >= 2) return '<span class="bs-hero-rec">' + ico(ICO.flame, 13) + 'серия <i>' + r.run + '</i> ' + plural(r.run, 'смена', 'смены', 'смен') + ' с продажей' + (r.run >= r.top && r.top > 2 ? ' – рекорд' : '') + '</span>';
+    return '';
+  }
   let statYm = 0, statMet = 'sum';
   const PAL = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#94a3b8'];
   const MONTHS_R = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
@@ -2234,7 +2260,7 @@
     return a.map(([n, k, s]) => [n, k, frac(k) + ' · ' + rub(s) + ' ₽']);
   }
   const card = (cls, title, body, right) => '<section class="bs-st-c ' + cls + '"><header><h4>' + title + '</h4>' + (right || '') + '</header>' + body + '</section>';
-  function paintStat(box) {
+  const paintStat = withHist(function (box) {
     const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
     statYm = Math.min(Math.max(statYm || now, first), now);
     const ym = statYm, s = monthStat(ym), pv = monthStat(ymAdd(ym, -1)), pmon = ymName(ymAdd(ym, -1)), cur = ym === now, y = Math.floor(ym / 100), m = ym % 100;
@@ -2317,9 +2343,18 @@
       '<b>' + (x.sal ? rub(x.sal / 1000) + ' тыс.' : '') + '</b>' +
       '<p style="height:' + (x.sal / mm * 100).toFixed(1) + '%"><i class="p" style="flex:' + (x.prem || 0) + '"></i><i class="s" style="flex:' + x.shifts + '"></i></p><span>' + ymName(x.ym).slice(0, 3) + '</span></div>').join('') + '</div>' +
       '<p class="bs-st-lg"><span><i class="p"></i>премия</span><span><i class="s"></i>смены</span></p>');
-    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
+    const rc = recStat(true), nw = d => d && ymOf(d) === ym ? '<em>' + (cur ? 'в этом месяце' : 'в ' + (ymName(ym) === 'май' ? 'мае' : ymName(ym).replace(/ь$/, 'е').replace(/т$/, 'те')) ) + '</em>' : '';
+    const ri = (cls, i, v, t, sub, badge) => '<div class="bs-st-rc ' + cls + '"><i>' + ico(i, 16) + '</i>' + (badge || '') + '<b>' + v + '</b><span>' + t + '</span><small>' + sub + '</small></div>';
+    const recs = card('bs-st-recs', 'Рекорды', '<div class="bs-st-rcs">' +
+      ri('fl', ICO.flame, rc.run + ' ' + plural(rc.run, 'смена', 'смены', 'смен'), 'подряд с продажей', rc.top > rc.run ? 'рекорд – ' + rc.top : rc.run ? 'это рекорд' : '–') +
+      (rc.sum ? ri('tr', ICO.trophy, rub(rc.sum.sum) + ' ₽', 'лучший день', dayName(rc.sum.d), nw(rc.sum.d)) : '') +
+      (rc.sold ? ri('st', ICO.star, nSales(rc.sold.sold), 'за один день', dayName(rc.sold.d), nw(rc.sold.d)) : '') +
+      (rc.big ? ri('ch', ICO.receipt, rub(rc.big.v) + ' ₽', 'самый крупный чек', dayName(rc.big.d), nw(rc.big.d)) : '') +
+      (rc.mon && rc.mon.sal ? ri('mo', ICO.cal, rub(rc.mon.sal / 1000) + ' тыс. ₽', 'лучшая зарплата', ymName(rc.mon.ym) + ' ' + Math.floor(rc.mon.ym / 100), rc.mon.ym === ym ? '<em>этот месяц</em>' : '') : '') +
+      '</div>', '<small class="bs-st-sub">за всё время</small>');
+    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
     statClick(box);
-  }
+  });
   function statClick(box) {
     box.onclick = ev => {
       const t = ev.target, b = t.closest('[data-a],[data-m],[data-ym]');
@@ -2343,7 +2378,7 @@
       }
     };
   }
-  function paintShift(box) {
+  const paintShift = withHist(function (box) {
     const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
     box.innerHTML =
       heroHtml(r) +
@@ -2391,7 +2426,7 @@
       }
       if (row) openSale(row.dataset.id, true);
     };
-  }
+  });
   // перенос смены на другую дату; если в истории уже есть смена этой даты – сливаем в неё
   function histMove(h, i, d) {
     const e = h[i], j = h.findIndex((x, k) => k !== i && x.d === d);
@@ -3103,12 +3138,14 @@
   // маленькие иконки линией – вместо смайликов
   const ico = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
   const ICO = { box: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
-    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
+    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', flame: '<path d="M12 22c3.9 0 7-2.9 7-7 0-3.5-2.2-5.9-4-8-.4 2.1-1.4 3.6-3 4.5C12 8.3 10.7 5.4 8.5 3 8.3 6.7 5 9.4 5 15c0 4.1 3.1 7 7 7z"/>',
+    trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v1a4 4 0 0 1-3.6 4M7 5H4v1a4 4 0 0 0 3.6 4"/>', star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    receipt: '<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM9 8h6M9 12h6"/>', cal: '<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>', pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
   // строка карточки сверки: точка-статус, что за таблица, как дела, кнопки
   const syncRow = (lbl, st, txt, btns) => '<div class="bs-sync-r"><i class="bs-dot" data-st="' + st + '"></i><b>' + lbl + '</b><span>' + txt + '</span>' + (btns || '') + '</div>';
   // карточка над списком смен: своя таблица и таблица отдела – по строке, справа премия за месяц (N1) и «обновить».
   // Пока идёт сверка, показываем прошлый результат, крутится только значок – без мигания текста
-  function syncCard(from, to, cnt, tcnt) {
+  const syncCard = withHist(function (from, to, cnt, tcnt) {
     if (!sheetUrl()) return '';
     let mine, prem = '';
     if (!sheetTab) mine = syncRow('Своя таблица', 'wait', 'сверяю…');
@@ -3128,7 +3165,7 @@
     return '<div class="bs-sync' + (sheetBusy || teamBusy ? ' busy' : '') + '"><div class="bs-sync-l">' + mine + (teamOn() ? teamRow(tcnt) : '') + '</div>' +
       (prem ? '<div class="bs-sync-p">' + prem + '</div>' : '') +
       '<button data-a="tabsync" class="bs-sync-btn" title="Заново прочитать таблицы и сверить с историей">' + ico(ICO.sync, 15) + '</button></div>';
-  }
+  });
   // строка таблицы → продажа в историю (уже записана в таблице – сразу ✓). ФИО и тариф потом можно поправить
   const tabSale = (r, n) => ({ id: Date.now().toString(36) + r.row + 'r' + (n || 0), dlg: r.dlg, name: r.name, price: r.sum, disc: '', mops: [], share: shareFor(r.mops || 1), cnt: true,
     fio: '', who: '', email: r.email, pay: PAYS.some(p => p[0] === r.pay) ? r.pay : undefined, sh: 1, shT: shTab(r) });
@@ -3789,6 +3826,15 @@
       '.bs-st-bars>s small{position:absolute;right:0;bottom:2px;padding:0 5px;border-radius:5px;font-size:10.5px;color:#3b82f6;background:var(--bs-panel,#fff)}' +
       '.bs-st-lg{display:flex;flex-wrap:wrap;gap:4px 16px;margin:10px 0 0;font-size:11.5px;color:var(--bs-muted,#888)}.bs-st-lg span{display:flex;align-items:center;gap:6px}.bs-st-lg b{color:var(--bs-text,#222);font-weight:600}' +
       '.bs-st-lg i{width:9px;height:9px;border-radius:3px;background:rgba(148,163,184,.55)}.bs-st-lg i.mine{background:#3b82f6}.bs-st-lg span:nth-child(3){display:block;margin-left:auto}' +
+      '.bs-st-sub{font-size:12px;color:var(--bs-muted,#888)}.bs-st-recs{margin-bottom:12px}.bs-st-rcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}' +
+      '.bs-st-rc{position:relative;padding:12px;border-radius:12px;background:var(--bs-hover,rgba(127,127,127,.07));display:flex;flex-direction:column;gap:2px;min-width:0}' +
+      '.bs-st-rc>i{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:6px;color:#fff}' +
+      '.bs-st-rc.fl>i{background:linear-gradient(135deg,#fb923c,#ef4444)}.bs-st-rc.tr>i{background:linear-gradient(135deg,#fcd34d,#f59e0b)}.bs-st-rc.st>i{background:linear-gradient(135deg,#a78bfa,#7c3aed)}' +
+      '.bs-st-rc.ch>i{background:linear-gradient(135deg,#60a5fa,#3b82f6)}.bs-st-rc.mo>i{background:linear-gradient(135deg,#4ade80,#16a34a)}' +
+      '.bs-st-rc>b{font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bs-st-rc>span{font-size:12px;color:var(--bs-text,#222)}.bs-st-rc>small{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-st-rc>em{position:absolute;top:12px;right:10px;padding:2px 7px;border-radius:20px;font-style:normal;font-size:10.5px;font-weight:600;color:#16a34a;background:rgba(22,163,74,.12)}' +
+      '.bs-hero-m .bs-hero-rec{display:inline-flex;align-items:center;gap:5px;align-self:flex-start;margin-top:2px;padding:2px 9px 2px 7px;border-radius:20px;font-size:12px;color:#ea580c;background:rgba(249,115,22,.12)}' +
+      '.bs-hero-m .bs-hero-rec i{font-style:normal;font-weight:700}.bs-hero-m .bs-hero-rec.gold{color:#b45309;background:rgba(245,158,11,.16)}' +
       '.bs-st-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}' +
       '.bs-st-tiles div{display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-radius:14px;background:var(--bs-hover,#f5f7fa)}.bs-st-tiles span{font-size:12px;color:var(--bs-muted,#888)}' +
       '.bs-st-tiles b{font-size:19px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.bs-st-tiles .bs-st-d{align-self:flex-start}' +
@@ -4131,10 +4177,16 @@
     }
     return best;
   }
+  // раз в секунду, но панель обходим, только если она поменялась или открыт другой чат
+  let remBox = null, remKey = '', remDirty = true;
+  const remObs = new MutationObserver(() => { remDirty = true; });
   function remMark() {
     const box = document.getElementById('remindersContentInner');
     if (!box) return;
+    if (box !== remBox) { remBox = box; remObs.disconnect(); remObs.observe(box, { childList: true, subtree: true, characterData: true }); remDirty = true; }
     const id = curDialog(), nm = norm((document.querySelector('.dialog_header .person_name') || {}).textContent || '').trim();
+    if (!remDirty && remKey === id + '|' + nm) return;
+    remDirty = false; remKey = id + '|' + nm;
     let row = null;
     if (id || nm) for (const e of box.querySelectorAll('*')) {
       if (e.closest('#remindersTabs,#reminderFiltersAdditional')) continue;
