@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.38.2
+// @version      1.62.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -449,7 +449,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -1108,22 +1108,24 @@
     ['leads', 'Новые лиды', 1], ['blocks', 'из них блоков', 1], ['chats', 'Чатов в работе', 1],
     ['links', 'Выставлено ссылок'], ['bought', 'Купили (программ)'], ['sum', 'Сумма продаж, ₽'], ['rem', 'Напоминаний'],
   ];
-  function closeReport() { const o = document.getElementById('bsRepWrap'); if (o) o.remove(); }
-  function openReport() {
-    if (document.getElementById('bsRepWrap')) return closeReport();
-    const wrap = document.createElement('div');
-    wrap.id = 'bsRepWrap';
-    wrap.innerHTML =
-      '<div id="bsRep"><div class="bs-rep-head"><b>Отчёт за смену</b><i title="Закрыть">×</i></div>' +
-      '<div class="bs-rep-top"><div class="bs-rep-range">' + MANAGERS.map(([id, n]) => '<span data-m="' + id + '">' + n + '</span>').join('') + '</div>' +
+  const repFem = m => (MANAGERS.find(x => x[0] === (m || meId())) || [])[2];
+  // отчёт – вкладка раздела «Смена»: смотреть и копировать можно по ходу дня, при закрытии смены он сохраняется сам
+  // плитка с цифрой: подпись сверху, само число – крупно, правится прямо в плитке
+  const REP_SHORT = { links: 'Ссылок', bought: 'Купили', sum: 'Сумма, ₽', blocks: 'Блоков' };
+  const repTile = ([k, label, auto]) => '<label class="bs-rp-t' + (auto ? ' bs-auto' : '') + '"><span>' + (REP_SHORT[k] || label) + '</span><input type="number" min="0" data-k="' + k + '"></label>';
+  function paintReport(host) {
+    host.innerHTML =
+      '<div id="bsRep">' +
+      '<div class="bs-rep-top"><span class="bs-seg">' + MANAGERS.map(([id, n]) => '<em data-m="' + id + '">' + n + '</em>').join('') + '</span>' +
       '<input type="date" class="bs-rep-date" title="Дата отчёта"></div>' +
-      '<div class="bs-rep-grid">' + REP_FIELDS.map(([k, label, auto]) =>
-        '<label' + (auto ? ' class="bs-auto"' : '') + '><span>' + label + '</span><input type="number" min="0" data-k="' + k + '"></label>').join('') + '</div>' +
-      '<div class="bs-rep-status"></div>' +
-      '<textarea spellcheck="false"></textarea>' +
-      '<div class="bs-rep-btns"><span class="bs-rep-edited">Текст правлен вручную</span><button data-a="rebuild" class="bs-rep-edited" title="Собрать текст из цифр заново">Собрать заново</button><button data-a="reload">Обновить цифры</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
-    document.body.appendChild(wrap);
-    const box = wrap.querySelector('#bsRep'), ta = box.querySelector('textarea'), status = box.querySelector('.bs-rep-status');
+      '<div class="bs-rp-cols"><div class="bs-rp-l">' +
+      '<section class="bs-rp-card"><header><b>Из CRM</b><small class="bs-rp-auto">авто</small><div class="bs-rep-status"></div><button data-a="reload" class="bs-rp-re" title="Посчитать заново">' + ico(ICO.sync, 14) + '</button></header>' +
+      '<div class="bs-rp-g3">' + REP_FIELDS.slice(0, 3).map(repTile).join('') + '</div></section>' +
+      '<section class="bs-rp-card"><header><b>За смену</b><small>ссылки и продажи считаются сами</small></header>' +
+      '<div class="bs-rp-g2">' + REP_FIELDS.slice(3).map(repTile).join('') + '</div></section></div>' +
+      '<div class="bs-rp-r"><header><b>Текст отчёта</b><span class="bs-rep-edited">правлен вручную ·</span><button data-a="rebuild" class="bs-rep-edited" title="Собрать текст из цифр заново">собрать заново</button></header>' +
+      '<textarea spellcheck="false"></textarea><button data-a="copy" class="bs-rp-copy">Скопировать отчёт</button></div></div></div>';
+    const box = host.querySelector('#bsRep'), ta = box.querySelector('textarea'), status = box.querySelector('.bs-rep-status');
     const inputs = {};
     box.querySelectorAll('input[data-k]').forEach(i => { inputs[i.dataset.k] = i; });
     const saved = repSaved();
@@ -1143,21 +1145,24 @@
       status.querySelector('span').textContent = text;
     };
     const values = () => { const v = {}; for (const k in inputs) v[k] = inputs[k].value; return v; };
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 2 + 'px'; };
     const update = () => {
-      if (!edited) ta.value = repText(values(), (MANAGERS.find(x => x[0] === manager) || [])[2]);
+      if (!box.isConnected) return;   // вкладку закрыли или смену уже закрыли – старые цифры не записываем
+      if (!edited) ta.value = repText(values(), repFem(manager));
+      fit();
       box.classList.toggle('bs-edited', edited);
       // ручные цифры за сегодня запоминаются, автоматические пересчитываются при каждом открытии
       jset(REP_KEY, Object.assign({ d: ddmm(new Date()) }, values(), edited ? { text: ta.value } : {}));
     };
     if (edited) ta.value = saved.text;
-    const paintRange = () => box.querySelectorAll('[data-m]').forEach(s => s.classList.toggle('bs-on', s.dataset.m === manager));
+    const paintRange = () => box.querySelectorAll('[data-m]').forEach(s => s.classList.toggle('on', s.dataset.m === manager));
     let run = 0;
     // reset – пересчёт запросил сам пользователь (кнопка, дата, менеджер): ручную правку текста сбрасываем
     async function load(reset) {
       if (reset === true) edited = false;
       const t = repDate(), m = manager, my = ++run;
       const who = MANAGERS.find(x => x[0] === m)[1];
-      setStatus('load', 'Считаю лиды и чаты – ' + who + ', ' + t.slice(0, 5) + '…');
+      setStatus('load', 'считаю – ' + who + ', ' + t.slice(0, 5) + '…');
       box.classList.add('bs-loading');
       try {
         const form = await clientsForm();
@@ -1166,13 +1171,13 @@
           countClients(form, 'psFirstContact', t, t, ST_BLOCK, m),
           countClients(form, 'psLastContact', t, t, ST_ALL, m),
         ]);
-        if (my !== run) return;   // пока считали, переключили менеджера
+        if (my !== run || !box.isConnected) return;   // пока считали, переключили менеджера или закрыли вкладку
         inputs.leads.value = leads; inputs.blocks.value = blocks; inputs.chats.value = chats;
-        setStatus('ok', 'Посчитано: ' + who + ', ' + t.slice(0, 5) + ' · остальное вручную');
+        setStatus('ok', who + ', ' + t.slice(0, 5));
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        setStatus('err', 'Не посчиталось – впиши цифры вручную');
+        setStatus('err', 'не посчиталось – впиши сам');
       }
       box.classList.remove('bs-loading');
       update();
@@ -1183,32 +1188,29 @@
     });
     dateInp.addEventListener('change', () => load(true));
     box.addEventListener('click', ev => {
-      const r = ev.target.dataset.m, a = ev.target.dataset.a;
-      if (ev.target.tagName === 'I') closeReport();
-      else if (r) { manager = r; paintRange(); load(true); }
+      const r = ev.target.dataset.m, a = ev.target.closest('[data-a]') && ev.target.closest('[data-a]').dataset.a;
+      if (r) { manager = r; paintRange(); load(true); }
       else if (a === 'reload') load(true);
       else if (a === 'rebuild') { edited = false; update(); }
       else if (a === 'copy') {
         update();
         navigator.clipboard.writeText(ta.value).then(() => {
           ev.target.textContent = 'Скопировано ✓';
-          setTimeout(() => { ev.target.textContent = 'Скопировать'; }, 1500);
+          setTimeout(() => { ev.target.textContent = 'Скопировать отчёт'; }, 1500);
         });
       }
     });
-    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeReport(); });
     paintRange(); update(); load();
   }
   function reportInit() {
-    const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
-    if (!dock || document.getElementById('bsRepBtn')) return;
-    const b = btn('bsRepBtn', 'Отчёт за смену');
-    b.innerHTML = svg('<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6M9 18h3"/>');
-    b.addEventListener('click', openReport);
-    dock.insertBefore(b, before);
-    document.addEventListener('keydown', ev => { if (ev.key === 'Escape') closeReport(); });
+    if (document.getElementById('bsRepCss')) return;
+    setTimeout(repAuto, 5000);
+    setInterval(repAuto, 60e3);
     const st = document.createElement('style');
+    st.id = 'bsRepCss';
     st.textContent =
+      '.bs-tab #bsRep{width:auto;max-width:none;max-height:none;overflow:visible;padding:0;border:0;border-radius:0;box-shadow:none;background:none}' +
+      '.bs-hrep textarea{width:100%;box-sizing:border-box;height:260px;resize:vertical;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font:12.5px/1.4 inherit}' +
       '#bsRepWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
       '#bsRep{width:400px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
@@ -1216,6 +1218,21 @@
       '.bs-rep-head i{font-style:normal;font-size:20px;color:var(--bs-muted,#888);cursor:pointer}' +
       '.bs-rep-top{display:flex;align-items:center;gap:8px;margin-bottom:10px}' +
       '.bs-rep-date{margin-left:auto;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:transparent;color:var(--bs-text,#222);font-size:12px;color-scheme:light dark}' +
+      // вкладка «Отчёт»: слева плитки с цифрами (из CRM и за смену), справа – текст отчёта пузырём по высоте текста
+      '.bs-tab #bsRep .bs-rep-top{justify-content:space-between;margin-bottom:12px}.bs-rp-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}@media (max-width:700px){.bs-rp-cols{grid-template-columns:1fr}}' +
+      '.bs-rp-l{display:flex;flex-direction:column;gap:12px}.bs-rp-card{padding:10px 12px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:12px}' +
+      '.bs-rp-card header,.bs-rp-r header{display:flex;align-items:center;gap:8px;min-height:24px;margin-bottom:8px}.bs-rp-card header b,.bs-rp-r header b{font-size:13px;font-weight:600}' +
+      '.bs-rp-auto{padding:0 6px;border-radius:6px;line-height:16px;background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)!important;margin-left:0!important}.bs-rp-card header small{margin-left:auto;font-size:11px;color:var(--bs-muted,#888)}' +
+      '#bsRep .bs-rep-status{flex:1;min-width:0;justify-content:flex-end;gap:6px;margin:0;padding:0;background:none!important;font-size:11.5px;font-weight:400;color:var(--bs-muted,#888)!important}' +
+      '#bsRep .bs-rep-status i{width:12px;height:12px;font-size:8px}#bsRep .bs-rep-status[data-st=ok] i{order:-1}#bsRep .bs-rep-status[data-st=err]{color:#e04848!important}#bsRep .bs-rep-status[data-st=load] i{display:none}' +
+      '.bs-rp-re{flex:none;width:26px;height:26px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:7px;background:none;color:var(--bs-muted,#888);cursor:pointer}.bs-rp-re:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}#bsRep.bs-loading .bs-rp-re svg{animation:bsSpin 1s linear infinite}' +
+      '.bs-rp-g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.bs-rp-g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}' +
+      '.bs-rp-t{display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:10px;background:var(--bs-hover,#f5f7fa);border:1px solid transparent;cursor:text;transition:border-color .15s}.bs-rp-t:focus-within{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rp-t span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '#bsRep .bs-rp-t input{width:100%;min-width:0;padding:0;border:0;background:none;color:var(--bs-text,#222);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;-moz-appearance:textfield}#bsRep .bs-rp-t input::-webkit-inner-spin-button,#bsRep .bs-rp-t input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}' +
+      '.bs-rp-r{display:flex;flex-direction:column}.bs-rp-r header button{padding:0;border:0;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}.bs-rp-r header span{margin-left:auto;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '#bsRep .bs-rp-r textarea{height:auto;min-height:120px;max-height:56vh;padding:11px 13px;border:1px solid transparent;border-radius:14px 14px 14px 4px;background:rgba(59,130,246,.09);font-family:inherit;font-size:12.5px;line-height:1.5;resize:none;outline:none}#bsRep .bs-rp-r textarea:focus{border-color:var(--bs-accent,#3b82f6)}' +
+      '.bs-rp-copy{align-self:flex-end;margin-top:10px;padding:7px 16px;border:0;border-radius:9px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:13px;font-weight:500;cursor:pointer}.bs-rp-copy:hover{filter:brightness(1.08)}' +
       '.bs-rep-edited{display:none!important}#bsRep.bs-edited .bs-rep-edited{display:inline-block!important}' +
       'span.bs-rep-edited{margin-right:auto;align-self:center;font-size:11.5px;color:var(--bs-muted,#888)}' +
       '.bs-rep-range{display:inline-flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;overflow:hidden}' +
@@ -1227,10 +1244,10 @@
       '.bs-rep-grid input{padding:5px 8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:transparent;color:var(--bs-text,#222);font-size:13px;outline:none}' +
       '.bs-rep-grid input:focus{border-color:var(--bs-accent,#3b82f6)}' +
       // пока считаем – поля «авто» переливаются, кнопки копирования и пересчёта неактивны
-      '#bsRep.bs-loading .bs-auto input{color:transparent!important;background-image:linear-gradient(var(--bs-border,#D9E0E7),var(--bs-border,#D9E0E7))!important;background-repeat:no-repeat!important;background-position:9px center!important;background-size:22px 8px;animation:bsBar .9s ease-in-out infinite alternate}' +
-      '@keyframes bsBar{from{background-size:22px 8px}to{background-size:58px 8px}}' +
-      '#bsRep.bs-loading .bs-rep-btns button[data-a=copy],#bsRep.bs-loading .bs-rep-btns button[data-a=reload]{opacity:.45;pointer-events:none}' +
-      '#bsRep.bs-done .bs-auto input{animation:bsOk 1.4s ease-out}' +
+      '#bsRep.bs-loading .bs-auto input{color:transparent!important;background-image:linear-gradient(var(--bs-border,#D9E0E7),var(--bs-border,#D9E0E7))!important;background-repeat:no-repeat!important;background-position:0 center!important;background-size:22px 10px;animation:bsBar .9s ease-in-out infinite alternate}' +
+      '@keyframes bsBar{from{background-size:22px 10px}to{background-size:64px 10px}}' +
+      '#bsRep.bs-loading button[data-a=copy],#bsRep.bs-loading button[data-a=reload]{opacity:.45;pointer-events:none}' +
+      '#bsRep.bs-done .bs-auto{animation:bsOk 1.4s ease-out}' +
       '@keyframes bsOk{0%,40%{border-color:#22a55a;box-shadow:0 0 0 3px rgba(34,165,90,.18)}100%{box-shadow:0 0 0 0 rgba(34,165,90,0)}}' +
       '.bs-rep-status{display:flex;align-items:center;gap:8px;margin:10px 0;padding:8px 10px;border-radius:9px;font-size:12.5px;font-weight:500}' +
       '.bs-rep-status:empty{display:none}' +
@@ -1272,8 +1289,8 @@
     if (i) { i.value = linksGet(); i.dispatchEvent(new Event('input', { bubbles: true })); }
   }
   function paintLinks() {
-    const b = document.getElementById('bsLinks');
-    if (b) b.querySelector('b').textContent = linksGet();
+    const b = document.querySelector('#bsLinkC b');
+    if (b && b.textContent !== String(linksGet())) b.textContent = linksGet();
   }
   function placeLinks() {
     const b = document.getElementById('bsLinks'), dock = document.getElementById('bsDock');
@@ -1281,8 +1298,8 @@
     const on = document.body.classList.contains('slide-panel-right-open');
     const tog = document.getElementById('bsEmoToggle');
     b.style.display = on ? 'flex' : 'none';
-    const sd = document.getElementById('bsSold');
-    if (sd) sd.style.display = b.style.display;
+    const sh = document.getElementById('bsShift');
+    if (sh) sh.style.display = b.style.display;
     if (tog) tog.style.display = 'none';
     if (!on) return;
     // поле ввода скрыто (клиент заблокировал и т.п.) – плашку смайликов не показываем
@@ -1294,10 +1311,9 @@
     const bar = document.getElementById('bsEmoBar');
     const r = (open ? sel : can && bar ? bar : dock).getBoundingClientRect();
     b.style.bottom = (innerHeight - r.top + 6) + 'px';
-    const sold = document.getElementById('bsSold');
-    if (sold) sold.style.bottom = (innerHeight - b.getBoundingClientRect().top + 6) + 'px';
+    if (sh) sh.style.bottom = (innerHeight - b.getBoundingClientRect().top + 6) + 'px';
     // карточка клиента прокручивается под плашками – снизу у неё отступ на их высоту
-    const top = (sold && sold.offsetHeight ? sold : b).getBoundingClientRect().top;
+    const top = (sh && sh.offsetHeight ? sh : b).getBoundingClientRect().top;
     document.body.style.setProperty('--bs-stack', Math.max(10, Math.round(innerHeight - top + 10)) + 'px');
     if (open && tog) {
       tog.style.display = 'flex';
@@ -1319,29 +1335,39 @@
     });
     sel.style.removeProperty('height');
     const r = sel.getBoundingClientRect();
-    const sold = document.getElementById('bsSold');
-    const pills = pill.offsetHeight + 6 + (sold && sold.offsetHeight ? sold.offsetHeight + 6 : 0);
+    const sh = document.getElementById('bsShift');
+    const pills = pill.offsetHeight + 6 + (sh && sh.offsetHeight ? sh.offsetHeight + 6 : 0);
     const room = r.bottom - (bottom + 22 + pills);
     if (room < r.height) sel.style.setProperty('height', Math.max(110, room) + 'px', 'important');
   }
+  // два круга над смайликами: «продано» (нажал – новая продажа) и «ссылки» (нажал – +1, минус – в уголке)
   function linksInit() {
     if (document.getElementById('bsLinks')) return;
     const b = document.createElement('div');
     b.id = 'bsLinks';
-    b.className = 'bs-pill';
-    b.innerHTML = '<span>Ссылки</span><b></b><i data-d="-1" class="bs-ico" title="Убрать одну">−</i><i data-d="1" class="bs-cta bs-sq" title="Выставил ссылку">+</i>';
-    b.addEventListener('click', ev => { const i = ev.target.closest('i'); if (!i) return; const d = +i.dataset.d; if (d) linksSet(linksGet() + d); });
+    b.className = 'bs-duo';
+    b.innerHTML = '<div id="bsSold" class="bs-ring" data-a="sale" title="Добавить продажу в этом чате"><div><b>0</b><i class="bs-ring-p">+</i></div><span>продано</span></div>' +
+      '<div id="bsLinkC" class="bs-ring bs-ring-l" data-a="link" title="Выставил ссылку – плюс одна"><div><b>0</b><i class="bs-ring-p">+</i><i class="bs-ring-m" data-a="unlink" title="Убрать одну">−</i></div><span>ссылки</span></div>';
+    b.addEventListener('click', ev => {
+      const a = ev.target.closest('[data-a]')?.dataset.a;
+      if (a === 'sale') openSale();
+      else if (a === 'link') linksSet(linksGet() + 1);
+      else if (a === 'unlink') linksSet(linksGet() - 1);
+    });
     document.body.appendChild(b);
     const st = document.createElement('style');
     st.textContent =
-      '.bs-pill{position:fixed;right:12px;width:230px;height:36px;box-sizing:border-box;z-index:2001;align-items:center;gap:2px;padding:0 5px 0 12px;border-radius:12px;font-size:12.5px;' +
-      'background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}' +
-      '.bs-pill span{width:60px;flex:none;white-space:nowrap}' +
-      '.bs-pill b{flex:1;min-width:0;color:var(--bs-text,#222);font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}' +
-      '.bs-pill i{font-style:normal;flex:none;height:26px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:8px;cursor:pointer;user-select:none}' +
-      '.bs-pill i.bs-ico{width:26px;font-size:16px;color:var(--bs-muted,#888)}.bs-pill i.bs-ico:hover{background:var(--bs-hover,#f3f4f6);color:var(--bs-text,#222)}' +
-      '.bs-pill i.bs-cta{margin-left:2px;padding:0 10px;background:var(--bs-accent,#3b82f6);color:#fff;font-size:12.5px;font-weight:600}.bs-pill i.bs-cta:hover{filter:brightness(1.1)}' +
-      '.bs-pill i.bs-sq{width:26px;padding:0;font-size:17px;font-weight:500}';
+      '.bs-duo{position:fixed;right:12px;width:230px;box-sizing:border-box;z-index:2001;justify-content:center;gap:34px;padding:2px 0 0;pointer-events:none}' +
+      '.bs-ring{display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;user-select:none;pointer-events:auto}' +
+      '.bs-ring>div{position:relative;width:60px;height:60px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:50%;' +
+      'background:var(--bs-panel,#fff);border:2px solid var(--bs-accent,#3b82f6);box-shadow:0 2px 10px rgba(0,0,0,.08);transition:transform .12s,box-shadow .12s}' +
+      '.bs-ring:hover>div{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.14)}.bs-ring:active>div{transform:scale(.96)}' +
+      '.bs-ring b{font-size:19px;font-weight:700;color:var(--bs-text,#222);font-variant-numeric:tabular-nums;letter-spacing:-.3px}' +
+      '.bs-ring span{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-ring i{position:absolute;bottom:-3px;width:20px;height:20px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;border-radius:50%;font-style:normal;font-size:14px;line-height:1;font-weight:600}' +
+      '.bs-ring-p{right:-3px;background:var(--bs-accent,#3b82f6);color:#fff;border:2px solid var(--bs-panel,#fff)}' +
+      '.bs-ring-l>div{border-color:#22a55a}.bs-ring-l .bs-ring-p{background:#22a55a}' +
+      '.bs-ring-m{left:-3px;background:var(--bs-panel,#fff);color:var(--bs-muted,#888);border:1px solid var(--bs-border,#D9E0E7)}.bs-ring-m:hover{color:#e04848;border-color:#e04848}';
     document.head.appendChild(st);
     paintLinks(); placeLinks();
     document.getElementById('bsEmoToggle')?.addEventListener('click', () => setTimeout(placeLinks));
@@ -1365,18 +1391,28 @@
     if (i) { i.value = soldGet(); i.dispatchEvent(new Event('input', { bubbles: true })); }
   }
   function paintSold() {
-    const b = document.getElementById('bsSold');
-    if (b) b.querySelector('b').textContent = String(soldGet()).replace('.', ',');
+    const b = document.querySelector('#bsSold b'), v = String(soldGet()).replace('.', ',');
+    if (b && b.textContent !== v) b.textContent = v;
+    const sh = document.getElementById('bsShift'), now = new Date();
+    if (sh) { const t = WD[now.getDay()] + ', ' + ddmm(now).slice(0, 5); if (sh.querySelector('span').textContent !== t) sh.querySelector('span').textContent = t; }
   }
   function soldInit() {
-    if (document.getElementById('bsSold')) return;
-    const b = document.createElement('div');
-    b.id = 'bsSold';
-    b.className = 'bs-pill';
-    b.style.display = 'none';
-    b.innerHTML = '<span>Продано</span><b></b><i data-a="list" class="bs-ico" title="Продажи за смену"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/></svg></i><i data-a="new" class="bs-cta" title="Добавить продажу в этом чате">+ Продажа</i>';
-    b.addEventListener('click', ev => { const i = ev.target.closest('i'), a = i && i.dataset.a; if (a === 'list') openSales(); else if (a === 'new') openSale(); });
-    document.body.appendChild(b);
+    if (document.getElementById('bsShift')) return;
+    // раздел «Смена» – отдельной большой кнопкой над кругами
+    const sh = document.createElement('div');
+    sh.id = 'bsShift';
+    sh.style.display = 'none';
+    sh.title = 'Смена: продажи, отчёт за день, история';
+    sh.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg><b>Смена</b><span></span><i>›</i>';
+    sh.addEventListener('click', () => openSales());
+    document.body.appendChild(sh);
+    const st = document.createElement('style');
+    st.textContent =
+      '#bsShift{position:fixed;right:12px;width:230px;height:42px;box-sizing:border-box;z-index:2001;align-items:center;gap:8px;padding:0 12px;border-radius:12px;cursor:pointer;font-size:12.5px;' +
+      'background:var(--bs-accent,#3b82f6);color:#fff;box-shadow:0 2px 8px rgba(59,130,246,.25)}#bsShift:hover{filter:brightness(1.08)}' +
+      '#bsShift svg{flex:none}#bsShift b{font-size:14px;font-weight:600}#bsShift span{flex:1;min-width:0;text-align:right;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+      '#bsShift i{font-style:normal;font-size:20px;line-height:1;opacity:.85}';
+    document.head.appendChild(st);
     paintSold();
   }
   document.addEventListener('DOMContentLoaded', soldInit);
@@ -1624,9 +1660,15 @@
   // ---------- История смен: закрытая смена (кнопкой или сменой даты) уходит в архив bsHistory ----------
   const HIST_KEY = 'bsHistory', HIST_MAX = 180;
   const histGet = () => jget(HIST_KEY, []);
+  // моя смена или нет (моя продажа может закрыться и в чужую смену). mine ставится при закрытии дня:
+  // «Закрыть смену» – моя, день закрылся сам – не моя (или как отметили руками). Старые смены и импорт –
+  // по работе за день: были мои лиды, чаты или ссылки – значит, моя
+  const MINE_KEY = 'bsShiftMine';
+  const shiftMine = e => e.mine != null ? !!e.mine : ['leads', 'blocks', 'chats', 'links'].some(k => +(e.rep || {})[k] > 0);
+  const curMine = () => { const m = jget(MINE_KEY, {}); return m.d === ddmm(new Date()) ? !!m.v : null; };
   const repHas = r => ['bought', 'sum', 'links', 'leads'].some(k => +r[k]);
   // в архив – только то, что нужно для статистики, без лишних полей
-  const histSale = x => ({ dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who });
+  const histSale = x => ({ id: x.id, dlg: x.dlg, name: x.name, price: x.price, disc: x.disc, mops: x.mops, share: x.share, cnt: x.cnt, fio: x.fio, who: x.who, email: x.email, pay: x.pay, prem: x.prem, premM: x.premM, sh: x.sh, shT: x.shT, shAlso: x.shAlso });
   const histRep = r => { const o = {}; ['leads', 'blocks', 'chats', 'links', 'bought', 'sum', 'rem'].forEach(k => { if (r[k] != null && r[k] !== '') o[k] = +r[k] || 0; }); return o; };
   // true – если запись получилась (если место в браузере кончилось – выкидываем самые старые смены)
   function histPush(e) {
@@ -1649,7 +1691,13 @@
     }
     const days = [...new Set([rOld && r.d, sOld && sl.d].filter(Boolean))];
     for (const d of days) {
-      const ok = histPush({ d, end: Date.now(), rep: rOld && r.d === d ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [] });
+      const hasRep = rOld && r.d === d;
+      const e = { d, end: Date.now(), rep: hasRep ? histRep(r) : {}, sales: sOld && sl.d === d ? sl.list.map(histSale) : [], text: hasRep ? r.text || repText(r, repFem()) : '' };
+      // день сменился сам, без «Закрыть смену» – лиды и чаты досчитает repAuto
+      if (!all) Object.assign(e, { fix: 1 }, hasRep && r.text != null ? { own: 1 } : {});
+      const mk = jget(MINE_KEY, {});
+      e.mine = mk.d === d ? !!mk.v : !!all;
+      const ok = histPush(e);
       if (!ok) return false;   // не влезло – ничего не стираем
     }
     if (rOld || r.d !== today) jset(REP_KEY, { d: today });
@@ -1705,8 +1753,26 @@
     return Math.round(Math.min(p, Math.max(0, v)));
   }
   const saleTotal = s => Math.max(0, (+s.price || 0) - saleDisc(s));
-  const salePart = s => s ? Math.round(saleTotal(s) * saleShare(s)) : 0;
-  function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); }
+  // доля 0.33 / 0.67 – это ровно ⅓ / ⅔: сумму и премию делим на число менеджеров, а не умножаем на 0,33
+  const shareX = s => Math.abs(s * 3 - Math.round(s * 3)) < 0.02 ? Math.round(s * 3) / 3 : +s || 0;
+  const shareHow = s => { if (!(s > 0)) return ''; const n = Math.round(1 / s); return n === 1 ? '' : Math.abs(1 / n - shareX(s)) < 1e-9 ? ' ÷ ' + n : ' × ' + r2s(s); };
+  const salePart = s => s ? Math.round(saleTotal(s) * shareX(saleShare(s))) : 0;
+  // один раз: суммы смен, посчитанные раньше как × 0,33, переводим на ÷ 3 (история и текущая смена)
+  try {
+    if (!localStorage.getItem('bsShareFix')) {
+      const fix = list => (list || []).reduce((a, x) => a + (x && x.cnt !== false ? salePart(x) - Math.round(saleTotal(x) * (+x.share || 0)) : 0), 0);
+      const h = jget(HIST_KEY, []);
+      let ch = 0;
+      h.forEach(e => { const d = fix(e.sales); if (d && e.rep && e.rep.sum != null) { e.rep.sum = Math.max(0, (+e.rep.sum || 0) + d); ch = 1; } });
+      if (ch) jset(HIST_KEY, h);
+      const r = jget(REP_KEY, {}), sl = jget(SALES_KEY, {}), d = r.d && r.d === sl.d ? fix(sl.list) : 0;
+      if (d && r.sum != null) jset(REP_KEY, Object.assign(r, { sum: Math.max(0, (+r.sum || 0) + d) }));
+      localStorage.setItem('bsShareFix', '1');
+    }
+  } catch (e) {}
+  // закрыли окно совсем – раскрытую смену истории не запоминаем (её держит только переход «смена → продажа/отчёт → назад»)
+  function closeSale() { const o = document.getElementById('bsSaleWrap'); if (o) o.remove(); histKeep = null; saleBack = null; }
+  let saleBack = null;   // карточку продажи открыли из «Продаж» – туда и возвращаемся
   // id – открыть сохранённую продажу; без id – новая в текущем чате
   // fromList – открыли из списка продаж: есть «Назад», после сохранения/удаления – обратно в список
   function openSale(id, fromList) {
@@ -1725,22 +1791,36 @@
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
     if (!old) x.share = shareFor(x.mops.length);
-    // по этому чату сегодня уже есть продажа – подсказываем, чтобы не посчитать дважды (доплата/бронь – это нормально, тогда просто заполняем дальше)
-    const twins = old ? [] : list.filter(s => s.dlg === dlg);
+    // новую продажу можно отнести к прошлому дню – тогда она уйдёт в смену этого дня в истории, а не в текущую
+    const curD = repSaved().d || ddmm(new Date());
+    let day = curD;
+    const past = () => day !== curD;
+    // по этому чату уже есть продажа – в текущей смене или в истории: подсказываем, чтобы не посчитать дважды
+    // (доплата/бронь – это нормально, тогда просто заполняем дальше). Новые сверху
+    const twins = old ? [] : list.filter(s => s.dlg === dlg).map(s => ({ s, d: curD })).reverse().concat(
+      histGet().map((e, hi) => ({ e, hi })).reverse().flatMap(({ e, hi }) => (e.sales || []).map((s, si) => ({ s, d: e.d, hi, end: e.end, si })).filter(o => o.s.dlg === dlg).reverse()));
+    const twinBtn = o => o.hi == null ? '<button data-a="twin" data-id="' + o.s.id + '">Открыть</button>' : '<button data-a="htwin" data-hi="' + o.hi + '" data-end="' + o.end + '" data-si="' + o.si + '">Открыть</button>';
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, label, ph, tag) => '<label><span>' + label + '</span>' + (tag === 'ta' ? '<textarea data-k="' + k + '" rows="2" placeholder="' + (ph || '') + '"></textarea>' : '<input data-k="' + k + '" placeholder="' + (ph || '') + '"' + (k === 'price' ? ' type="number" min="0"' : '') + '>') + '</label>';
+    // форма – блоками: покупка, кто продал, оплата, клиент; справа текст для Telegram (высота по тексту)
+    const sec = (t, body, cls) => '<section class="bs-sf-sec' + (cls ? ' ' + cls : '') + '"><h4>' + t + '</h4>' + body + '</section>';
+    const row = (...a) => '<div class="bs-sf-row">' + a.join('') + '</div>';
     wrap.innerHTML =
-      '<div id="bsSale"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
-      twins.map(s => '<div class="bs-sale-dup">По этому чату сегодня уже есть продажа: <b>' + esc(s.name || 'без тарифа') + ' · ' + rub(saleTotal(s)) + ' ₽</b>. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.<button data-a="twin" data-id="' + s.id + '">Открыть</button></div>').join('') +
+      '<div id="bsSale" class="bs-sform"><div class="bs-rep-head"><b>' + (old ? 'Продажа' : 'Новая продажа') + (x.who ? ' – ' + esc(x.who) : '') + '</b><i title="Закрыть">×</i></div>' +
+      (twins.length ? '<div class="bs-sale-dup bs-sale-dups"><span>По этому чату уже ' + (twins.length > 1 ? 'есть продажи' : 'есть продажа') + '. Если это та же оплата – открой её, чтобы не посчитать дважды. Доплату или бронь заполняй здесь.</span>' +
+        twins.slice(0, 3).map(o => '<p><span><b>' + (o.d === curD ? 'сегодня' : o.d.slice(0, 5)) + '</b> – ' + esc(o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽</span>' + twinBtn(o) + '</p>').join('') +
+        (twins.length > 3 ? '<p><span>и ещё ' + (twins.length - 3) + ' – в «Истории»</span></p>' : '') + '</div>' : '') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
-      '<label><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>' +
-      field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + field('price', 'Цена, ₽', '0') + field('disc', 'Скидка', '0 – в рублях или 10%') +
-      '<label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
-      '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
-      field('email', 'Почта', 'когда пришлёт') + field('fio', 'Имя и фамилия', 'когда пришлёт') + field('nick', 'Ник', '@…') +
-      field('src', 'Источник', 'из тегов или вручную') + field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta') +
-      '</div><div class="bs-sale-prev"><span>Текст для Telegram</span><textarea readonly spellcheck="false"></textarea><div class="bs-sale-note"></div></div></div>' +
+      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>',
+        old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
+        field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + row(field('price', 'Цена, ₽', '0'), field('disc', 'Скидка', '₽ или 10%'))) +
+      sec('Кто продал', '<div class="bs-sf-team"><label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+        '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label></div>') +
+      sec('Оплата и премия', payChips(), 'bs-sf-pay') +
+      sec('Клиент', row(field('fio', 'Имя и фамилия', 'когда пришлёт'), field('email', 'Почта', 'когда пришлёт')) + row(field('nick', 'Ник', '@…'), field('src', 'Источник', 'из тегов или вручную')) +
+        field('quote', 'Откуда узнал о нас', 'своими словами клиента', 'ta')) +
+      '</div><div class="bs-sale-prev"><h4>Текст для Telegram</h4><textarea readonly spellcheck="false" rows="4"></textarea><div class="bs-sale-note"></div></div></div>' +
       '<div class="bs-rep-btns">' + (old ? '<button data-a="del" class="bs-sale-del">Удалить</button>' : '') + '<span class="bs-tar-st"></span>' + (fromList ? '<button data-a="back">Назад</button>' : '') + '<button data-a="save">Сохранить</button><button data-a="copy" class="bs-main">Сохранить и скопировать</button></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), prev = box.querySelector('.bs-sale-prev textarea'), note = box.querySelector('.bs-sale-note');
@@ -1751,15 +1831,25 @@
       box.querySelectorAll('[data-g="mops"] em').forEach(e => e.classList.toggle('bs-on', x.mops.includes(e.dataset.v)));
       box.querySelectorAll('[data-g="share"] em').forEach(e => e.classList.toggle('bs-on', +e.dataset.v === x.share));
       prev.value = saleText(x);
+      prev.style.height = 'auto'; prev.style.height = prev.scrollHeight + 2 + 'px';
       const mine = saleMine(x);
       box.querySelector('.bs-sale-share').hidden = !mine;
+      box.querySelector('.bs-sf-pay').hidden = !mine;
+      payPaint(box, x, mine);
+      premPaint(box, x, old, ymOf(day), mine);
       if (!mine) return void (note.textContent = 'Продажа не на тебя (' + meName() + ') – будет в списке продаж, чтобы дописать данные, но в «Продано» и сумму не пойдёт.');
-      const part = Math.round(saleTotal(x) * x.share);
-      note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + 'В отчёт смены: продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
+      const part = Math.round(saleTotal(x) * shareX(x.share));
+      note.textContent = (meSet() ? '' : 'Не выбрано, кто ты («Продажи за смену» → «Я: …») – считаю продажу твоей. ') + (past() ? 'В смену ' + day.slice(0, 5) + ' в истории' : 'В отчёт смены') + ': продано +' + String(x.share).replace('.', ',') + ', сумма +' + rub(part) + ' ₽' + (saleDone(x) ? '' : ' · почту и имя можно дописать потом');
     };
     box.addEventListener('input', ev => {
       const k = ev.target.dataset.k;
       if (!k || k === 'tar') return;
+      if (k === 'day') {
+        const v = ev.target.value && new Date(ev.target.value + 'T00:00');
+        day = v && !isNaN(v) && v <= new Date() ? ddmm(v) : curD;
+        box.querySelector('[data-a="copy"]').textContent = past() ? 'Добавить в ' + day.slice(0, 5) + ' и скопировать' : 'Сохранить и скопировать';
+        return paint();
+      }
       x[k] = ev.target.value;
       paint();
     });
@@ -1771,15 +1861,28 @@
       paint();
     });
     const save = () => {
+      const same = twins.filter(o => o.d === day || Math.abs(saleTotal(o.s) - saleTotal(x)) < 1);
+      if (same.length && !confirm('По этому чату уже есть ' + (same.length > 1 ? 'продажи' : 'продажа') + ':\n' + same.map(o => '• ' + o.d.slice(0, 5) + ' – ' + (o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽').join('\n') +
+        '\n\nЕсли это та же оплата – нажми «Отмена» и открой её. Добавить ещё одну (доплата, бронь)?')) return false;
+      if (past()) {
+        x.cnt = saleMine(x);
+        premSave(x, null, ymOf(day));
+        if (!histAddDay(day, [x])) return false;
+        box.querySelector('.bs-tar-st').textContent = 'Добавлено в ' + day.slice(0, 5);
+        return true;
+      }
       const all = salesGet(), i = all.findIndex(s => s.id === x.id), was = i >= 0 ? all[i] : null;
       x.cnt = saleMine(x);
+      premSave(x, was, ymOf(day));
       const dShare = r2(saleShare(x) - saleShare(was));
       if (dShare) soldAdd(dShare);
       sumAdd(salePart(x) - salePart(was));
       if (i >= 0) all[i] = x; else all.push(x);
       salesSet(all);
       box.querySelector('.bs-tar-st').textContent = 'Сохранено';
+      return true;
     };
+    const saved = () => past() ? '✓ Продажа добавлена в смену ' + day.slice(0, 5) + ' (История)' : '✓ Продажа сохранена';
     box.addEventListener('click', ev => {
       const em = ev.target.closest('em'), a = ev.target.dataset.a;
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
@@ -1788,19 +1891,21 @@
         if (g === 'mops') {
           x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);   // доля – от числа МОП, потом можно поправить вручную
-        } else x.share = +v;
+        } else if (g === 'pay') x.pay = v;
+        else x.share = +v;
         paint();
-      } else if (a === 'back') openSales();
+      } else if (a === 'back') openSales(saleBack || undefined);
       else if (a === 'twin') openSale(ev.target.dataset.id, fromList);
-      else if (a === 'save') { if (!x.name) return inp('tar').focus(); save(); fromList ? openSales() : closeSale(); tarHint('✓ Продажа сохранена', true); }
+      else if (a === 'htwin') openHistSale(+ev.target.dataset.hi, ev.target.dataset.end, +ev.target.dataset.si);
+      else if (a === 'save') { if (!x.name) return inp('tar').focus(); if (!save()) return; fromList ? openSales(saleBack || undefined) : closeSale(); tarHint(saved(), true); }
       else if (a === 'copy') {
         if (!x.name) return inp('tar').focus();
-        save();
-        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(x.cnt ? '✓ Продажа сохранена, текст скопирован' : '✓ Сохранено без учёта в сумме, текст скопирован', true); });
+        if (!save()) return;
+        navigator.clipboard.writeText(prev.value).then(() => { closeSale(); tarHint(x.cnt ? saved() + ', текст скопирован' : '✓ Сохранено без учёта в сумме, текст скопирован', true); });
       } else if (a === 'del') {
         if (!confirm('Удалить эту продажу? Доля и сумма уйдут из отчёта смены.')) return;
         saleDel(x.id);
-        fromList ? openSales() : closeSale();
+        fromList ? openSales(saleBack || undefined) : closeSale();
       }
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
@@ -1818,12 +1923,126 @@
     salesSet([]);
     paintSold(); paintLinks();
   }
-  // ---------- Окно «Продажи»: вкладки «Смена» (сегодня) и «История» (архив смен) ----------
+  // закрыть смену: досчитываем лиды и чаты за день, собираем отчёт – смена вместе с ним уходит в историю
+  async function countDay(d, m) {
+    const form = await clientsForm();
+    const [leads, blocks, chats] = await Promise.all([
+      countClients(form, 'psFirstContact', d, d, ST_ALL, m),
+      countClients(form, 'psFirstContact', d, d, ST_BLOCK, m),
+      countClients(form, 'psLastContact', d, d, ST_ALL, m),
+    ]);
+    return { leads, blocks, chats };
+  }
+  // отчёт сам: пока открыта CRM, цифры дня обновляются в фоне, а смену, закрытую сменой даты, досчитываем.
+  // Лиды и блоки за прошлый день считаются точно; чаты задним числом занижаются (у клиента уже новый «последний контакт»),
+  // поэтому для чатов берём большее из последнего фонового подсчёта и пересчёта
+  const AUTO_KEY = 'bsRepAuto', AUTO_EVERY = 25 * 60e3;
+  let autoBusy = false, autoFail = 0;
+  async function repAuto() {
+    if (autoBusy || Date.now() - autoFail < 5 * 60e3) return;
+    autoBusy = true;
+    try {
+      const e = histGet().find(x => x.fix);
+      if (e) {
+        const got = await countDay(e.d, meId());
+        const h = histGet(), e2 = h.find(x => x.fix && x.end === e.end && x.d === e.d);
+        if (e2) {
+          Object.assign(e2.rep, { leads: got.leads, blocks: got.blocks, chats: Math.max(+e2.rep.chats || 0, got.chats) });
+          if (e2.rep.rem == null) e2.rep.rem = 0;
+          if (!e2.own) e2.text = repText(e2.rep, repFem());
+          delete e2.fix; delete e2.own;
+          histSave(h);
+        }
+      }
+      const tabOpen = () => !!document.querySelector('.bs-tab #bsRep');   // вкладка «Отчёт» считает сама
+      if (Date.now() - (jget(AUTO_KEY, {}).at || 0) >= AUTO_EVERY && !tabOpen()) {
+        jset(AUTO_KEY, { at: Date.now() });   // сразу – чтобы другая вкладка CRM не считала то же самое
+        const d = repSaved().d, got = await countDay(d, meId());
+        const r = repSaved();   // перечитываем: пока считали, могли добавить ссылку или продажу
+        if (r.d === d && !tabOpen()) { Object.assign(r, got); if (r.rem == null) r.rem = 0; jset(REP_KEY, r); }
+      }
+    } catch (err) { autoFail = Date.now(); }
+    autoBusy = false;
+  }
+  async function closeShift(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Считаю отчёт…'; }
+    const d = repSaved().d, m = meId();
+    let got = null;
+    try { got = await countDay(d, m); } catch (e) {}
+    // перечитываем: пока считали, могли нажать «+» у ссылок или добавить продажу
+    const r = repSaved();
+    if (got) Object.assign(r, got);
+    if (r.rem == null) r.rem = 0;
+    jset(REP_KEY, r);
+    const before = histGet().length;
+    newShift();
+    const h = histGet(), e = h[h.length - 1];
+    tarHint('✓ Смена закрыта, отчёт сохранён в истории', true);
+    if (h.length > before && e.d === d) return openHistReport(h.length - 1, e.end, got ? '' : 'Лиды и чаты не посчитались – поправь их в тексте вручную', true);
+    openSales('hist');
+  }
+  // отчёт закрытой смены: текст можно поправить (сохраняется в истории) и скопировать
+  // send – сразу после «Закрыть смену»: продажи с моей долей уходят в таблицу (если подключена)
+  function openHistReport(hi, end, warn, send) {
+    const h = histGet(), e = h[hi];
+    if (!e || String(e.end) !== String(end)) return openSales('hist');
+    closeSale();
+    histKeep = hi + ':' + end;
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales bs-hrep"><div class="bs-rep-head"><b>Отчёт за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
+      '<div class="bs-rep-status"></div><div class="bs-hrep-sheet" hidden></div><div class="bs-hrep-sheet bs-hrep-team" hidden></div><textarea spellcheck="false"></textarea>' +
+      '<div class="bs-rep-btns"><button data-a="back">К истории</button><button data-a="copy" class="bs-main">Скопировать</button></div></div>';
+    document.body.appendChild(wrap);
+    const ta = wrap.querySelector('textarea'), status = wrap.querySelector('.bs-rep-status');
+    if (warn) { status.dataset.st = 'err'; status.innerHTML = '<i></i><span></span>'; status.querySelector('span').textContent = warn; }
+    ta.value = e.text || repText(e.rep || {}, repFem());
+    const sl = wrap.querySelector('.bs-hrep-sheet'), tl = wrap.querySelector('.bs-hrep-team');
+    let wait = Promise.resolve();
+    if (send && sheetUrl() && e.sales.some(toSheet)) {
+      sl.hidden = false; sl.textContent = 'Переношу продажи в таблицу…';
+      wait = sheetSend(hi, end).then(st => { sl.textContent = 'Таблица: ' + sheetMsg(st); sl.dataset.st = st.err.length ? 'err' : 'ok'; })
+        .catch(err => { sl.textContent = 'В таблицу не ушло: ' + err.message + '. Потом – «В таблицу» в истории.'; sl.dataset.st = 'err'; });
+    }
+    // цифры дня – в таблицу отдела (после своей таблицы: скрипт один)
+    if (send && teamOn()) {
+      tl.hidden = false; tl.textContent = 'Пишу в таблицу отдела…';
+      wait.then(() => teamCloseDay(e.d)).then(m => { tl.textContent = 'Отдел: ' + m; tl.dataset.st = /⚠|не тронул|нет столбца|формула/.test(m) ? 'err' : 'ok'; })
+        .catch(err => { tl.textContent = 'В таблицу отдела не ушло: ' + err.message + '. Потом – «В отдел» в истории.'; tl.dataset.st = 'err'; });
+    }
+    ta.addEventListener('input', () => {
+      const h2 = histGet(), e2 = h2[hi];
+      if (e2 && String(e2.end) === String(end)) { e2.text = ta.value; if (e2.fix) e2.own = 1; histSave(h2); }
+    });
+    wrap.addEventListener('click', ev => {
+      const t = ev.target, a = t.dataset.a;
+      if (t.matches('.bs-rep-head i')) return closeSale();
+      if (a === 'back') return openSales('hist');
+      if (a === 'copy') navigator.clipboard.writeText(ta.value).then(() => {
+        t.textContent = 'Скопировано ✓';
+        setTimeout(() => { t.textContent = 'Скопировать'; }, 1500);
+      });
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Окно «Смена»: вкладки «Сегодня» (продажи текущей смены), «Отчёт» (за день) и «История» (архив смен) ----------
   const dmyDate = d => { const [a, b, c] = String(d).split('.'); return new Date(+c, b - 1, +a); };
   const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   const fromIso = s => { const [y, m, d] = String(s).split('-'); return y && m && d ? new Date(+y, m - 1, +d) : null; };
   const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
   const r2s = n => String(Math.round((+n || 0) * 100) / 100).replace('.', ',');
+  // доли продаж дробью: 0,5 → ½, 23,33 → 23⅓; что не похоже на дробь – числом
+  const FRACS = [[0.25, '¼'], [0.33, '⅓'], [0.5, '½'], [0.67, '⅔'], [0.75, '¾']];
+  const frac = n => {
+    n = Math.round((+n || 0) * 100) / 100;
+    let w = Math.floor(n), f = Math.round((n - w) * 100) / 100;
+    if (f >= 0.98) { w++; f = 0; }
+    if (!f) return String(w);
+    const hit = FRACS.find(([v]) => Math.abs(v - f) < 0.015);
+    return hit ? (w || '') + hit[1] : r2s(n);
+  };
+  // «1 продажа», «1½ продажи», «4 продажи», «5 продаж»
+  const nSales = n => frac(n) + ' ' + (Math.round(n * 100) % 100 ? 'продажи' : plural(Math.round(n), 'продажа', 'продажи', 'продаж'));
   // период истории помнится, пока открыта страница
   const histPer = { p: '7', from: null, to: null };
   function histRange() {
@@ -1836,39 +2055,63 @@
     return [histPer.from, histPer.to];
   }
   // все смены (архив + текущая), новые сверху
+  // пока рисуется одна вкладка, история не меняется – читаем её из браузера один раз (withHist)
+  let histMemo = null;
+  const withHist = f => function () { if (histMemo) return f.apply(this, arguments); histMemo = histAll(); try { return f.apply(this, arguments); } finally { histMemo = null; } };
   function histAll() {
+    if (histMemo) return histMemo;
     const cur = repSaved(), curSales = salesGet();
     const all = histGet().map((e, hi) => Object.assign({ hi }, e));
-    if (repHas(cur) || curSales.length) all.push({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales });
+    if (repHas(cur) || curSales.length || curMine() != null) all.push(Object.assign({ d: ddmm(new Date()), now: true, end: Date.now(), rep: histRep(cur), sales: curSales }, curMine() != null ? { mine: curMine() } : {}));
     return all.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
   }
   function histSave(h) {
     try { localStorage.setItem(HIST_KEY, JSON.stringify(h)); return true; } catch (e) { alert('Не хватило места в браузере – скачай резервную копию и удали старые смены.'); return false; }
   }
   // продажи за прошлую дату – в смену этой даты в архиве (если её нет – создаём)
-  function histAddDay(d, xs) {
+  const histAddDay = (d, xs) => histAddDays([[d, xs]]);
+  // то же сразу за несколько дат: [[дата, продажи], …] – одним сохранением
+  function histAddDays(days) {
     const h = histGet();
-    let e = h.filter(x => x.d === d).pop();
-    if (!e) { e = { d, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }; h.push(e); }
-    xs.forEach(x => {
-      e.sales.push(histSale(x));
-      e.rep.bought = Math.round(((+e.rep.bought || 0) + saleShare(x)) * 100) / 100;
-      e.rep.sum = (+e.rep.sum || 0) + salePart(x);
+    days.forEach(([d, xs]) => {
+      let e = h.filter(x => x.d === d).pop();
+      if (!e) { e = { d, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }; h.push(e); }
+      xs.forEach(x => {
+        e.sales.push(histSale(x));
+        e.rep.bought = Math.round(((+e.rep.bought || 0) + saleShare(x)) * 100) / 100;
+        e.rep.sum = (+e.rep.sum || 0) + salePart(x);
+      });
     });
     return histSave(h);
   }
   const statsHtml = a => '<div class="bs-stats">' + a.map(([k, v]) => '<div><span>' + k + '</span><b>' + v + '</b></div>').join('') + '</div>';
+  const SHIFT_TABS = [['shift', 'Сегодня'], ['rep', 'Отчёт'], ['hist', 'История'], ['find', 'Продажи'], ['stat', 'Статистика']];
   function openSales(tab) {
+    const keep = histKeep;
     closeSale();
-    tab = tab === 'hist' ? 'hist' : 'shift';
+    histKeep = tab === 'hist' ? keep : null;
+    tab = SHIFT_TABS.some(x => x[0] === tab) ? tab : 'shift';
+    premAll();
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
-    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Продажи</b>' +
-      '<span class="bs-seg"><em data-tab="shift"' + (tab === 'shift' ? ' class="on"' : '') + '>Смена</em><em data-tab="hist"' + (tab === 'hist' ? ' class="on"' : '') + '>История</em></span>' +
+    wrap.innerHTML = '<div id="bsSale" class="bs-sales"><div class="bs-rep-head"><b>Смена' + (tab === 'shift' ? '<small class="bs-head-d">' + WD[new Date().getDay()] + ', ' + ddmm(new Date()).slice(0, 5) + '</small>' : '') + '</b>' +
+      '<span class="bs-seg">' + SHIFT_TABS.map(([k, t]) => '<em data-tab="' + k + '"' + (tab === k ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>' +
       '<i title="Закрыть">×</i></div><div class="bs-tab"></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('.bs-tab');
-    (tab === 'hist' ? paintHist : paintShift)(box);
+    ({ shift: paintShift, rep: paintReport, hist: paintHist, find: paintFind, stat: paintStat })[tab](box);
+    // KPI из таблицы ОКК пришёл новый – перерисовать премию
+    okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); if (tab === 'stat') paintStat(box); if (tab === 'find') paintFind(box); };
+    okkSync();
+    wrap.addEventListener('mouseover', ev => {
+      const pm = ev.target.closest && ev.target.closest('.bs-pm'), tip = pm && pm.querySelector('.bs-ptip');
+      if (!tip) return;
+      const r = pm.getBoundingClientRect(), h = tip.offsetHeight, w = tip.offsetWidth;
+      tip.style.left = Math.max(8, Math.min(r.right - w, innerWidth - w - 8)) + 'px';
+      const down = r.bottom + 6 + h < innerHeight - 8;
+      tip.style.top = (down ? r.bottom + 6 : Math.max(8, r.top - h - 6)) + 'px';
+      tip.classList.toggle('bs-up', !down);
+    });
     wrap.addEventListener('click', ev => {
       const t = ev.target;
       if (t.matches('.bs-rep-head i')) return closeSale();
@@ -1876,27 +2119,315 @@
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
   }
-  function paintShift(box) {
-    const list = salesGet(), r = repSaved(), now = new Date();
+  // цель на месяц – сколько продаж (доли считаются); помнится по месяцам, новый месяц берёт прошлую цель
+  const GOAL_KEY = 'bsGoal';
+  const ymNow = () => { const d = new Date(); return d.getFullYear() * 100 + d.getMonth() + 1; };
+  const goalGet = () => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ymNow()]) || +g.n || 0; };
+  const goalSet = n => { const g = jget(GOAL_KEY, {}); g.m = g.m || {}; g.m[ymNow()] = n; g.n = n; jset(GOAL_KEY, g); };
+  // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
+  // коэффициенты к премии за месяц (как в таблице, перемножаются): за качество – KPI из таблицы ОКК (bsKpi – последнее, что прочитали),
+  // за выполнение плана – продано за месяц / цель месяца в помощнике
+  const KPI_KEY = 'bsKpi';
+  const goalFor = ym => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ym]) || +g.n || 0; };
+  const kpiGet = ym => { const v = jget(KPI_KEY, {})[ym]; return v == null ? null : +v; };
+  const kq = n => String(n).replace('.', ',');
+  function premK(ym) {
+    const kpi = kpiGet(ym), goal = goalFor(ym);
+    const sold = Math.round(histAll().filter(e => ymOf(e.d) === ym).reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100;
+    const plan = goal ? Math.round(sold / goal * 1000) / 10 : null;
+    const q = kpi == null ? 1 : kpi < 70 ? 0.9 : kpi < 97 ? 1 : 1.1, pl = plan == null ? 1 : plan < 80 ? 0.9 : plan < 150 ? 1 : 1.1;
+    return { kpi, plan, sold, goal, q, p: pl, k: Math.round(q * pl * 100) / 100 };
+  }
+  // премия за месяц: посчитанная помощником (p = premSum) × коэффициенты и из таблицы (N1) – если обе, сверяем
+  // (в таблице коэффициенты появляются в конце месяца – сходится и без них)
+  function premMonHtml(p, tab, lbl, ym) {
+    if (!p && tab == null) return '';
+    const c = p && premK(ym), v = p && Math.round(p.v * c.k * 100) / 100;
+    const okF = p && tab != null && Math.abs(v - tab) < 0.5, okB = p && tab != null && !okF && Math.abs(p.v - tab) < 0.5;
+    const bad = p && tab != null && !okF && !okB;
+    if (!p) return '<div title="В твоей таблице (ячейка N1)"><span>' + lbl + '</span><b class="bs-ok">' + rubK(tab) + ' ₽</b></div>';
+    // подсказка – своя карточка (не серый title): строки «что – сколько», коэффициенты цветом
+    const cls = x => x > 1 ? 'up' : x < 1 ? 'down' : '', row = (a, b, c) => '<p' + (c ? ' class="' + c + '"' : '') + '><i>' + a + '</i><em>' + b + '</em></p>';
+    const pl = c.plan == null ? 'цель не задана' : Math.floor(c.plan) + '% (' + frac(c.sold) + ' из ' + c.goal + (ym === ymNow() ? ', месяц идёт' : '') + ')';
+    const tip = '<section class="bs-ptip">' + row('По продажам', rubK(p.v) + ' ₽') +
+      (p.miss ? '<p class="bs-pt-n">без премии ещё ' + p.miss + ' ' + plural(p.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
+      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q), 'bs-pt-k ' + cls(c.q)) +
+      (c.kpi == null ? '<p class="bs-pt-n">' + (okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'подключи таблицу ОКК в «Таблицах»') + '</p>' : '') +
+      row('План · ' + pl, '×' + kq(c.p), 'bs-pt-k ' + cls(c.p)) +
+      (c.plan == null ? '<p class="bs-pt-n">задай цель – клик по кольцу во вкладке «Сегодня»</p>' : '') +
+      row('Итого', rubK(v) + ' ₽', 'bs-pt-t') +
+      (tab != null ? row('В таблице (N1)', rubK(tab) + ' ₽', 'bs-pt-tab') +
+        '<p class="bs-pt-n ' + (bad ? 'bad' : 'ok') + '">' + (okF ? '✓ сходится' : okB ? '✓ сходится без коэффициентов – их ставят в конце месяца' : '≠ не сходится') + '</p>' : '') + '</section>';
+    const chip = (t, x, none) => '<em class="' + (none ? 'no' : cls(x)) + '">' + t + (none ? ' ?' : ' ×' + kq(x)) + '</em>';
+    return '<div class="bs-pm"><span>' + lbl + '</span><b class="' + (bad || p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') + '</b>' +
+      '<small class="bs-kpi">' + chip('KPI', c.q, c.kpi == null) + chip('план', c.p, c.plan == null) + '</small>' + tip + '</div>';
+  }
+  const heroHtml = withHist(function (r) {
+    const now = new Date(), mon = MONTHS[now.getMonth()];
+    const month = histAll().filter(e => { const x = dmyDate(e.d); return x.getFullYear() === now.getFullYear() && x.getMonth() === now.getMonth(); });
+    const mb = Math.round(month.reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100, ms = month.reduce((a, e) => a + (+e.rep.sum || 0), 0);
+    const goal = goalGet(), p = goal ? Math.min(1, mb / goal) : 0, C = 2 * Math.PI * 34, left = Math.max(0, Math.round((goal - mb) * 100) / 100);
+    const pm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y === now.getFullYear() && m.m === now.getMonth() + 1 && m.prem != null);
+    const on = premOn(), pd = premSum(salesGet()), pmo = premSum([].concat(...month.map(e => e.sales || []))), sm = monthStat(ymNow());
+    return '<div class="bs-hero"><button data-a="goal" class="bs-goal" title="' + (goal ? 'Продано за ' + mon + ': ' + frac(mb) + ' из ' + goal + '. Нажми, чтобы поменять цель' : 'Задать цель на месяц – сколько продаж') + '">' +
+        '<svg viewBox="0 0 80 80" width="80" height="80"><circle cx="40" cy="40" r="34"/>' + (p ? '<circle cx="40" cy="40" r="34" class="bs-goal-on" stroke-dasharray="' + (C * p).toFixed(1) + ' ' + C.toFixed(1) + '" transform="rotate(-90 40 40)"/>' : '') + '</svg>' +
+        '<b>' + (goal ? Math.floor(p * 100) + '%' : '–') + '</b><small>' + (goal ? 'цели' : 'цель?') + '</small></button>' +
+      '<div class="bs-hero-m"><b title="Твоя доля с продаж за сегодня">' + rub(+r.sum || 0) + ' ₽</b>' +
+        (on ? '<span class="bs-hero-p" title="Твоя часть премии с продаж за сегодня' + (pd.miss ? '. Без премии ' + pd.miss + ' – открой их и впиши вручную' : '') + '">премия <i>+' + rubK(pd.v) + ' ₽</i>' + (pd.miss ? ' <b class="bs-prem-q">+ ? ×' + pd.miss + '</b>' : '') + '</span>' : '') +
+        '<span>продано <i>' + frac(r.bought) + '</i> · ссылок <i>' + (+r.links || 0) + '</i></span>' +
+        '<span class="bs-hero-g">' + (!goal ? 'цель на ' + mon + ' не задана' : left ? 'до цели <i>' + frac(left) + '</i> ' + nSales(left).replace(/^\S+ /, '') : 'цель на ' + mon + ' выполнена') + '</span>' + recLine() + '</div>' +
+      '<div class="bs-hero-r"><div><span>за ' + mon + '</span><b>' + rub(ms) + ' ₽</b></div>' +
+        premMonHtml(on ? pmo : null, pm ? pm.prem : null, 'премия за ' + mon, ymNow()) +
+        '<div class="bs-pm bs-sal"><span>зарплата</span><b data-a="stat">' + rub(sm.sal) + ' ₽</b>' + salTip(sm) + '</div></div></div>';
+  });
+  // зарплата = премия за месяц (с коэффициентами) + смены; ставка – сумма за норму смен (10 000 ₽ за 15), смены – дни с отметкой «Моя смена»
+  const PAYR_KEY = 'bsShiftPay';
+  const payRate = () => { const p = jget(PAYR_KEY, {}); return { sum: +p.sum || 10000, n: +p.n || 15 }; };
+  const ymAdd = (ym, k) => { const d = new Date(Math.floor(ym / 100), ym % 100 - 1 + k, 1); return d.getFullYear() * 100 + d.getMonth() + 1; };
+  const ymName = ym => MONTHS[ym % 100 - 1];
+  // всё про месяц – для зарплаты и статистики
+  function monthStat(ym) {
+    const es = histAll().filter(e => ymOf(e.d) === ym), sales = [].concat(...es.map(e => e.sales || []));
+    const tot = k => es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0);
+    const days = new Set(es.filter(shiftMine).map(e => e.d)).size, rate = payRate();
+    const tm = sheetUrl() && sheetTab && sheetTab.months && sheetTab.months.find(m => m.y * 100 + m.m === ym && m.prem != null);
+    const ps = premOn() ? premSum(sales) : null, c = premK(ym);
+    const prem = ps ? Math.round(ps.v * c.k) : tm ? Math.round(tm.prem) : null, shifts = Math.round(rate.sum / rate.n * days);
+    return { ym, es, sales, days, rate, c, ps, prem, fromTab: !ps && !!tm, shifts, sal: (prem || 0) + shifts,
+      sold: Math.round(tot('bought') * 100) / 100, sum: tot('sum'), links: tot('links'), leads: tot('leads') };
+  }
+  // карточка-подсказка к зарплате: из чего сложилась
+  function salTip(s) {
+    const row = (a, b, c) => '<p' + (c ? ' class="' + c + '"' : '') + '><i>' + a + '</i><em>' + b + '</em></p>';
+    return '<section class="bs-ptip">' + row('Премия' + (s.ps ? ' · ×' + kq(s.c.k) : s.fromTab ? ' · из таблицы' : ''), s.prem == null ? 'не считается' : rub(s.prem) + ' ₽') +
+      (s.ps && s.ps.miss ? '<p class="bs-pt-n">без премии ещё ' + s.ps.miss + ' ' + plural(s.ps.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
+      row('Смены · ' + s.days + ' × ' + rub(s.rate.sum / s.rate.n) + ' ₽', rub(s.shifts) + ' ₽') +
+      row('Итого', rub(s.sal) + ' ₽', 'bs-pt-t') +
+      '<p class="bs-pt-n">' + rub(s.rate.sum) + ' ₽ за ' + s.rate.n + ' смен. Смены – дни с отметкой «Моя смена». Подробно – во вкладке «Статистика»</p></section>';
+  }
+  // вкладка «Статистика»: месяц целиком – зарплата, план, KPI, график по дням, из чего продажи, сравнение с прошлыми месяцами
+  // рекорды за всё время – по своим сменам, две смены за день складываем
+  function recStat(full) {
+    const by = {}, mine = histAll().filter(shiftMine);
+    mine.forEach(e => { const x = by[e.d] = by[e.d] || { d: e.d, sum: 0, sold: 0 }; x.sum += +(e.rep || {}).sum || 0; x.sold += +(e.rep || {}).bought || 0; if (e.now) x.now = true; });
+    const days = Object.values(by).sort((a, b) => dmyDate(a.d) - dmyDate(b.d)), best = k => days.reduce((a, x) => x[k] > (a ? a[k] : 0) ? x : a, null);
+    let big = null;
+    mine.forEach(e => (e.sales || []).forEach(x => { if (saleShare(x) && saleTotal(x) > (big ? big.v : 0)) big = { v: saleTotal(x), d: e.d }; }));
+    // серия – смен подряд с продажей; сегодняшняя без продаж серию ещё не обрывает
+    let run = 0, top = 0;
+    days.forEach(x => { if (x.sold > 0) top = Math.max(top, ++run); else if (!x.now) run = 0; });
+    const mon = full && [...new Set(days.map(x => ymOf(x.d)))].map(monthStat).reduce((a, m) => m.sal > (a ? a.sal : 0) ? m : a, null);
+    const today = days.find(x => x.now), prev = Math.max(0, ...days.filter(x => !x.now).map(x => x.sum));
+    return { sum: best('sum'), sold: best('sold'), big, run, top, mon, today, prev };
+  }
+  const dayName = d => { const x = dmyDate(d); return x.getDate() + ' ' + MONTHS_R[x.getMonth()] + (x.getFullYear() !== new Date().getFullYear() ? ' ' + x.getFullYear() : ''); };
+  // строчка на «Сегодня»: побил рекорд дня или идёт серия
+  function recLine() {
+    const r = recStat(), t = r.today;
+    if (t && t.sum > r.prev && r.prev > 0) return '<span class="bs-hero-rec gold">' + ico(ICO.trophy, 13) + 'новый рекорд дня!</span>';
+    if (r.run >= 2) return '<span class="bs-hero-rec">' + ico(ICO.flame, 13) + 'серия <i>' + r.run + '</i> ' + plural(r.run, 'смена', 'смены', 'смен') + ' с продажей' + (r.run >= r.top && r.top > 2 ? ' – рекорд' : '') + '</span>';
+    return '';
+  }
+  let statYm = 0, statMet = 'sum';
+  const PAL = ['#3b82f6', '#22c55e', '#f59e0b', '#a855f7', '#ef4444', '#14b8a6', '#ec4899', '#94a3b8'];
+  const MONTHS_R = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  const pct = n => Math.round(n) + '%';
+  const d1 = n => String(Math.round(n * 10) / 10).replace('.', ',');
+  // разница с прошлым месяцем – зелёным или оранжевым
+  const delta = (a, b, mon) => {
+    if (!b || a == null) return '';
+    const p = Math.round((a - b) / b * 100);
+    return '<small class="bs-st-d' + (p > 0 ? ' up' : p < 0 ? ' down' : '') + '" title="К месяцу ' + mon + '">' + (p > 0 ? '↑ ' : p < 0 ? '↓ ' : '') + Math.abs(p) + '%</small>';
+  };
+  // кольцо-диаграмма с подписями: items – [[название, вес, подпись]]
+  function donut(items, center, sub) {
+    const tot = items.reduce((a, x) => a + x[1], 0), R = 38, C = 2 * Math.PI * R;
+    let off = 0;
+    const arcs = items.map(([, v], i) => {
+      const l = v / tot * C, g = items.length > 1 ? Math.min(2.5, l / 3) : 0;
+      const s = '<circle cx="50" cy="50" r="' + R + '" stroke="' + PAL[i % PAL.length] + '" stroke-dasharray="' + Math.max(0.1, l - g).toFixed(2) + ' ' + C.toFixed(2) + '" stroke-dashoffset="' + (-off).toFixed(2) + '"/>';
+      off += l; return s;
+    }).join('');
+    return '<div class="bs-st-donut"><div class="bs-st-dc"><svg viewBox="0 0 100 100" width="118" height="118"><circle cx="50" cy="50" r="' + R + '" class="bs-st-dtr"/>' +
+      '<g transform="rotate(-90 50 50)">' + arcs + '</g></svg><b>' + center + '</b><small>' + sub + '</small></div>' +
+      '<ul>' + items.map(([n, v, t], i) => '<li><i style="background:' + PAL[i % PAL.length] + '"></i><span>' + esc(n) + '</span><em>' + t + '</em><small>' + pct(v / tot * 100) + '</small></li>').join('') + '</ul></div>';
+  }
+  // группы продаж (свои доли) по ключу: [[название, доля продаж, сумма]], крупные сверху, хвост – в «другое»
+  function groupSales(sales, key) {
+    const m = {};
+    sales.filter(x => saleShare(x) > 0).forEach(x => { const k = key(x), g = m[k] || (m[k] = [k, 0, 0]); g[1] += saleShare(x); g[2] += salePart(x); });
+    const a = Object.values(m).sort((x, y) => y[1] - x[1]);
+    if (a.length > 6) a.splice(5, a.length, a.slice(5).reduce((o, x) => [o[0], o[1] + x[1], o[2] + x[2]], ['другое', 0, 0]));
+    return a.map(([n, k, s]) => [n, k, frac(k) + ' · ' + rub(s) + ' ₽']);
+  }
+  const card = (cls, title, body, right) => '<section class="bs-st-c ' + cls + '"><header><h4>' + title + '</h4>' + (right || '') + '</header>' + body + '</section>';
+  const paintStat = withHist(function (box) {
+    const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
+    statYm = Math.min(Math.max(statYm || now, first), now);
+    const ym = statYm, s = monthStat(ym), pv = monthStat(ymAdd(ym, -1)), pmon = ymName(ymAdd(ym, -1)), cur = ym === now, y = Math.floor(ym / 100), m = ym % 100;
+    const MON = ymName(ym)[0].toUpperCase() + ymName(ym).slice(1), r = s.rate, per = r.sum / r.n;
+    const top = '<div class="bs-st-top"><div class="bs-st-nav"><button data-a="prev"' + (ym <= first ? ' disabled' : '') + ' title="Прошлый месяц">' + ico(ICO.back, 16) + '</button>' +
+      '<b>' + MON + ' ' + y + '</b><button data-a="next"' + (cur ? ' disabled' : '') + ' title="Следующий месяц">' + ico(ICO.back, 16) + '</button></div>' +
+      '<span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span></div>';
+    if (!s.es.length) { box.innerHTML = top + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
+    // зарплата
+    const sp = s.prem || 0, all = Math.max(1, sp + s.shifts);
+    const fc = cur && s.prem != null && s.days && s.days < r.n ? Math.round(s.prem / s.days * r.n + r.sum) : 0;
+    const sal = card('bs-st-sal', 'Зарплата за ' + ymName(ym),
+      '<div class="bs-st-big bs-pm"><b>' + rub(s.sal) + ' ₽</b>' + (cur ? '' : delta(s.sal, pv.sal, pmon)) + salTip(s) + '</div>' +
+      '<div class="bs-st-stack"><i class="p" style="width:' + (sp / all * 100).toFixed(1) + '%"></i><i class="s" style="width:' + (s.shifts / all * 100).toFixed(1) + '%"></i></div>' +
+      '<p class="bs-st-leg"><i class="p"></i>Премия' + (s.ps ? ' <small>×' + kq(s.c.k) + '</small>' : s.fromTab ? ' <small>таблица</small>' : '') + '<em>' + (s.prem == null ? 'не считается' : rub(s.prem) + ' ₽') + '</em></p>' +
+      '<p class="bs-st-leg"><i class="s"></i>Смены <small>' + s.days + ' × ' + rub(per) + '</small><em>' + rub(s.shifts) + ' ₽</em></p>' +
+      (fc ? '<p class="bs-st-fc">Если так же до конца месяца – около <b>' + rub(fc) + ' ₽</b></p>' : ''));
+    // план: шкала с порогами коэффициента
+    const g = s.c.goal, pl = g ? s.sold / g * 100 : 0, mx = Math.max(160, Math.ceil((pl + 10) / 10) * 10), at = v => (v / mx * 100).toFixed(1) + '%';
+    const left = Math.max(0, r.n - s.days), next = [[80, '×1'], [100, ''], [150, '×1,1']].find(([t]) => pl < t);
+    const need = next && Math.max(0, g * next[0] / 100 - s.sold);
+    const plan = card('bs-st-plan', 'План', !g ? '<p class="bs-st-hint">Цель на ' + ymName(ym) + ' не задана – нажми на кольцо во вкладке «Сегодня».</p>' :
+      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + '</em></em></div>' +
+      '<div class="bs-st-track" style="--z1:' + at(80) + ';--z2:' + at(150) + '"><i style="width:' + at(Math.min(pl, mx)) + '"></i>' +
+        [80, 100, 150].map(t => '<s style="left:' + at(t) + '"><small>' + t + '</small></s>').join('') + '</div>' +
+      '<p class="bs-st-hint">' + (!next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
+        plural(Math.ceil(need - 0.001), 'продажа', 'продажи', 'продаж') + (cur && left ? ' – по <b>' + d1(need / left) + '</b> за смену, осталось ' + left + ' ' + plural(left, 'смена', 'смены', 'смен') : '')) + '</p>');
+    // KPI: полукруг с зонами коэффициента
+    const k = s.c.kpi, L = Math.PI * 40, arc = 'M10 50 A40 40 0 0 1 90 50', zc = k == null ? '' : k < 70 ? 'down' : k < 97 ? '' : 'up';
+    const tick = v => { const a = Math.PI * (1 - v / 100); return '<line x1="' + (50 + 33 * Math.cos(a)).toFixed(1) + '" y1="' + (50 - 33 * Math.sin(a)).toFixed(1) + '" x2="' + (50 + 47 * Math.cos(a)).toFixed(1) + '" y2="' + (50 - 47 * Math.sin(a)).toFixed(1) + '"/>'; };
+    const kpi = card('bs-st-kpi', 'Качество', '<div class="bs-st-gauge ' + zc + '"><svg viewBox="0 0 100 56" width="150" height="84"><path d="' + arc + '" class="bs-st-gtr"/>' +
+      (k != null ? '<path d="' + arc + '" class="bs-st-gv" stroke-dasharray="' + (L * Math.min(100, k) / 100).toFixed(1) + ' ' + L.toFixed(1) + '"/>' : '') + '<g class="bs-st-gt">' + tick(70) + tick(97) + '</g></svg>' +
+      '<b>' + (k != null ? kq(k) + '%' : '–') + '</b><small>KPI из таблицы ОКК</small></div>' +
+      '<p class="bs-st-kz"><span' + (k != null && k < 70 ? ' class="on down"' : '') + '>&lt;70 ×0,9</span><span' + (k != null && k >= 70 && k < 97 ? ' class="on"' : '') + '>70–96 ×1</span><span' + (k != null && k >= 97 ? ' class="on up"' : '') + '>97+ ×1,1</span></p>' +
+      (k == null ? '<p class="bs-st-hint">' + (okkOn() ? 'В таблице ОКК нет KPI за ' + ymName(ym) : 'Подключи таблицу ОКК в «Таблицах»') + '</p>' : ''));
+    // график по дням
+    const dim = new Date(y, m, 0).getDate(), td = new Date(), pOn = premOn();
+    const days = Array.from({ length: dim }, (_, i) => {
+      const d = String(i + 1).padStart(2, '0') + '.' + String(m).padStart(2, '0') + '.' + y, es = s.es.filter(e => e.d === d);
+      const tot = k => es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0);
+      return { n: i + 1, wd: new Date(y, m - 1, i + 1).getDay(), mine: es.some(shiftMine), now: cur && td.getDate() === i + 1, sum: tot('sum'), bought: Math.round(tot('bought') * 100) / 100,
+        prem: pOn ? Math.round(premSum([].concat(...es.map(e => e.sales || []))).v) : 0 };
+    });
+    const mets = [['sum', 'Сумма'], ['bought', 'Продажи']].concat(pOn ? [['prem', 'Премия']] : []);
+    if (!mets.some(x => x[0] === statMet)) statMet = 'sum';
+    const fv = v => statMet === 'bought' ? nSales(v) : rub(v) + ' ₽';
+    const mxv = Math.max(1, ...days.map(x => x[statMet])), md = days.filter(x => x.mine), avg = md.length ? md.reduce((a, x) => a + x[statMet], 0) / md.length : 0;
+    const best = days.reduce((a, x) => x[statMet] > (a ? a[statMet] : 0) ? x : a, null);
+    const bars = card('bs-st-days', 'По дням', '<div class="bs-st-bars">' + days.map(x => {
+      const v = x[statMet], h = v / mxv;
+      return '<div class="' + [x.mine ? 'mine' : '', x.now ? 'now' : '', x.wd === 0 || x.wd === 6 ? 'we' : '', best === x ? 'best' : ''].join(' ') + '" style="--h:' + h.toFixed(3) + '">' +
+        '<p><i' + (v ? '' : ' class="z"') + '></i></p><span>' + x.n + '</span><b>' + x.n + ' ' + MONTHS_R[m - 1] + '<em>' + fv(v) + '</em>' + (x.mine ? '' : '<small>не твоя смена</small>') + '</b></div>';
+    }).join('') + (avg ? '<s style="--h:' + (avg / mxv).toFixed(3) + '"><small>в среднем ' + (statMet === 'bought' ? d1(avg) : fv(avg)) + '</small></s>' : '') + '</div>' +
+      '<p class="bs-st-lg"><span><i class="mine"></i>твоя смена</span><span><i></i>не твоя</span>' + (best ? '<span>лучший день – <b>' + best.n + ' ' + MONTHS_R[m - 1] + '</b>, ' + fv(best[statMet]) + '</span>' : '') + '</p>',
+      '<span class="bs-seg bs-st-met">' + mets.map(([k, t]) => '<em data-m="' + k + '"' + (statMet === k ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>');
+    // средние за смену
+    const sd = x => Math.max(1, x.days), tile = (t, v, a, b) => '<div><span>' + t + '</span><b>' + v + '</b>' + delta(a, b, pmon) + '</div>';
+    const avgs = '<div class="bs-st-tiles">' +
+      tile('Средний чек', s.sold ? rub(s.sum / s.sold) + ' ₽' : '–', s.sold ? s.sum / s.sold : null, pv.sold ? pv.sum / pv.sold : 0) +
+      tile('Продаж за смену', d1(s.sold / sd(s)), s.sold / sd(s), pv.days ? pv.sold / pv.days : 0) +
+      tile('Сумма за смену', rub(s.sum / sd(s)) + ' ₽', s.sum / sd(s), pv.days ? pv.sum / pv.days : 0) +
+      (s.prem != null ? tile('Премия за смену', rub(s.prem / sd(s)) + ' ₽', s.prem / sd(s), pv.days && pv.prem ? pv.prem / pv.days : 0) :
+        tile('Ссылок за смену', d1(s.links / sd(s)), s.links / sd(s), pv.days ? pv.links / pv.days : 0)) + '</div>';
+    // из чего продажи
+    const gp = groupSales(s.sales, x => (PAYS.find(p => p[0] === salePay(x)) || [0, salePay(x)])[1]), gk = groupSales(s.sales, saleKind);
+    const nsold = gp.reduce((a, x) => a + x[1], 0);
+    const pies = gp.length ? '<div class="bs-st-row2">' + card('', 'Типы оплат', donut(gp, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) +
+      card('', 'Что продаётся', donut(gk, frac(nsold), nSales(nsold).replace(/^\S+ /, ''))) + '</div>' : '';
+    // воронка: лиды → ссылки → купили. Ширина – просто форма воронки, смысл в цифрах и процентах перехода
+    const fl = [['l', s.leads, plural(Math.round(s.leads), 'лид', 'лида', 'лидов')], ['k', s.links, plural(Math.round(s.links), 'ссылка', 'ссылки', 'ссылок')],
+      ['s', s.sold, nSales(s.sold).replace(/^\S+ /, '')]].filter(x => x[0] !== 'l' || x[1]);
+    const fw = fl.length > 2 ? [100, 76, 52] : [100, 66], fx = { k: ['лидов', 'получили ссылку'], s: ['ссылок', 'оплатили'] };
+    const funnel = card('bs-st-fun', 'Воронка', fl.map(([k, v, w], i) => (i ? '<div class="bs-st-fx"><span>↓</span><b>' + (fl[i - 1][1] ? pct(v / fl[i - 1][1] * 100) : '–') + '</b> ' +
+      (fl[i - 1][0] === 'l' ? fx.k : fx.s).join(' ') + '</div>' : '') + '<div class="bs-st-fs ' + k + '" style="width:' + fw[i] + '%"><b>' + frac(v) + '</b> ' + w + '</div>').join('') +
+      (fl[0][0] === 'l' && s.leads ? '<p class="bs-st-hint">Из 100 лидов покупают примерно <b>' + Math.round(s.sold / s.leads * 100) + '</b></p>' : ''));
+    // по месяцам – зарплата столбиками: премия + смены; клик – открыть месяц
+    const ms = Array.from({ length: 6 }, (_, i) => ymAdd(ym, i - 5)).map(x => x === ym ? s : monthStat(x)), mm = Math.max(1, ...ms.map(x => x.sal));
+    const months = card('bs-st-mon', 'Зарплата по месяцам', '<div class="bs-st-mcs">' + ms.map(x => '<div data-ym="' + x.ym + '" class="' + (x.ym === ym ? 'on' : '') + (x.ym > now ? ' fut' : '') + '" title="' +
+      (x.sal ? ymName(x.ym) + ': премия ' + (x.prem == null ? '–' : rub(x.prem) + ' ₽') + ', смены ' + x.days + ' – ' + rub(x.shifts) + ' ₽' : 'Нет смен') + '">' +
+      '<b>' + (x.sal ? rub(x.sal / 1000) + ' тыс.' : '') + '</b>' +
+      '<p style="height:' + (x.sal / mm * 100).toFixed(1) + '%"><i class="p" style="flex:' + (x.prem || 0) + '"></i><i class="s" style="flex:' + x.shifts + '"></i></p><span>' + ymName(x.ym).slice(0, 3) + '</span></div>').join('') + '</div>' +
+      '<p class="bs-st-lg"><span><i class="p"></i>премия</span><span><i class="s"></i>смены</span></p>');
+    const rc = recStat(true), nw = d => d && ymOf(d) === ym ? '<em>' + (cur ? 'в этом месяце' : 'в ' + (ymName(ym) === 'май' ? 'мае' : ymName(ym).replace(/ь$/, 'е').replace(/т$/, 'те')) ) + '</em>' : '';
+    const ri = (cls, i, v, t, sub, badge) => '<div class="bs-st-rc ' + cls + '"><i>' + ico(i, 16) + '</i>' + (badge || '') + '<b>' + v + '</b><span>' + t + '</span><small>' + sub + '</small></div>';
+    const recs = card('bs-st-recs', 'Рекорды', '<div class="bs-st-rcs">' +
+      ri('fl', ICO.flame, rc.run + ' ' + plural(rc.run, 'смена', 'смены', 'смен'), 'подряд с продажей', rc.top > rc.run ? 'рекорд – ' + rc.top : rc.run ? 'это рекорд' : '–') +
+      (rc.sum ? ri('tr', ICO.trophy, rub(rc.sum.sum) + ' ₽', 'лучший день', dayName(rc.sum.d), nw(rc.sum.d)) : '') +
+      (rc.sold ? ri('st', ICO.star, nSales(rc.sold.sold), 'за один день', dayName(rc.sold.d), nw(rc.sold.d)) : '') +
+      (rc.big ? ri('ch', ICO.receipt, rub(rc.big.v) + ' ₽', 'самый крупный чек', dayName(rc.big.d), nw(rc.big.d)) : '') +
+      (rc.mon && rc.mon.sal ? ri('mo', ICO.cal, rub(rc.mon.sal / 1000) + ' тыс. ₽', 'лучшая зарплата', ymName(rc.mon.ym) + ' ' + Math.floor(rc.mon.ym / 100), rc.mon.ym === ym ? '<em>этот месяц</em>' : '') : '') +
+      '</div>', '<small class="bs-st-sub">за всё время</small>');
+    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
+    statClick(box);
+  });
+  function statClick(box) {
+    box.onclick = ev => {
+      const t = ev.target, b = t.closest('[data-a],[data-m],[data-ym]');
+      if (!b || b.disabled) return;
+      if (b.dataset.m) { statMet = b.dataset.m; return paintStat(box); }
+      if (b.dataset.ym) { statYm = +b.dataset.ym; return paintStat(box); }
+      const a = b.dataset.a;
+      if (a === 'prev' || a === 'next') { statYm = ymAdd(statYm, a === 'prev' ? -1 : 1); return paintStat(box); }
+      if (a === 'rate') {
+        const sp = box.querySelector('.bs-st-rate'), r = payRate();
+        sp.innerHTML = '<input type="number" min="1" value="' + r.sum + '"> ₽ за <input type="number" min="1" max="31" value="' + r.n + '"> смен <button data-a="rateok">ок</button>';
+        const [a1, a2] = sp.querySelectorAll('input');
+        a1.focus(); a1.select();
+        sp.onkeydown = e => { if (e.key === 'Enter') sp.querySelector('button').click(); if (e.key === 'Escape') { e.stopPropagation(); paintStat(box); } };
+        return;
+      }
+      if (a === 'rateok') {
+        const [a1, a2] = box.querySelectorAll('.bs-st-rate input'), v = Math.round(+a1.value), n = Math.round(+a2.value);
+        if (v > 0 && n > 0) jset(PAYR_KEY, { sum: v, n });
+        return paintStat(box);
+      }
+    };
+  }
+  const paintShift = withHist(function (box) {
+    const list = salesGet(), r = repSaved(), now = new Date(), mine = curMine();   // null – не отмечена
     box.innerHTML =
-      statsHtml([['Сегодня', ddmm(now).slice(0, 5) + ', ' + WD[now.getDay()]], ['Продано', r2s(r.bought)], ['Сумма', rub(+r.sum || 0) + ' ₽'], ['Ссылки', +r.links || 0]]) +
+      heroHtml(r) +
       (list.length ? '<div class="bs-sales-list">' + list.map(x =>
         '<div class="bs-sales-row" data-id="' + x.id + '"><b>' + esc(x.who || x.fio || 'чат ' + x.dlg) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b><span>' + esc(x.name) + '</span>' +
-        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + (saleDone(x) ? '' : '<u>не заполнено</u>') +
+        '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? '0' : r2s(x.share)) + '</em>' + premTag(x) + (saleDone(x) ? curSh(x) : '<u>не заполнено</u>') +
         '<i class="bs-sales-del" title="Удалить продажу">×</i></div>').join('') + '</div>'
-        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми «+ Продажа» или вставь отчёты из Telegram.</div>') +
-      '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">👤 ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button><span></span>' +
-      '<button data-a="imp" title="Вставить тексты продаж из Telegram – свои доли попадут в отчёт">Импорт из ТГ</button>' +
-      '<button data-a="shift" class="bs-main" title="Смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
+        : '<div class="bs-empty">Продаж пока нет.<br>Открой чат клиента и нажми на круг «продано» справа<br>или перенеси продажи из Telegram – кнопка со значком самолётика внизу.</div>') +
+      '<div class="bs-foot"><button data-a="me" class="bs-ghost" title="Кто ты – на тебя считаются продажи и отчёт">' + ico(ICO.user) + ' ' + (meSet() ? esc(meName()) : 'Кто я?') + '</button>' +
+      '<button data-a="mine" class="bs-ghost bs-mine" data-st="' + (mine == null ? 'wait' : mine ? 'on' : 'off') + '" title="Твоя сегодня смена или нет – отметка для «Истории» (твоя продажа может закрыться и в чужую смену). ' +
+        (mine == null ? 'Пока не отмечена: «Закрыть смену» отметит её твоей, а если день закроется сам – не твоей. ' : 'Сохранится, даже если день закроется сам. ') + 'Нажми, чтобы ' + (mine == null ? 'отметить твоей' : 'поменять') + '">' +
+        '<i class="bs-sw"></i>Моя смена</button><span></span>' +
+      (curShN(list) > 1 ? '<button data-a="shall" class="bs-ghost bs-sh-all" title="Отправить в Google Таблицу все заполненные продажи смены, которых там ещё нет">' + ico(ICO.grid) + ' Все в таблицу (' + curShN(list) + ')</button>' : '') +
+      '<button data-a="imp" class="bs-icon" title="Импорт из Telegram – вставить тексты продаж, свои доли попадут в отчёт">' + ico(ICON.send, 16) + '</button>' +
+      '<button data-a="shift" class="bs-main" title="Посчитается и сохранится отчёт за день, смена уйдёт в «Историю», а «Продано», сумма, ссылки и список обнулятся">Закрыть смену</button></div>';
     box.onclick = ev => {
-      const t = ev.target, a = t.dataset.a;
+      const t = ev.target, a = (t.closest('[data-a]') || t).dataset.a;
       if (a === 'me') return askMe();
+      if (a === 'goal') {
+        const g = box.querySelector('.bs-hero-g');
+        if (g.querySelector('input')) return;
+        g.innerHTML = 'цель на месяц <input type="number" min="1" max="999" value="' + (goalGet() || '') + '" placeholder="63"> продаж <button data-a="goalok">ок</button>';
+        const inp = g.querySelector('input');
+        inp.focus(); inp.select();
+        inp.onkeydown = e => { if (e.key === 'Enter') g.querySelector('button').click(); if (e.key === 'Escape') { e.stopPropagation(); paintShift(box); } };
+        return;
+      }
+      if (a === 'goalok') {
+        const n = Math.round(+box.querySelector('.bs-hero-g input').value);
+        if (n > 0) goalSet(n);
+        return paintShift(box);
+      }
+      if (a === 'mine') { jset(MINE_KEY, { d: ddmm(new Date()), v: mine == null ? true : !mine }); return paintShift(box); }
       if (a === 'imp') return openImport();
+      if (a === 'stat') return openSales('stat');
       if (a === 'shift') {
-        if (!confirm('Закрыть смену? Она сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.')) return;
-        newShift(); openSales('hist'); return tarHint('✓ Смена закрыта и сохранена в истории', true);
+        if (!confirm('Закрыть смену? Посчитается отчёт за день, смена с отчётом сохранится в «Истории», а «Продано», сумма, «Ссылки» и список продаж обнулятся.' +
+          (teamOn() ? '\n\nЦифры дня (лиды, чаты, ссылки, продано, сумма) запишутся в таблицу отдела – только в пустые клетки.' : ''))) return;
+        return closeShift(t);
       }
       const row = t.closest('.bs-sales-row');
+      if (a === 'sh1' || a === 'shall') {
+        const b = t.closest('button');
+        b.disabled = true; b.textContent = 'Отправляю…';
+        return sheetSendCur(a === 'sh1' ? row.dataset.id : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintShift(box); })
+          .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintShift(box); });
+      }
+      if (t.closest('.bs-sales-sh')) return;
       if (row && t.matches('.bs-sales-del')) {
         const x = salesGet().find(s => s.id === row.dataset.id);
         if (!x || !confirm('Удалить продажу «' + (x.who || x.name) + '»? Доля и сумма уйдут из отчёта смены.')) return;
@@ -1904,7 +2435,76 @@
       }
       if (row) openSale(row.dataset.id, true);
     };
-  }
+  });
+  // ---------- «Продажи»: все продажи из истории и текущей смены, поиск по имени, почте, тарифу, ссылке на чат ----------
+  let findQ = '', findF = 'all';   // помним поиск и фильтр, пока открыт сайт
+  const findNorm = s => String(s == null ? '' : s).toLowerCase().replace(/ё/g, 'е');
+  // подсветка найденных слов (ищем уже в экранированном тексте)
+  const findHl = (s, ws) => {
+    const h = esc(s || '');
+    return ws.length ? h.replace(new RegExp('(' + ws.map(w => esc(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')', 'gi'), '<mark>$1</mark>') : h;
+  };
+  const paintFind = withHist(function (box) {
+    const yr = String(new Date().getFullYear()), all = [];
+    histAll().forEach(e => (e.sales || []).map((x, si) => ({ e, x, si })).reverse().forEach(o => {
+      const x = o.x;
+      o.hay = findNorm([x.who, x.fio, x.email, x.name, x.pay, (x.mops || []).join(' '), x.dlg, o.e.d, x.price, saleTotal(x)].join(' '));
+      all.push(o);
+    }));
+    if (findF === 'nosh' && !sheetUrl()) findF = 'all';
+    box.innerHTML = '<div class="bs-find-top"><div class="bs-find-q">' + ico('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>') +
+      '<input type="search" placeholder="Имя, почта, тариф, менеджер, дата или ссылка на чат" value="' + esc(findQ) + '"></div>' +
+      '<span class="bs-seg">' + [['all', 'Все'], ['mine', 'Мои']].concat(sheetUrl() ? [['nosh', 'Не в таблице']] : []).map(([v, t]) => '<em data-f="' + v + '">' + t + '</em>').join('') + '</span></div>' +
+      '<div class="bs-find-body"></div>';
+    const body = box.querySelector('.bs-find-body'), q = box.querySelector('input');
+    let shown = [];
+    const paintBody = () => {
+      box.querySelectorAll('[data-f]').forEach(em => em.classList.toggle('on', em.dataset.f === findF));
+      // вставили ссылку на чат – ищем по номеру чата
+      const raw = findQ.trim(), id = (/dialogId=(\d+)/i.exec(raw) || [])[1], ws = id ? [] : findNorm(raw).split(/\s+/).filter(Boolean);
+      const hit = all.filter(o => (findF !== 'mine' || o.x.cnt !== false) && (findF !== 'nosh' || toSheet(o.x) && !o.x.sh) &&
+        (id ? String(o.x.dlg) === id : ws.every(w => o.hay.includes(w))));
+      shown = hit.slice(0, 150);
+      const sum = hit.reduce((a, o) => a + saleTotal(o.x), 0), mine = hit.reduce((a, o) => a + saleShare(o.x), 0);
+      const row = (o, n) => {
+        const x = o.x, d = o.e.d;
+        return '<div class="bs-sales-row bs-find-row' + (x.cnt === false ? ' bs-find-other' : '') + '" data-n="' + n + '" title="Открыть и поправить">' +
+          '<b>' + findHl(x.who || x.fio || 'чат ' + x.dlg, ws) + (x.mops || []).map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+          '<span>' + (x.fio && x.fio !== x.who ? findHl(x.fio, ws) + ' · ' : '') + (x.email ? '<a class="bs-find-mail" data-a="mail" title="Скопировать почту">' + findHl(x.email, ws) + '</a> · ' : '') + findHl(x.name, ws) + '</span>' +
+          '<em>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</em>' +
+          '<small class="bs-find-d">' + (o.e.now ? 'сегодня' : WD[dmyDate(d).getDay()] + ', ' + d.slice(0, 5) + (d.slice(6) !== yr ? '.' + d.slice(8) : '')) + '</small>' +
+          (!sheetUrl() ? '' : !toSheet(x) ? '<small class="bs-sales-sh"></small>' : x.sh || saleDone(x) ? curSh(x) : '<u>не заполнено</u>') +
+          (x.dlg ? '<i class="bs-sales-del bs-find-chat" data-a="chat" title="Открыть чат">' + ico(ICO.chat) + '</i>' : '<i></i>') + '</div>';
+      };
+      body.innerHTML = !all.length ? '<div class="bs-empty">Продаж пока нет – они появятся здесь, как только отметишь первую.</div>' :
+        !hit.length ? '<div class="bs-empty">Ничего не нашлось' + (findF !== 'all' ? ' – попробуй «Все»' : '') + '.</div>' :
+        '<div class="bs-find-sum">' + (raw || findF !== 'all' ? 'Нашлось ' : 'Всего ') + plural(hit.length, hit.length + ' продажа', hit.length + ' продажи', hit.length + ' продаж') + ' на ' + rub(sum) + ' ₽' +
+          (findF !== 'mine' && Math.abs(mine - hit.length) > 0.001 ? ' · твоих ' + frac(mine) : '') + '</div>' +
+        '<div class="bs-sales-list">' + shown.map(row).join('') + '</div>' +
+        (hit.length > shown.length ? '<div class="bs-empty">Показаны первые ' + shown.length + ' из ' + hit.length + ' – уточни поиск</div>' : '');
+    };
+    paintBody();
+    q.oninput = () => { findQ = q.value; paintBody(); };
+    setTimeout(() => { q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
+    box.onclick = ev => {
+      const t = ev.target, a = (t.closest('[data-a]') || t).dataset.a, f = t.closest('[data-f]');
+      if (f) { findF = f.dataset.f; return paintBody(); }
+      const r = t.closest('.bs-find-row'), o = r && shown[+r.dataset.n];
+      if (!o) return;
+      const x = o.x, e = o.e;
+      if (a === 'mail') return navigator.clipboard.writeText(x.email).then(() => tarHint('✓ Почта скопирована', true));
+      if (a === 'chat') { closeSale(); return openChat(x.dlg); }
+      if (a === 'sh1') {
+        const b = t.closest('button');
+        b.disabled = true; b.textContent = 'Отправляю…';
+        return (e.now ? sheetSendCur(x.id) : sheetSend(e.hi, e.end, o.si)).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); paintFind(box); })
+          .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintFind(box); });
+      }
+      if (t.closest('.bs-sales-sh')) return;
+      if (e.now) openSale(x.id, true); else openHistSale(e.hi, e.end, o.si);
+      if (document.querySelector('#bsSaleWrap .bs-sale-form')) saleBack = 'find';
+    };
+  });
   // перенос смены на другую дату; если в истории уже есть смена этой даты – сливаем в неё
   function histMove(h, i, d) {
     const e = h[i], j = h.findIndex((x, k) => k !== i && x.d === d);
@@ -1912,10 +2512,17 @@
     const t = h[j];
     Object.keys(Object.assign({}, t.rep, e.rep)).forEach(k => { t.rep[k] = Math.round(((+t.rep[k] || 0) + (+e.rep[k] || 0)) * 100) / 100; });
     t.sales = (t.sales || []).concat(e.sales || []);
+    if (shiftMine(e)) t.mine = true;   // хоть одна из двух – моя
     h.splice(i, 1);
   }
   // дата из поля ввода – только целиком набранная (пока год печатается, там 0002, 0020…)
   const dateOk = s => { const d = fromIso(s); return d && d.getFullYear() >= 2000 && d <= new Date() ? d : null; };
+  // цифры отчёта смены в раскрытой строке истории; чего не считали (старые смены) – прочерк
+  function histRepHtml(r) {
+    const v = k => r[k] == null || r[k] === '' ? '–' : k === 'sum' ? rub(+r[k] || 0) + ' ₽' : k === 'bought' ? frac(r[k]) : +r[k] || 0;
+    return '<div class="bs-hist-rep">' + [['Лиды', v('leads') + (r.blocks ? ' <small>(' + r.blocks + ' блок.)</small>' : '')], ['Чаты', v('chats')], ['Ссылки', v('links')],
+      ['Продано', v('bought')], ['Сумма', v('sum')], ['Напоминания', v('rem')]].map(([k, x]) => '<span>' + k + '<b>' + x + '</b></span>').join('') + '</div>';
+  }
   function paintHist(box) {
     const today = isoOf(new Date());
     // шапка с периодом рисуется один раз – иначе поле даты теряет ввод посреди набора года
@@ -1924,7 +2531,9 @@
         .map(([v, t]) => '<em data-p="' + v + '">' + t + '</em>').join('') + '</span>' +
       '<span class="bs-range"><input type="date" data-r="from" max="' + today + '"><span>–</span><input type="date" data-r="to" max="' + today + '"></span></div>' +
       '<div class="bs-hist-body"></div>' +
-      '<div class="bs-foot"><button data-a="bak" class="bs-ghost" title="Сохранить все данные помощника в файл или загрузить из файла">💾 Резервная копия</button><span></span>' +
+      '<div class="bs-foot"><button data-a="bak" class="bs-ghost" title="Сохранить все данные помощника в файл или загрузить из файла">' + ico(ICO.box) + 'Резервная копия</button>' +
+      '<button data-a="sheetset" class="bs-ghost" title="Своя Google Таблица для зарплаты и таблица отдела' + (sheetUrl() ? ' – подключено: ' + (teamOn() ? 'обе' : 'своя') : '') + '">' + ico(ICO.grid) + 'Таблицы' +
+        (sheetUrl() ? '<i class="bs-dot" data-st="ok"></i>' : '') + '</button><span></span>' +
       '<button data-a="add" class="bs-main" title="Вставить отчёты из Telegram за прошлый день – они попадут в историю">+ Продажи за дату</button></div>';
     const body = box.querySelector('.bs-hist-body'), fromInp = box.querySelector('[data-r=from]'), toInp = box.querySelector('[data-r=to]');
     const paintPer = () => {
@@ -1936,41 +2545,263 @@
     };
     const paintBody = () => {
       const [from, to] = histRange();
-      const list = histAll().filter(e => { const d = dmyDate(e.d); return (!from || d >= from) && (!to || d <= to); });
-      const tot = k => list.reduce((a, e) => a + (+e.rep[k] || 0), 0);
+      const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+      const shifts = histAll().filter(e => inR(e.d));
+      // лиды, чаты, ссылки – только за мои смены (в чужую смену CRM могла что-то насчитать); продажи и сумма – за все
+      const WORK = ['leads', 'blocks', 'chats', 'links'];
+      const tot = k => shifts.reduce((a, e) => a + (WORK.includes(k) && !shiftMine(e) ? 0 : +e.rep[k] || 0), 0);
       const bought = Math.round(tot('bought') * 100) / 100, sum = tot('sum');
-      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k));
+      const open = new Set([...body.querySelectorAll('.bs-hist-row.open')].map(r => r.dataset.k)), sheetOn = !!sheetUrl();
       if (histKeep) { open.add(histKeep); histKeep = null; }
+      // сверка со строками таблицы: что есть только там – к своему дню (дня нет в истории – отдельной строкой)
+      const tab = sheetOn && sheetTab && sheetTab.rows ? sheetTab : null, tm = tab ? tabMatch() : null;
+      const ms = new Set(tab ? tab.months.filter(m => m.sheet).map(m => m.y * 100 + m.m) : []);
+      const onlyBy = {};
+      if (tab) tm.only.forEach(r => { if (r.d && inR(r.d)) (onlyBy[r.d] = onlyBy[r.d] || []).push(r); });
+      const list = shifts.slice(), seen = new Set(shifts.map(e => e.d));
+      Object.keys(onlyBy).forEach(d => { if (!seen.has(d)) list.push({ d, tab: 1, end: dmyDate(d).getTime() + 86399000, rep: {}, sales: [] }); });
+      list.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
+      // у дня: чего нет в таблице, что там записано по-другому, что есть только там; премия за день – у первой смены даты
+      // imp – сколько оплат «только в таблице» можно забрать (в идущую смену не добавляем)
+      const cnt = { miss: 0, bad: 0, only: 0, imp: 0 }, given = new Set(), givenT = new Set();
+      // таблица отдела: по дням периода – что дописать или перезаписать, и дни с цифрами, которых нет в истории
+      const team = teamOn() && teamTab && teamTab.days ? teamTab.days : null, hh = histGet(), tcnt = { put: [], over: [], fresh: [] };
+      if (team) Object.keys(team).filter(inR).forEach(d => {
+        const c = teamCells(d, team[d], hh);
+        tcnt.put.push(...c.put); tcnt.over.push(...c.over);
+        if (typeof team[d].leads === 'number' && d !== ddmm(new Date()) && !hh.some(e => e.d === d)) tcnt.fresh.push(d);
+      });
+      const info = list.map(e => {
+        const first = !given.has(e.d), firstT = !e.now && !e.tab && !givenT.has(e.d);
+        given.add(e.d);
+        if (firstT) givenT.add(e.d);
+        const on = tab && ms.has(ymOf(e.d)), only = first && onlyBy[e.d] || [];
+        const xs = on && !e.now ? e.sales.map((x, si) => ({ x, k: e.hi + ':' + si })).filter(o => toSheet(o.x)) : [];
+        const o = { only, on, team: firstT && team && team[e.d] ? teamCells(e.d, team[e.d], hh) : null, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
+          miss: xs.filter(o => !tm.pair.has(o.k)).length, bad: xs.filter(o => tm.pair.has(o.k) && shBad(o.x)).length, any: xs.length + only.length };
+        cnt.miss += o.miss; cnt.bad += o.bad; cnt.only += only.length;
+        if (!e.now) cnt.imp += only.length;
+        return o;
+      });
+      const prem = tab ? Object.keys(tab.days).filter(inR).reduce((a, d) => a + tab.days[d], 0) : null;
+      // премия, посчитанная помощником: за период и по дням (за день сверяем с таблицей – там она у первой продажи дня)
+      const pOn = premOn(), ps = premSum([].concat(...shifts.map(e => e.sales || []))), pDay = {};
+      shifts.forEach(e => { const p = premSum(e.sales), d = pDay[e.d] = pDay[e.d] || { v: 0, miss: 0 }; d.v = Math.round((d.v + p.v) * 100) / 100; d.miss += p.miss; });
+      const premCell = (e, f) => {
+        if (!pOn) return '<span class="bs-hist-prem" title="Премия за день – из таблицы (столбец N в строке с датой)">' + (f.prem ? '+' + rub(f.prem) + ' ₽' : '') + '</span>';
+        const p = e.tab ? null : premSum(e.sales), d = pDay[e.d] || { v: 0, miss: 0 }, t = f.prem, bad = t != null && Math.abs(d.v - t) >= 0.5;
+        const tip = (p ? 'Премия за смену – посчитана помощником: ' + rubK(p.v) + ' ₽' + (p.miss ? '. Без премии ' + p.miss + ' – раскрой день и открой их' : '') : 'Смены нет в помощнике') +
+          (t != null ? '\nВ таблице за день: ' + rubK(t) + ' ₽' + (p ? bad ? ' – не сходится (у помощника за день ' + rubK(d.v) + ' ₽)' : ' – сходится' : '') : '');
+        // список продаж не вёлся (старые смены) – премию за день показываем из таблицы
+        if (!p || !e.sales.length) return '<span class="bs-hist-prem" title="' + (p ? 'Список продаж за смену не вёлся – премия за день из таблицы' : tip) + '">' + (t ? '+' + rubK(t) + ' ₽' : '') + '</span>';
+        const txt = p.v || p.miss ? '+' + rubK(p.v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') : '';
+        return '<span class="bs-hist-prem' + (bad || p.miss ? ' bs-warn' : '') + '" title="' + tip + '">' + txt + '</span>';
+      };
       body.innerHTML =
-        statsHtml([['Смен', list.length], ['Продано', r2s(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–'], ['Ссылки', tot('links')]]) +
-        (list.length ? '<div class="bs-hist-list">' + list.map(e => {
-          const k = e.now ? 'now' : e.hi + ':' + e.end;
-          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span></b>' +
-            '<em><span>' + r2s(e.rep.bought) + ' прод.</span><span>' + rub(+e.rep.sum || 0) + ' ₽</span><span>' + (+e.rep.links || 0) + ' ссыл.</span></em>' +
-            (e.now ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
-            '<div class="bs-hist-sales">' + (e.sales.length ? e.sales.map((x, si) =>
-              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : r2s(x.share)) + '</span>' +
-              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : '<div><span>Список продаж не вёлся</span></div>') +
-            (e.now ? '' : '<p class="bs-hist-move"><span>Дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move">Перенести</button></p>') +
+        statsHtml([['Смен', shifts.length + (shifts.some(e => !shiftMine(e)) ? '<small> · моих ' + shifts.filter(shiftMine).length + '</small>' : '')], ['Лиды · чаты', tot('leads') + '<small> · ' + tot('chats') + '</small>'], ['Продано', bought >= 10 ? rub(bought) : frac(bought)], ['Сумма', rub(sum) + ' ₽'], ['Ср. чек', bought ? rub(Math.round(sum / bought)) + ' ₽' : '–']]
+          .concat(pOn ? [['Премия', '<i title="Посчитано помощником по продажам' + (ps.miss ? ', без премии ' + ps.miss + ' – их надо вписать вручную' : '') + (tab ? '\nВ таблице за эти дни: ' + rubK(prem) + ' ₽' : '') + '">' + rubK(ps.v) + ' ₽' + (ps.miss ? '<small class="bs-prem-q"> ?' + ps.miss + '</small>' : '') + '</i>']] :
+            tab ? [['Премия', rub(prem) + ' ₽']] : [])) +
+        syncCard(from, to, cnt, tcnt) +
+        (list.length ? '<div class="bs-hist-list' + (tab || pOn ? ' bs-prem' : '') + '">' + list.map((e, li) => {
+          const k = e.now ? 'now' : e.tab ? 'tab:' + e.d : e.hi + ':' + e.end, f = info[li];
+          const zero = !+e.rep.bought && !+e.rep.sum && !f.only.length && !f.prem;
+          const issues = f.miss + f.bad + f.only.length;
+          const mark = !f.on || !f.any ? '' : issues ? '<i class="bs-hist-tabm bs-warn" title="С таблицей не сходится: ' + esc([f.miss && 'нет в таблице ' + f.miss, f.bad && 'в таблице записано по-другому ' + f.bad, f.only.length && 'только в таблице ' + f.only.length].filter(Boolean).join(', ')) + ' – раскрой день">табл. ' + issues + '</i>' :
+            '<i class="bs-hist-tabm" title="Всё, что за этот день в помощнике, есть в таблице, и наоборот">табл.</i>';
+          const tw = f.team ? f.team.put.length + f.team.over.length : 0;
+          const tmark = tw ? '<i class="bs-hist-tabm bs-warn" title="В таблице отдела не так, как в помощнике – раскрой день">отдел</i>' : '';
+          const chip = e.tab ? '<i class="bs-hist-mine bs-warn">нет смены в истории</i>' :
+            '<i class="bs-hist-mine' + (e.now && e.mine == null ? '' : shiftMine(e) ? ' on' : '') + '">' + (e.now && e.mine == null ? 'не отмечена' : shiftMine(e) ? 'моя' : 'не моя') + '</i>';
+          return '<div class="bs-hist-row' + (open.has(k) ? ' open' : '') + (zero ? ' bs-hist-zero' : '') + '" data-k="' + k + '"><b>' + e.d.slice(0, 5) + '<span>' + WD[dmyDate(e.d).getDay()] + (e.now ? ' · сейчас' : '') + '</span>' + chip + mark + tmark + '</b>' +
+            '<em><span>' + (zero || e.tab ? '–' : nSales(+e.rep.bought || 0)) + '</span><span>' + (zero || e.tab ? '–' : rub(+e.rep.sum || 0) + ' ₽') + '</span>' +
+            (tab || pOn ? premCell(e, f) : '') +
+            '<span>' + (+e.rep.links ? +e.rep.links + ' ' + plural(+e.rep.links, 'ссылка', 'ссылки', 'ссылок') : '') + '</span></em>' +
+            (e.now || e.tab ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
+            '<div class="bs-hist-sales">' + (e.tab ? '' : histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
+              '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + premTag(x) + '</span>' +
+              (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице записано по-другому: ' + esc(shDiff(x).join('; ')) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
+                x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
+                x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
+                '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
+              (e.now ? '' : '<i class="bs-hist-sdel" data-si="' + si + '" title="Удалить продажу из этой смены">×</i>') + '</div>').join('') : f.only.length ? '' : '<div><span>Список продаж не вёлся</span></div>')) +
+            onlyHtml(e, f.only) +
+            (e.tab ? '' : histActHtml(e, f, today)) +
             '</div></div>';
         }).join('') + '</div>' : '<div class="bs-empty">За этот период смен нет.<br>Закрытые смены попадают сюда сами, а прошлые дни можно добавить кнопкой «+ Продажи за дату».</div>');
     };
     const repaint = () => { paintPer(); paintBody(); };
+    histPaint = () => { if (body.isConnected) paintBody(); };
+    // сама сверяет с таблицей смены за период: строки оплат листов этих месяцев против продаж в истории
+    // (строки могли удалить или дописать руками). Старый скрипт строк не отдаёт – тогда как раньше, только текущий месяц
+    // lazy – при открытии истории и смене периода: тот же период сверяли меньше минуты назад – не дёргаем таблицу снова
+    const autoCheck = lazy => {
+      if (!sheetUrl()) return;
+      const [from, to] = histRange(), now = new Date();
+      const key = [from && isoOf(from), to && isoOf(to), sheetUrl(), teamOn() && JSON.stringify(teamCfg())].join('|');
+      if (lazy && sheetLast && sheetLast.key === key && Date.now() - sheetLast.t < 60000) return;
+      sheetLast = { key, t: Date.now() };
+      if (!lazy) { okkLast = 0; okkSync(); }
+      const tok = ++sheetTok;
+      // таблица отдела – после своей таблицы (скрипт один, запросы всё равно идут по очереди)
+      teamBusy = teamOn();
+      const team = () => !teamBusy ? null : teamFetch(from, to).catch(err => { teamTab = { err: err.message }; })
+        .then(() => { if (tok !== sheetTok) return; teamBusy = false; histPaint(); });
+      const keys = new Set(histGet().map((e, hi) => ({ e, k: hi + ':' + e.end })).filter(({ e }) => {
+        const d = dmyDate(e.d);
+        return (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+      }).map(o => o.k));
+      sheetBusy = keys;
+      paintBody();
+      const old = () => {
+        const list = histGet().map((e, hi) => ({ hi, end: e.end, e })).filter(({ e }) => {
+          const d = dmyDate(e.d);
+          return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() &&
+            (!from || d >= from) && (!to || d <= to) && e.sales.some(toSheet);
+        }).map(({ hi, end }) => ({ hi, end }));
+        return list.length ? sheetCheck(list).then(st => { if (st.err.length) sheetAutoErr = { keys, msg: st.err.join('; ') }; }) : null;
+      };
+      sheetAutoErr = null;
+      tabFetch(from, to).then(ok => { if (!ok) { sheetTab = { old: 1 }; return old(); } })
+        .catch(err => { sheetTab = { err: err.message }; sheetAutoErr = { keys, msg: err.message }; })
+        .then(() => { if (tok !== sheetTok) return; sheetBusy = null; histPaint(); return team(); });
+    };
     repaint();
+    autoCheck(1);
     const find = row => { const [hi, end] = row.dataset.k.split(':'), h = histGet(); return h[+hi] && String(h[+hi].end) === end ? { h, i: +hi } : null; };
     box.onclick = ev => {
       const t = ev.target, a = t.dataset.a;
       if (a === 'bak') return openBackup();
+      if (a === 'sheetset') return openSheet();
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
-      if (t.dataset.p) { histPer.p = t.dataset.p; return repaint(); }
+      if (t.dataset.p) { histPer.p = t.dataset.p; repaint(); return autoCheck(1); }
+      if (a === 'tabsync') return autoCheck();
+      // за весь период: оплаты «только в таблице» – в историю по своим дням
+      if (a === 'tabimp') {
+        const [from, to] = histRange(), nowD = histAll().some(e => e.now) ? ddmm(new Date()) : null;
+        const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+        const rs = sheetTab && sheetTab.rows ? tabMatch().only.filter(r => r.d && r.d !== nowD && inR(r.d)) : [];
+        if (!rs.length) return paintBody();
+        const by = {};
+        rs.forEach(r => (by[r.d] = by[r.d] || []).push(r));
+        const ds = Object.keys(by).sort((a, b) => dmyDate(a) - dmyDate(b)), had = new Set(histGet().map(e => e.d));
+        const fresh = ds.filter(d => !had.has(d)).length;
+        if (!confirm('Забрать из таблицы ' + rs.length + ' ' + plural(rs.length, 'оплату', 'оплаты', 'оплат') + ' на ' + rub(rs.reduce((a, r) => a + r.sum, 0)) + ' ₽ за ' + ds.length + ' ' + plural(ds.length, 'день', 'дня', 'дней') +
+          ' (' + ds[0].slice(0, 5) + (ds.length > 1 ? ' – ' + ds[ds.length - 1].slice(0, 5) : '') + ')?\n\nКаждая встанет продажей в смену своего дня' +
+          (fresh ? ', ' + fresh + ' ' + plural(fresh, 'смена создастся', 'смены создадутся', 'смен создастся') + ' (отметь потом, твои ли они)' : '') + '. В таблице ничего не меняется.')) return;
+        if (histAddDays(ds.map(d => [d, by[d].map(tabSale)]))) tarHint('✓ Из таблицы в историю: ' + rs.length + ' за ' + ds.length + ' ' + plural(ds.length, 'день', 'дня', 'дней'), true);
+        return repaint();
+      }
+      // за весь период: продажи, которых нет в таблице, – туда, смена за сменой
+      if (a === 'tabexp') {
+        const [from, to] = histRange(), h = histGet();
+        const list = h.map((e, hi) => ({ hi, end: e.end, d: e.d, n: e.sales.filter(x => toSheet(x) && !x.sh).length }))
+          .filter(o => { const x = dmyDate(o.d); return o.n && (!from || x >= from) && (!to || x <= to); });
+        if (!list.length) return paintBody();
+        const n = list.reduce((a, o) => a + o.n, 0);
+        if (!confirm('Отправить в таблицу ' + n + ' ' + plural(n, 'продажу', 'продажи', 'продаж') + ' из ' + list.length + ' ' + plural(list.length, 'смены', 'смен', 'смен') + '?\n\nПовторы помощник не запишет, а если у человека в таблице уже есть оплата – спросит.')) return;
+        t.disabled = true;
+        const all = { add: 0, dup: 0, skip: 0, late: 0, err: [] };
+        return list.reduce((p, o, k) => p.then(() => {
+          t.textContent = 'Отправляю ' + (k + 1) + '/' + list.length + '…';
+          return sheetSend(o.hi, o.end).then(st => { ['add', 'dup', 'skip', 'late'].forEach(f => all[f] += st[f]); all.err.push(...st.err.map(m => o.d.slice(0, 5) + ': ' + m)); })
+            .catch(err => { all.err.push(o.d.slice(0, 5) + ': ' + err.message); });
+        }), Promise.resolve()).then(() => {
+          const ok = !all.err.length && !all.skip && !all.late;
+          tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(Object.assign({ n, rows: [] }, all)), ok);
+          autoCheck();
+        });
+      }
+      // таблица отдела: «Забрать смены» – дни с цифрами, которых нет в истории (лиды, чаты, ссылки; продажи – из своей таблицы);
+      // «В отдел» – продано и сумма (и пустые лиды, чаты, ссылки) из помощника, со списком перед записью; в раскрытой смене – за один день
+      if (a === 'teamimp' || a === 'teamexp') {
+        const [from, to] = histRange(), h = histGet(), days = teamTab && teamTab.days || {};
+        const inR = d => { const x = dmyDate(d); return (!from || x >= from) && (!to || x <= to); };
+        // у кнопки в раскрытой смене – только её день
+        const one = t.dataset.d, ds = one ? (days[one] ? [one] : []) : Object.keys(days).filter(inR).sort((a, b) => dmyDate(a) - dmyDate(b));
+        if (a === 'teamimp') {
+          const add = ds.filter(d => typeof days[d].leads === 'number' && d !== ddmm(new Date()) && !h.some(e => e.d === d));
+          if (!add.length) return paintBody();
+          if (!confirm('В таблице отдела у тебя есть цифры за ' + add.length + ' ' + plural(add.length, 'день', 'дня', 'дней') + ', которых нет в истории:\n' + add.map(d => d.slice(0, 5)).join(', ') +
+            '\n\nСоздать эти смены (моими) с лидами, чатами и ссылками из таблицы отдела? Продажи в них – кнопкой «Забрать» из своей таблицы.')) return;
+          add.forEach(d => {
+            const rep = {};
+            ['leads', 'chats', 'links'].forEach(k => { if (typeof days[d][k] === 'number') rep[k] = days[d][k]; });
+            h.push({ d, end: dmyDate(d).getTime() + 86399000, rep, sales: [], mine: true });
+          });
+          if (histSave(h)) tarHint('✓ Из таблицы отдела в историю: ' + add.length + ' ' + plural(add.length, 'смена', 'смены', 'смен'), true);
+          return repaint();
+        }
+        const put = [], over = [];
+        ds.forEach(d => { const c = teamCells(d, days[d], h); put.push(...c.put); over.push(...c.over); });
+        if (!put.length && !over.length) return paintBody();
+        const p1 = put.length ? 'Запишу в таблицу отдела (там пусто или «выходной», а оплаты были):\n' + teamList(put) : '';
+        let cells = put;
+        if (over.length) {
+          const p2 = 'Там другие цифры – перезапишу цифрами помощника:\n' + teamList(over, 1);
+          if (confirm([p1, p2].filter(Boolean).join('\n\n') + '\n\nОК – записать всё' + (put.length ? '. Отмена – выбрать: только пустые или ничего' : ''))) cells = put.concat(over);
+          else if (!put.length || !confirm('Тогда записать только в пустые клетки и вместо «выходного» (' + put.length + '), а другие цифры не трогать?\n\n' + teamList(put))) return;
+        } else if (!confirm(p1 + '\n\nЗаписать?')) return;
+        t.disabled = true; t.textContent = 'Пишу…';
+        return teamWrite(cells).then(st => { const ok = st.ok === cells.length; tarHint((ok ? '✓ ' : '') + 'Таблица отдела: ' + teamMsg(st), ok); autoCheck(); })
+          .catch(err => { tarHint('В таблицу отдела не ушло: ' + err.message); paintBody(); });
+      }
       const row = t.closest('.bs-hist-row');
       if (!row) return;
+      // оплата есть только в таблице – добавить её продажей в смену того дня (дня нет – создастся)
+      if (a === 'tabadd') {
+        const only = sheetTab && sheetTab.rows ? tabMatch().only : [];
+        const rs = only.filter(r => t.dataset.r ? r.sheet + ':' + r.row === t.dataset.r : r.d === t.dataset.d);
+        if (!rs.length) return paintBody();
+        const d = rs[0].d;
+        if (!confirm((rs.length > 1 ? 'Добавить ' + rs.length + ' оплаты из таблицы' : 'Добавить оплату из таблицы (' + (rs[0].name || 'без продукта') + ', ' + rub(rs[0].sum) + ' ₽)') +
+          ' в смену ' + d + '? Продано и сумма этой смены вырастут. ФИО и тариф потом можно поправить в продаже.')) return;
+        if (histAddDay(d, rs.map(tabSale))) tarHint('✓ Добавлено в смену ' + d + ': ' + rs.length, true);
+        return repaint();
+      }
+      if (a === 'sheet' || a === 'sheet1') {
+        const f = find(row);
+        if (!f) return paintBody();
+        t.disabled = true; t.textContent = a === 'sheet' ? 'Переношу…' : '…';
+        return sheetSend(f.i, f.h[f.i].end, a === 'sheet1' ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.skip && !st.late; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + sheetMsg(st), ok); if (st.add) autoCheck(); else paintBody(); })
+          .catch(err => { tarHint('В таблицу не ушло: ' + err.message); paintBody(); });
+      }
+      if (a === 'sheetfix') {
+        const f = find(row);
+        if (!f) return paintBody();
+        t.disabled = true; t.textContent = t.dataset.si ? '…' : 'Исправляю…';
+        return sheetFix(f.i, f.h[f.i].end, t.dataset.si ? +t.dataset.si : null).then(st => { const ok = !st.err.length && !st.gone; tarHint((ok ? '✓ ' : '') + 'Таблица: ' + fixMsg(st), ok); paintBody(); })
+          .catch(err => { tarHint('Исправить не вышло: ' + err.message); paintBody(); });
+      }
+      if (a === 'sheetchk') {
+        const f = find(row);
+        if (!f) return paintBody();
+        t.disabled = true; t.textContent = 'Сверяю…';
+        return sheetCheck([{ hi: f.i, end: f.h[f.i].end }]).then(st => { if (sheetAutoErr) sheetAutoErr.keys.delete(f.i + ':' + f.h[f.i].end); return st; }).then(st => { tarHint((st.err.length || st.here < st.n || st.mops ? '' : '✓ ') + 'Таблица: ' + checkMsg(st), !st.err.length && st.here === st.n && !st.mops); paintBody(); })
+          .catch(err => { tarHint('Сверить не вышло: ' + err.message); paintBody(); });
+      }
+      if (a === 'moveask') return void row.querySelector('.bs-hist-act').classList.toggle('mv');
+      if (a === 'mine') {
+        const v = t.dataset.v === '1';
+        if (row.dataset.k === 'now') jset(MINE_KEY, { d: ddmm(new Date()), v });
+        else {
+          const f = find(row);
+          if (!f) return paintBody();
+          f.h[f.i].mine = v;
+          if (!histSave(f.h)) return;
+        }
+        return repaint();
+      }
+      if (a === 'hrep') {
+        if (row.dataset.k === 'now') return openSales('rep');
+        const f = find(row);
+        return f ? openHistReport(f.i, f.h[f.i].end) : paintBody();
+      }
       if (a === 'move' || t.matches('.bs-hist-del,.bs-hist-sdel')) {
         const f = find(row);
         if (!f) return paintBody();
         const e = f.h[f.i];
         if (a === 'move') {
-          const d = dateOk(row.querySelector('.bs-hist-move input').value);
+          const d = dateOk(row.querySelector('.bs-hist-mv input').value);
           if (!d) return alert('Дата не подходит – нужна полная дата не позже сегодня.');
           const nd = ddmm(d);
           if (nd === e.d) return;
@@ -1996,7 +2827,7 @@
         histSave(f.h);
         return paintBody();
       }
-      const sd = t.closest('.bs-hist-s');
+      const sd = t.closest('.bs-hist-s:not(.bs-hist-only)');
       if (sd) {
         if (sd.dataset.id) return openSale(sd.dataset.id, true);
         const f = find(row);
@@ -2026,8 +2857,8 @@
   function openHistSale(hi, end, si) {
     const h = histGet(), e = h[hi];
     if (!e || String(e.end) !== String(end) || !e.sales[si]) return openSales('hist');
-    histKeep = hi + ':' + end;
     closeSale();
+    histKeep = hi + ':' + end;
     const old = e.sales[si], x = Object.assign({}, old, { mops: (old.mops || []).slice() });
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
@@ -2037,21 +2868,24 @@
       '<div class="bs-hedit-2">' + field('price', 'Цена, ₽') + field('disc', 'Скидка', '₽ или 10%') + '</div>' +
       '<label><span>Менеджеры</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
       '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
-      '<div class="bs-sale-note"></div>' +
+      payChips() + field('email', 'Почта') + '<div class="bs-sale-note"></div>' +
       (x.dlg ? '<a class="bs-hedit-chat" href="/app/messenger/?dialogId=' + encodeURIComponent(x.dlg) + '" target="_blank">Открыть чат ↗</a>' : '') + '</div>' +
       '<div class="bs-rep-btns"><button data-a="del" class="bs-sale-del">Удалить</button><span class="bs-tar-st"></span><button data-a="back">Назад</button><button data-a="save" class="bs-main">Сохранить</button></div></div>';
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), note = box.querySelector('.bs-sale-note');
-    ['fio', 'name', 'price', 'disc'].forEach(k => { box.querySelector('[data-k="' + k + '"]').value = x[k] == null ? '' : x[k]; });
+    ['fio', 'name', 'price', 'disc', 'email'].forEach(k => { box.querySelector('[data-k="' + k + '"]').value = x[k] == null ? '' : x[k]; });
     const paint = () => {
-      // «моя» – если я среди менеджеров (как при импорте)
-      x.cnt = !meSet() || x.mops.includes(meName());
+      // «моя» – если я среди менеджеров (как при импорте); менеджеров нет (пришла из таблицы) – как была
+      x.cnt = x.mops.length ? !meSet() || x.mops.includes(meName()) : old.cnt !== false;
       box.querySelectorAll('[data-g="mops"] em').forEach(m => m.classList.toggle('bs-on', x.mops.includes(m.dataset.v)));
       box.querySelectorAll('[data-g="share"] em').forEach(m => m.classList.toggle('bs-on', +m.dataset.v === +x.share));
       box.querySelector('.bs-sale-share').hidden = !x.cnt;
+      payPaint(box, x, x.cnt);
+      premPaint(box, x, old, ymOf(e.d), x.cnt);
       const dB = Math.round((saleShare(x) - saleShare(old)) * 100) / 100, dS = salePart(x) - salePart(old);
-      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽ × ' + r2s(x.share) + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
-        (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '');
+      note.textContent = (x.cnt ? 'Твоя: ' + rub(saleTotal(x)) + ' ₽' + (shareHow(x.share) || ' × 1') + ' = ' + rub(salePart(x)) + ' ₽' : 'Не твоя – в «Продано» и сумму не идёт') +
+        (dB || dS ? ' · смена: продано ' + (dB >= 0 ? '+' : '') + r2s(dB) + ', сумма ' + (dS >= 0 ? '+' : '−') + rub(Math.abs(dS)) + ' ₽' : '') +
+        (x.sh ? ' · уже в таблице: сумму, почту и число менеджеров там поправишь кнопкой «↻ табл.»' : '');
     };
     paint();
     box.addEventListener('input', ev => { const k = ev.target.dataset.k; if (k) { x[k] = ev.target.value; paint(); } });
@@ -2065,13 +2899,14 @@
         if (em.parentNode.dataset.g === 'mops') {
           x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);
-        } else x.share = +v;
+        } else if (em.parentNode.dataset.g === 'pay') x.pay = v;
+        else x.share = +v;
         return paint();
       }
-      if (a === 'back') return openSales('hist');
+      if (a === 'back') return openSales(saleBack || 'hist');
       if (a !== 'save' && a !== 'del') return;
       const f = fresh();
-      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales('hist'); }
+      if (!f) { alert('Эта смена изменилась – открой продажу заново.'); return openSales(saleBack || 'hist'); }
       const r = f.e2.rep;
       if (a === 'del') {
         if (!confirm('Удалить продажу из смены ' + e.d + '? Продано и сумма этой смены уменьшатся.')) return;
@@ -2080,15 +2915,674 @@
       } else {
         x.price = String(x.price).replace(/\s/g, '');
         x.who = x.fio || x.who;
+        premSave(x, old, ymOf(e.d));
         f.e2.sales[si] = histSale(x);
       }
       r.bought = Math.max(0, Math.round(((+r.bought || 0) + saleShare(x) - saleShare(old)) * 100) / 100);
       r.sum = Math.max(0, (+r.sum || 0) + salePart(x) - salePart(old));
       if (!histSave(f.h2)) return;
-      openSales('hist');
+      openSales(saleBack || 'hist');
       tarHint(a === 'del' ? '✓ Продажа удалена из смены ' + e.d : '✓ Продажа за ' + e.d + ' сохранена', true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Своя таблица продаж (Google Таблицы): продажи с моей долей дописываются через веб-приложение Apps Script ----------
+  // Код для таблицы – bluesales-sheet.gs в репозитории. Ссылка …/exec хранится только в этом браузере (bsSheet).
+  const SHEET_KEY = 'bsSheet', SHEET_RX = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+  const SHEET_CODE = 'https://raw.githubusercontent.com/Misha-Burtsev/bluesales-tools/main/bluesales-sheet.gs';
+  const sheetUrl = () => jget(SHEET_KEY, {}).url || '';
+  // «Оплата» (столбец F): сама угадывается по тарифу и сумме, можно поменять в продаже
+  // [что пишется в F (как в выпадашке таблицы), подпись]
+  const PAYS = [['Месяц', 'Месяц'], ['Год', 'Год'], ['Высшая математика', 'Высшая'], ['Летняя школа', 'Летняя школа'], ['Бронь', 'Бронь'],
+    ['Доплата на лучш тариф (месяц)', 'Доплата мес.'], ['Доплата на лучш тариф (год)', 'Доплата год'],
+    ['ВЫЧЕТ ЛШ: 1 предмет куратор', 'Вычет ЛШ 1 кур.'], ['ВЫЧЕТ ЛШ: 1 предмет самоподготовка', 'Вычет ЛШ 1 сам.'],
+    ['ВЫЧЕТ ЛШ: комбо куратор', 'Вычет ЛШ комбо кур.'], ['ВЫЧЕТ ЛШ: комбо самоподготовка', 'Вычет ЛШ комбо сам.']];
+  const payGuess = x => /высш/i.test(x.name) ? PAYS[2][0] : /летн/i.test(x.name) ? PAYS[3][0] : saleTotal(x) >= 15000 ? PAYS[1][0] : PAYS[0][0];
+  const salePay = x => PAYS.some(p => p[0] === x.pay) ? x.pay : payGuess(x);
+  const saleKind = x => /высш/i.test(x.name) ? 'Высшая' : /комбо|математика \+ русский/i.test(x.name) ? 'Комбо' : '1 предмет';
+  const PAY_GR = { 5: 'Доплата', 7: 'Вычет ЛШ' };
+  const payChips = () => '<label class="bs-sale-pay"><span>Оплата <small>(для таблицы и премии)</small></span><div class="bs-chips bs-pay" data-g="pay">' +
+    PAYS.map(([v, t], i) => (PAY_GR[i] ? '<b></b><i>' + PAY_GR[i] + '</i>' : '') + '<em data-v="' + v + '" title="' + v + '">' + t.replace(/^(Доплата|Вычет ЛШ) /, '') + '</em>').join('') + '</div></label>' +
+    '<label class="bs-sale-prem"><span>Премия за продажу <small></small></span><input data-k="premIn" inputmode="decimal"></label>';
+  function payPaint(box, x, mine) {
+    const l = box.querySelector('.bs-sale-pay');
+    l.hidden = !mine;
+    l.querySelectorAll('em').forEach(e => e.classList.toggle('bs-on', e.dataset.v === salePay(x)));
+  }
+  // ---------- Премия: как столбец N своей таблицы – по ставкам и ценам из справочника листа месяца (T1:T4, P3:R8) ----------
+  // Посчитанная премия запоминается в продаже (prem – вся, до деления) и сама не пересчитывается, даже если в таблице
+  // поменяются цены или ставки: заново – только если в продаже поменяли сумму или оплату. premM – вписана руками.
+  // prem === null – сумма нестандартная (доплата, скидка), премию надо вписать руками; undefined – ещё не считали (нет ставок)
+  const PREM_KEY = 'bsPremCfg';   // { ГГГГММ: { t: [T1, T2, T3, T4], p: [[продукт, за месяц, за курс] × 6] } }
+  const premCfgs = () => jget(PREM_KEY, {});
+  const premOn = () => Object.keys(premCfgs()).length > 0;
+  // ставки месяца продажи; листа за этот месяц не видели – ближайшего прошлого, иначе самого раннего
+  const premCfgFor = ym => {
+    const c = premCfgs(), ks = Object.keys(c).map(Number).sort((a, b) => a - b);
+    return c[ym] || (ks.length ? c[ks.filter(k => k <= ym).pop() || ks[0]] : null);
+  };
+  const rubK = n => rub(n);   // копейки не показываем – целые рубли
+  // формула N: Месяц, Высшая, доплата за месяц – сумма × T1; Год – цена за месяц (H) × T2; Летняя школа – H × T1;
+  // доплата за год – T3; бронь – T4; вычет ЛШ – цена тарифа за месяц × T2. H – цена за месяц по сумме оплаты (столбец H), не нашлась – нестандарт
+  function premCalc(x, c) {
+    if (!c || !c.t || !c.p || c.p.length < 6) return undefined;
+    const g = saleTotal(x), t = c.t.map((v, i) => i < 2 && v > 1 ? v / 100 : +v || 0), p = c.p, ege = p.slice(2);
+    // «за месяц» от 15 000 ₽ (как в угадывании оплаты) – это не месяц (например, годовая доплата): считать вручную
+    const big = g >= 15000;
+    const h = !g ? null : g === p[0][1] ? p[0][2] : g === p[1][1] ? p[1][2] : (ege.find(r => g === r[2]) || ege.find(r => g === r[1]) || [])[1];
+    const v = {
+      'Месяц': !big && g * t[0], 'Высшая математика': g * t[0], 'Год': h && h * t[1], 'Летняя школа': h && h * t[0],
+      'Доплата на лучш тариф (год)': t[2], 'Доплата на лучш тариф (месяц)': !big && g * t[0], 'Бронь': t[3],
+      'ВЫЧЕТ ЛШ: 1 предмет куратор': p[2][1] * t[1], 'ВЫЧЕТ ЛШ: 1 предмет самоподготовка': p[3][1] * t[1],
+      'ВЫЧЕТ ЛШ: комбо куратор': p[4][1] * t[1], 'ВЫЧЕТ ЛШ: комбо самоподготовка': p[5][1] * t[1],
+    }[salePay(x)];
+    return v > 0 ? Math.round(v * 100) / 100 : null;
+  }
+  const premKey = x => saleTotal(x) + '|' + salePay(x);
+  // какая премия будет у продажи после сохранения: вписанная руками, прежняя (сумма и оплата не менялись) или посчитанная заново
+  function premNext(x, was, ym) {
+    const s = String(x.premIn != null ? x.premIn : x.premM ? x.prem : '').replace(/\s/g, '').replace(',', '.');
+    if (s !== '' && isFinite(+s)) return { v: Math.round(+s * 100) / 100, man: 1 };
+    if (was && !was.premM && was.prem !== undefined && premKey(was) === premKey(x)) return { v: was.prem };
+    return { v: premCalc(x, premCfgFor(ym)) };
+  }
+  function premSave(x, was, ym) {
+    const n = premNext(x, was, ym);
+    delete x.premIn; delete x.premM; delete x.prem;
+    if (n.man) x.premM = 1;
+    if (n.v !== undefined) x.prem = n.v;
+  }
+  // всем продажам без премии – посчитать и запомнить (ставки пришли позже продажи, импорт, старые смены)
+  function premAll() {
+    if (!premOn()) return;
+    // один раз (1.56.2): пересчитать авто-премии «за месяц» – раньше большая сумма с оплатой «Месяц» считалась × 10%
+    const redo = !localStorage.getItem('bsPremFix'), monthy = x => /^(Месяц|Доплата на лучш тариф \(месяц\))$/.test(salePay(x));
+    const h = histGet(), s = salesGet(), todo = x => !x.premM && (x.prem === undefined || redo && x.prem != null && monthy(x));
+    let ch = false;
+    h.forEach(e => (e.sales || []).forEach(x => { if (todo(x)) { premSave(x, null, ymOf(e.d)); ch = ch || x.prem !== undefined; } }));
+    if (ch) histSave(h);
+    if (s.some(todo)) { const ym = ymOf(repSaved().d || ddmm(new Date())); s.forEach(x => { if (todo(x)) premSave(x, null, ym); }); salesSet(s); }
+    if (redo) try { localStorage.setItem('bsPremFix', '1'); } catch (e) {}
+  }
+  // моя часть премии (по доле); null – не посчитана
+  const premPart = x => x.cnt === false ? 0 : x.prem == null ? null : Math.round(x.prem * shareX(saleShare(x)) * 100) / 100;
+  const premHow = x => shareHow(x.share);
+  // премия по продажам: v – сумма моих частей, miss – сколько моих продаж без премии
+  const premSum = sales => (sales || []).reduce((a, x) => { const p = premPart(x); if (p == null) a.miss++; else a.v = Math.round((a.v + p) * 100) / 100; return a; }, { v: 0, miss: 0 });
+  const premWhy = x => x.prem === null ? 'сумма не по тарифу (доплата, скидка…) – открой продажу и впиши премию вручную' : 'ещё нет ставок из таблицы – подключи свою таблицу и открой «Историю»';
+  // метка у продажи в списках: моя часть премии или «премия?»
+  const premTag = x => {
+    if (x.cnt === false || !premOn() && x.prem === undefined) return '';
+    const p = premPart(x);
+    return p == null ? '<b class="bs-prem-q" title="Премия не рассчитана: ' + premWhy(x) + '">премия?</b>' :
+      '<b class="bs-prem-v" title="Премия' + (x.premM ? ' (вписана вручную)' : '') + ': ' + rubK(x.prem) + ' ₽' + premHow(x) + '">+' + rubK(p) + ' ₽</b>';
+  };
+  // поле «Премия» в форме продажи: пусто – считается сама (подсказка в placeholder), вписал – вручную
+  function premPaint(box, x, was, ym, mine) {
+    const l = box.querySelector('.bs-sale-prem'), i = l.querySelector('input'), sm = l.querySelector('small');
+    l.hidden = !mine;
+    if (!mine) return;
+    if (document.activeElement !== i && x.premIn == null) i.value = x.premM ? String(x.prem).replace('.', ',') : '';
+    const n = premNext(x, was, ym), auto = n.man ? premNext(Object.assign({}, x, { premIn: '', premM: 0 }), was, ym) : n;
+    i.placeholder = auto.v ? 'сама: ' + rubK(auto.v) : auto.v === null ? 'не считается – впиши' : 'нет ставок из таблицы';
+    sm.className = n.v == null ? 'bs-prem-q' : '';
+    sm.textContent = n.v == null ? '(' + (n.v === null ? 'сумма не по тарифу – впиши вручную' : 'посчитается, когда будут ставки из таблицы') + ')' :
+      '(твоя: ' + rubK(Math.round(n.v * shareX(x.share) * 100) / 100) + ' ₽' + (n.man ? ', вписана вручную' : '') + ')';
+  }
+  // в таблицу идут только продажи с моей долей
+  const toSheet = x => x.cnt !== false && saleShare(x) > 0;
+  // у продажи на «Сегодня»: уже в таблице – отметка, нет – кнопка; пустые (без ФИО и почты) не шлём
+  const curSh = x => !sheetUrl() || !toSheet(x) ? '' : x.sh ? (shBad(x) ? '<small class="bs-sales-sh bad" title="В таблице записано не то, что тут (сумма, почта или МОП). Исправить можно в «Истории» после закрытия смены">≠ в таблице</small>' :
+    '<small class="bs-sales-sh ok" title="Эта продажа уже есть в Google Таблице">✓ в таблице</small>') : '<button data-a="sh1" class="bs-sales-sh" title="Отправить эту продажу в Google Таблицу">+ в таблицу</button>';
+  const curShN = list => sheetUrl() ? list.filter(x => toSheet(x) && !x.sh && saleDone(x)).length : 0;
+  // менеджеров для таблицы – из доли (0.5 → 2)
+  const saleMops = x => Math.max(1, Math.round(1 / (+x.share || 1)));
+  // shT – что стоит в строке таблицы (по последней сверке/отправке): {sum, email, mops}. Чем отличается от продажи
+  const shDiff = x => {
+    const t = x.sh && x.shT;
+    if (!t) return [];
+    const mail = (x.email || '').trim();
+    return [t.sum !== saleTotal(x) && 'сумма ' + rub(t.sum) + ' ₽ → ' + rub(saleTotal(x)) + ' ₽',
+      t.email.toLowerCase() !== mail.toLowerCase() && 'почта ' + (t.email || 'пусто') + ' → ' + (mail || 'пусто'),
+      t.mops !== saleMops(x) && 'менеджеров ' + t.mops + ' → ' + saleMops(x)].filter(Boolean);
+  };
+  const shBad = x => shDiff(x).length > 0;
+  // найденная в таблице строка: отметка ✓ и что в ней записано (старый скрипт этого не отдаёт)
+  const shTab = r => r.sum != null ? { sum: +r.sum || 0, email: String(r.email || '').trim(), mops: +r.mops || 0 } : null;
+  const shHere = (x, r) => { x.sh = 1; delete x.shAlso; delete x.shM; const t = shTab(r); if (t) x.shT = t; };
+  const shSent = x => ({ sum: saleTotal(x), email: (x.email || '').trim(), mops: saleMops(x) });
+  const sheetSale = (d, x) => ({
+    d, dlg: x.dlg, name: x.name, kind: saleKind(x), pay: salePay(x), sum: saleTotal(x), email: (x.email || '').trim(),
+    mops: saleMops(x), link: 'https://bluesales.ru/app/messenger/?dialogId=' + x.dlg,
+    // сумма в таблице, если продажу потом поправили – по ней скрипт найдёт строку
+    was: x.sh && x.shT && x.shT.sum !== saleTotal(x) ? x.shT.sum : undefined,
+  });
+  async function sheetPost(body, url) {
+    url = url || sheetUrl();
+    if (!url) throw new Error('таблица не подключена («История» → «Таблицы»)');
+    let r;
+    // text/plain – простой запрос, Google отвечает без предварительной проверки CORS
+    try { r = await fetch(url, { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'text/plain;charset=utf-8' } }); }
+    catch (e) { throw new Error('таблица не ответила – проверь интернет, ссылку и что в развёртывании доступ «Все»'); }
+    let j; try { j = await r.json(); } catch (e) {}
+    if (!j) throw new Error('таблица ответила не так (' + r.status + ') – проверь ссылку …/exec');
+    if (!j.ok) throw new Error(j.msg || 'ошибка в таблице');
+    return j;
+  }
+  // неотправленные продажи смены из истории – в таблицу; отправленные (и найденные там повторы) помечаем sh
+  // only – номер одной продажи (кнопка «+ в табл.» у продажи)
+  // строки таблицы с тем же человеком (чат или почта): в этом месяце – с другой суммой, в прошлом месяце – любые
+  const alsoTxt = also => (also || []).map(a => (a.sheet ? a.sheet + ', ' : '') + 'стр. ' + a.row + (a.d ? ', ' + a.d : '') + ' – ' + rub(a.sum) + ' ₽').join('; ');
+  // отправленные (✓) – вперёд: в таблице им достаются строки, остальным – что останется
+  const shOrder = (list, get) => list.filter(o => get(o).sh).concat(list.filter(o => !get(o).sh));
+  async function sheetSend(hi, end, only) {
+    const e = histGet()[hi];
+    if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    return sheetSendList(e, only, ap => { const h = histGet(), e2 = h[hi]; if (e2 && String(e2.end) === String(end) && ap(e2.sales)) histSave(h); });
+  }
+  // продажи текущей смены – прямо во время смены; only – id одной продажи
+  function sheetSendCur(only) {
+    const sales = salesGet(), i = only == null ? null : sales.findIndex(x => x.id === only);
+    return sheetSendList({ d: repSaved().d || ddmm(new Date()), sales }, i, ap => { const l = salesGet(); if (ap(l)) salesSet(l); }, saleDone);
+  }
+  // e – {d, sales}; pick – какие ещё можно слать; отметки ставим в свежем списке (пока ждали таблицу, продажи могли поменять) – commit(apply)
+  async function sheetSendList(e, only, commit, pick) {
+    let idx = e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i]) && !e.sales[i].sh && (only == null || i === only) && (!pick || pick(e.sales[i])));
+    const st = { n: idx.length, add: 0, dup: 0, err: [], rows: [], skip: 0, late: 0 };
+    if (!idx.length) return st;
+    const marks = [], mark = (i, f) => marks.push([e.sales[i], f]);
+    // сначала смотрим, что уже есть: повторы не шлём, а про того же человека – спрашиваем.
+    // Сверяем всю смену, отправленные первыми: две оплаты в одном чате на одну сумму – это две строки таблицы
+    const all = shOrder(e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i])), i => e.sales[i]);
+    const f = await sheetPost({ find: all.map(i => sheetSale(e.d, e.sales[i])) }), warn = [];
+    const checked = Array.isArray(f.res) && f.res.length === all.length;
+    if (checked) {
+      idx = idx.filter(i => {
+        const r = f.res[all.indexOf(i)];
+        if (r.st === 'dup') { st.dup++; mark(i, x => shHere(x, r)); return false; }
+        if (r.also && r.also.length) warn.push({ i, t: alsoTxt(r.also) });
+        return true;
+      });
+      if (warn.length) {
+        const who = w => { const x = e.sales[w.i]; return '• ' + (x.who || x.fio || 'чат ' + x.dlg) + ' (' + rub(saleTotal(x)) + ' ₽): ' + w.t; };
+        const rest = idx.length - warn.length;
+        if (!confirm('У этого человека в таблице уже есть оплата – проверь, не ошибка ли:\n\n' + warn.map(who).join('\n') +
+          '\n\nОК – всё равно отправить' + (rest ? ', Отмена – отправить только остальные (' + rest + ')' : ', Отмена – не отправлять'))) {
+          const off = new Set(warn.map(w => w.i));
+          st.skip = off.size;
+          idx = idx.filter(i => !off.has(i));
+        }
+      }
+    }
+    if (idx.length) {
+      // force – уже сверили: это отдельная оплата, даже если в чате есть строка на ту же сумму
+      const j = await sheetPost({ sales: idx.map(i => Object.assign(sheetSale(e.d, e.sales[i]), checked ? { force: 1 } : {})) });
+      idx.forEach((i, k) => {
+        const r = (j.res || [])[k] || { st: 'err', msg: 'нет ответа' };
+        if (r.st === 'err') return void st.err.push(r.msg);
+        st[r.st === 'dup' ? 'dup' : 'add']++;
+        if (r.st === 'add') st.rows.push(r.sheet + ', стр. ' + r.row);
+        // тот же человек пришёл в этой же отправке – заранее не спросили
+        if (r.also && r.also.length && !warn.some(w => w.i === i)) st.late++;
+        mark(i, x => shHere(x, r.st === 'add' ? shSent(x) : r));
+      });
+    }
+    if (marks.length) commit(list => marks.reduce((n, [x, f]) => {
+      const y = list.find(y => x.id ? y.id === x.id : y.dlg === x.dlg && y.name === x.name);
+      if (y) f(y);
+      return n + !!y;
+    }, 0));
+    return st;
+  }
+  // сверка с таблицей: какие продажи смены там правда есть (строки могли удалить руками) – правим отметки sh
+  // list – смены [{hi, end}]; одним запросом
+  async function sheetCheck(list) {
+    const h0 = histGet(), items = [];
+    list.forEach(({ hi, end }) => {
+      const e = h0[hi];
+      if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+      shOrder(e.sales.map((x, i) => ({ hi, end, i, x, d: e.d })).filter(o => toSheet(o.x)), o => o.x).forEach(o => items.push(o));
+    });
+    const st = { n: items.length, here: 0, gone: 0, miss: 0, also: 0, mops: 0, nosheet: '', err: [] };
+    if (!items.length) return st;
+    const j = await sheetPost({ find: items.map(o => sheetSale(o.d, o.x)) });
+    if (!Array.isArray(j.res) || j.res.length !== items.length) throw new Error('обнови код скрипта в таблице («Таблицы» → «Скопировать код», потом Новая версия развёртывания)');
+    const h = histGet();
+    let ch = false;
+    items.forEach((o, k) => {
+      const r = j.res[k], e2 = h[o.hi], x = e2 && String(e2.end) === String(o.end) && e2.sales[o.i];
+      const ok = x && x.dlg === o.x.dlg && x.name === o.x.name;
+      if (r.st === 'err') return void st.err.push(r.msg);
+      // листа за тот месяц в таблице уже нет – отметку оставляем как была
+      if (r.st === 'nosheet') return void (st.nosheet = r.msg);
+      if (r.st === 'dup') {
+        st.here++;
+        if (ok) { const was = JSON.stringify([x.sh, x.shAlso, x.shT]); shHere(x, r); if (JSON.stringify([x.sh, x.shAlso, x.shT]) !== was) ch = true; }
+        const t = shTab(r);
+        if (t && shBad(Object.assign({}, o.x, { sh: 1, shT: t }))) st.mops++;
+        return;
+      }
+      if (o.x.sh) st.gone++; else st.miss++;
+      const also = alsoTxt(r.also);
+      if (also) st.also++;
+      if (ok && (x.sh || (x.shAlso || '') !== also)) { delete x.sh; delete x.shT; if (also) x.shAlso = also; else delete x.shAlso; ch = true; }
+    });
+    if (ch) histSave(h);
+    return st;
+  }
+  // ---------- Сверка «История ↔ таблица» по строкам: скрипт отдаёт строки оплат и премию за месяцы периода ----------
+  // sheetTab – последний ответ: { months: [{y, m, sheet, prem (N1) | err}], rows, days: {дата: премия за день} }; old – скрипт старый; err – не сверилась
+  let sheetTab = null;
+  const ymOf = d => { const x = dmyDate(d); return x.getFullYear() * 100 + x.getMonth() + 1; };
+  // строки за месяцы периода и прошлый месяц (там ищем «этот человек уже платил»), не больше года; false – скрипт старый
+  async function tabFetch(from, to) {
+    const h = histGet(), now = new Date();
+    to = to || now;
+    from = from || (h.length ? new Date(Math.min(...h.map(e => +dmyDate(e.d)))) : now);
+    const cap = new Date(to.getFullYear(), to.getMonth() - 12, 1);
+    let a = new Date(from.getFullYear(), from.getMonth() - 1, 1);
+    if (a < cap) a = cap;
+    const j = await sheetPost({ rows: { from: ddmm(a), to: ddmm(to) } });
+    if (!Array.isArray(j.rows)) return false;
+    sheetTab = { months: j.months || [], rows: j.rows, days: j.days || {} };
+    const pc = premCfgs();
+    let pch = false;
+    sheetTab.months.forEach(m => { if (m.cfg && m.cfg.t) { pc[m.y * 100 + m.m] = m.cfg; pch = true; } });
+    if (pch) { jset(PREM_KEY, pc); premAll(); }
+    tabMatch(true);
+    return true;
+  }
+  // каждой продаже – её строка, как в скрипте: тот же чат на листе месяца продажи, сначала сумма из таблицы (продажу могли
+  // поправить), потом своя; отправленные (✓) – вперёд. Строки без пары – «только в таблице».
+  // persist – по строкам обновить отметки у продаж в истории (✓, что записано в таблице, «у человека уже есть оплата»)
+  function tabMatch(persist) {
+    const t = sheetTab, res = { pair: new Map(), only: [] };
+    if (!t || !t.rows) return res;
+    const ms = new Set(t.months.filter(m => m.sheet).map(m => m.y * 100 + m.m)), h = histGet(), items = [], today = ddmm(new Date());
+    // pair – по ключу «номер смены:номер продажи» (у сегодняшних – «now:номер»)
+    h.forEach((e, hi) => { const ym = ymOf(e.d); if (ms.has(ym)) e.sales.forEach((x, si) => { if (toSheet(x)) items.push({ x, ym, k: hi + ':' + si }); }); });
+    // сегодняшние ещё не отправлены, но если строку уже вписали руками – она не «только в таблице»
+    if (ms.has(ymOf(today))) salesGet().forEach((x, si) => { if (toSheet(x)) items.push({ x, ym: ymOf(today), now: 1, k: 'now:' + si }); });
+    const used = new Set();
+    shOrder(items, o => o.x).forEach(o => {
+      const c = t.rows.filter(r => !used.has(r) && r.ym === o.ym && r.dlg === String(o.x.dlg || ''));
+      const was = o.x.sh && o.x.shT ? o.x.shT.sum : null;
+      const r = (was != null && c.find(r => r.sum === was)) || c.find(r => r.sum === saleTotal(o.x));
+      if (r) { used.add(r); res.pair.set(o.k, r); }
+    });
+    res.only = t.rows.filter(r => !used.has(r));
+    if (!persist) return res;
+    let ch = false;
+    items.forEach(o => {
+      if (o.now) return;
+      const x = o.x, r = res.pair.get(o.k), was = JSON.stringify([x.sh, x.shAlso, x.shT]);
+      if (r) shHere(x, r);
+      else {
+        delete x.sh; delete x.shT;
+        const mail = (x.email || '').trim().toLowerCase(), prev = o.ym % 100 === 1 ? o.ym - 89 : o.ym - 1;
+        const also = t.rows.filter(r => (r.ym === o.ym || r.ym === prev) && (r.dlg && r.dlg === String(x.dlg) || mail && r.email.toLowerCase() === mail))
+          .map(r => ({ row: r.row, sum: r.sum, d: r.d.slice(0, 5), sheet: r.ym === o.ym ? '' : r.sheet }));
+        if (also.length) x.shAlso = alsoTxt(also); else delete x.shAlso;
+      }
+      if (JSON.stringify([x.sh, x.shAlso, x.shT]) !== was) ch = true;
+    });
+    if (ch) histSave(h);
+    return res;
+  }
+  // маленькие иконки линией – вместо смайликов
+  const ico = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
+  const ICO = { box: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
+    sync: '<path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"/><path d="M21 3v5h-5"/>', back: '<path d="M15 18l-6-6 6-6"/>', chat: '<path d="M21 12a8 8 0 0 1-11.7 7.1L4 20l1-4.4A8 8 0 1 1 21 12z"/>', flame: '<path d="M12 22c3.9 0 7-2.9 7-7 0-3.5-2.2-5.9-4-8-.4 2.1-1.4 3.6-3 4.5C12 8.3 10.7 5.4 8.5 3 8.3 6.7 5 9.4 5 15c0 4.1 3.1 7 7 7z"/>',
+    trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v1a4 4 0 0 1-3.6 4M7 5H4v1a4 4 0 0 0 3.6 4"/>', star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+    receipt: '<path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM9 8h6M9 12h6"/>', cal: '<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/>', pen: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/>' };
+  // строка карточки сверки: точка-статус, что за таблица, как дела, кнопки
+  const syncRow = (lbl, st, txt, btns) => '<div class="bs-sync-r"><i class="bs-dot" data-st="' + st + '"></i><b>' + lbl + '</b><span>' + txt + '</span>' + (btns || '') + '</div>';
+  // карточка над списком смен: своя таблица и таблица отдела – по строке, справа премия за месяц (N1) и «обновить».
+  // Пока идёт сверка, показываем прошлый результат, крутится только значок – без мигания текста
+  const syncCard = withHist(function (from, to, cnt, tcnt) {
+    if (!sheetUrl()) return '';
+    let mine, prem = '';
+    if (!sheetTab) mine = syncRow('Своя таблица', 'wait', 'сверяю…');
+    else if (sheetTab.old) mine = syncRow('Своя таблица', 'warn', 'обнови код скрипта («Таблицы» → «Скопировать код», потом новая версия развёртывания) – тогда будет премия и сверка всех строк');
+    else if (sheetTab.err) mine = syncRow('Своя таблица', 'err', 'не сверилась: ' + esc(sheetTab.err));
+    else {
+      const lo = from ? from.getFullYear() * 100 + from.getMonth() + 1 : 0, hi = to ? to.getFullYear() * 100 + to.getMonth() + 1 : 1e9;
+      const months = sheetTab.months.filter(m => m.y * 100 + m.m >= lo && m.y * 100 + m.m <= hi && (from || m.sheet));
+      const nos = months.filter(m => !m.sheet).map(m => MONTHS[m.m - 1]);
+      prem = months.filter(m => m.sheet && m.prem != null).map(m => premMonHtml(premOn() ? premSum([].concat(...histAll().filter(e => ymOf(e.d) === m.y * 100 + m.m).map(e => e.sales || []))) : null,
+        m.prem, 'премия за ' + MONTHS[m.m - 1], m.y * 100 + m.m)).join('');
+      const bad = [cnt.miss && 'не отправлено ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean);
+      mine = syncRow('Своя таблица', bad.length || nos.length ? 'warn' : 'ok', (bad.length ? bad.join(' · ') : 'всё сходится') + (nos.length ? ' · нет листа за ' + nos.join(', ') : ''),
+        (cnt.imp ? '<button data-a="tabimp" title="Все оплаты за период, которых нет в помощнике, – в историю, каждую в смену своего дня">Забрать ' + cnt.imp + '</button>' : '') +
+        (cnt.miss ? '<button data-a="tabexp" title="Все продажи за период, которых нет в таблице, – в таблицу">Отправить ' + cnt.miss + '</button>' : ''));
+    }
+    return '<div class="bs-sync' + (sheetBusy || teamBusy ? ' busy' : '') + '"><div class="bs-sync-l">' + mine + (teamOn() ? teamRow(tcnt) : '') + '</div>' +
+      (prem ? '<div class="bs-sync-p">' + prem + '</div>' : '') +
+      '<button data-a="tabsync" class="bs-sync-btn" title="Заново прочитать таблицы и сверить с историей">' + ico(ICO.sync, 15) + '</button></div>';
+  });
+  // строка таблицы → продажа в историю (уже записана в таблице – сразу ✓). ФИО и тариф потом можно поправить
+  const tabSale = (r, n) => ({ id: Date.now().toString(36) + r.row + 'r' + (n || 0), dlg: r.dlg, name: r.name, price: r.sum, disc: '', mops: [], share: shareFor(r.mops || 1), cnt: true,
+    fio: '', who: '', email: r.email, pay: PAYS.some(p => p[0] === r.pay) ? r.pay : undefined, sh: 1, shT: shTab(r) });
+  // оплаты дня, которые есть только в таблице
+  function onlyHtml(e, rs) {
+    if (!rs.length) return '';
+    const add = !e.now;   // в идущую смену не добавляем – она ещё не в истории
+    return '<div class="bs-hist-onlyh"><span>Только в таблице – в помощнике этих оплат нет</span>' + (add && rs.length > 1 ? '<button data-a="tabadd" data-d="' + e.d + '" class="bs-hist-sh">+ все</button>' : '') + '</div>' +
+      rs.map(r => '<div class="bs-hist-s bs-hist-only" title="' + esc(r.sheet + ', стр. ' + r.row + (r.email ? ', ' + r.email : '')) + '"><span>' + esc(r.name || 'без продукта') + (r.dlg ? '' : ' <small>(без ссылки на чат)</small>') + '</span>' +
+        '<span>' + rub(r.sum) + ' ₽ · ' + frac(shareFor(r.mops || 1)) + '</span>' +
+        (add ? '<button data-a="tabadd" data-r="' + esc(r.sheet + ':' + r.row) + '" class="bs-hist-sh bs-warn" title="Добавить эту оплату продажей в смену ' + e.d + '">+ сюда</button>' : '<b class="bs-hist-sh" title="Добавишь, когда закроешь смену">табл.</b>') + '<s class="bs-hist-sgap"></s></div>').join('');
+  }
+  // сумма, почта и число менеджеров в таблице – как в продаже (поправили в помощнике после отправки). only – одна продажа.
+  // Шлём всю смену в том же порядке, что и сверка, – тогда каждой продаже достаётся её строка
+  async function sheetFix(hi, end, only) {
+    const e = histGet()[hi];
+    if (!e || String(e.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    const all = shOrder(e.sales.map((x, i) => i).filter(i => toSheet(e.sales[i])), i => e.sales[i]);
+    const want = i => shBad(e.sales[i]) && (only == null || i === only);
+    const st = { n: all.filter(want).length, fix: 0, gone: 0, err: [] };
+    if (!st.n) return st;
+    const j = await sheetPost({ fix: all.map(i => Object.assign(sheetSale(e.d, e.sales[i]), want(i) ? { fix: 1 } : {})) });
+    if (!Array.isArray(j.res) || j.res.length !== all.length) throw new Error('обнови код скрипта в таблице («Таблицы» → «Скопировать код», потом Новая версия развёртывания)');
+    const h = histGet(), e2 = h[hi];
+    if (!e2 || String(e2.end) !== String(end)) throw new Error('смена изменилась – открой историю заново');
+    all.forEach((i, k) => {
+      if (!want(i)) return;
+      const r = j.res[k], x = e2.sales[i], ok = x && x.dlg === e.sales[i].dlg && x.name === e.sales[i].name;
+      if (r.st === 'fix') { st.fix++; if (ok) shHere(x, r); return; }
+      if (r.st === 'err' || r.st === 'nosheet') return void st.err.push(r.msg);
+      // строки уже нет – значит, и отметка ✓ неверна
+      st.gone++;
+      if (ok) { delete x.sh; delete x.shT; }
+    });
+    histSave(h);
+    return st;
+  }
+  const fixMsg = st => [st.fix && 'исправил в таблице: ' + st.fix, st.gone && 'не нашёл в таблице ' + st.gone + ' – отправь заново',
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ') || 'исправлять нечего';
+  // сверка при открытии истории: какие смены сейчас сверяются и чем кончилась прошлая
+  let sheetBusy = null, sheetAutoErr = null, sheetTok = 0, sheetLast = null, histPaint = () => {};
+  const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
+    st.nosheet && st.nosheet + ' – отметки оставил как были',
+    st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»',
+    st.also && '⚠ у ' + st.also + ' человек в таблице уже есть оплата – перепроверь',
+    st.mops && '⚠ у ' + st.mops + ' продаж в таблице записано не то, что в помощнике (сумма, почта или менеджеры) – нажми «↻ табл.» или «Исправить»'].filter(Boolean).join(' · ');
+  const sheetMsg = st => !st.n ? 'новых продаж для таблицы нет' :
+    [st.add && 'добавлено ' + st.add + (st.rows.length ? ' (' + st.rows.join('; ') + ')' : ''), st.dup && 'уже были в таблице ' + st.dup, st.skip && 'не отправил ' + st.skip + ' – перепроверь', st.late && '⚠ у ' + st.late + ' человек в таблице теперь несколько оплат – перепроверь', st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ');
+  // низ раскрытой смены: сколько продаж уже в таблице – чипом (нажал – сверить), и кнопки «Исправить» / «Отправить»
+  function sheetLine(e) {
+    const xs = e.sales.filter(toSheet);
+    if (e.now || !sheetUrl() || !xs.length) return ['', ''];
+    const done = xs.filter(x => x.sh).length, bad = xs.filter(shBad).length;
+    const err = sheetAutoErr && sheetAutoErr.keys.has(e.hi + ':' + e.end) ? sheetAutoErr.msg : '';
+    const tip = (done === xs.length ? 'Все продажи смены есть в таблице' : 'В таблице ' + done + ' из ' + xs.length) + (bad ? '. У ' + bad + ' там записано не то, что тут' : '') +
+      (err ? '. Не сверилась: ' + err : '') + '. Нажми – сверить эту смену с таблицей';
+    return ['<button data-a="sheetchk" class="bs-chip" data-st="' + (err ? 'err' : bad || done < xs.length ? 'warn' : 'ok') + '" title="' + esc(tip) + '">таблица ' + done + '/' + xs.length + '</button>',
+      (bad ? '<button data-a="sheetfix" title="Записать в таблицу сумму, почту и число менеджеров как в продажах">Исправить' + (bad > 1 ? ' ' + bad : '') + '</button>' : '') +
+      (done < xs.length ? '<button data-a="sheet" title="Отправить все продажи без отметки">Отправить' + (xs.length - done > 1 ? ' ' + (xs.length - done) : '') + '</button>' : '')];
+  }
+  // низ раскрытой смены одной строкой: моя / не моя, чипы таблиц, действия; «Перенести» раскрывает поле даты
+  function histActHtml(e, f, today) {
+    const unset = e.now && e.mine == null;
+    const tip = [e.mine == null && (e.now ? 'Не отмечена: «Закрыть смену» отметит твоей, а если день закроется сам – не твоей' : 'Угадано по работе за день'),
+      !unset && !shiftMine(e) && 'Лиды, чаты и ссылки чужой смены не идут в итог'].filter(Boolean).join('. ');
+    const [sChip, sBtns] = sheetLine(e), tm = f.team ? teamDayHtml(e.d, f.team) : ['', ''];
+    return '<p class="bs-hist-act"><span class="bs-seg"' + (tip ? ' title="' + esc(tip) + '"' : '') + '>' +
+      [[1, 'моя'], [0, 'не моя']].map(([v, t]) => '<em data-a="mine" data-v="' + v + '"' + (!unset && +shiftMine(e) === v ? ' class="on"' : '') + '>' + t + '</em>').join('') + '</span>' +
+      '<span class="bs-hist-st">' + sChip + tm[0] + '</span>' +
+      '<button data-a="hrep" title="Отчёт за день' + (e.now ? ' – смена ещё идёт' : '') + '">Отчёт</button>' + sBtns + tm[1] +
+      (e.now ? '' : '<button data-a="moveask" title="Поменять дату смены">Перенести</button>') + '</p>' +
+      (e.now ? '' : '<p class="bs-hist-mv"><span>Новая дата смены</span><input type="date" value="' + isoOf(dmyDate(e.d)) + '" max="' + today + '"><button data-a="move" class="bs-main">Перенести</button><button data-a="moveask">Отмена</button></p>');
+  }
+  function openSheet() {
+    closeSale();
+    const wrap = document.createElement('div');
+    wrap.id = 'bsSaleWrap';
+    wrap.innerHTML = '<div id="bsSale" class="bs-backup bs-sheet"><div class="bs-rep-head"><i data-a="back" class="bs-back" title="Назад к истории">' + ico(ICO.back, 18) + '</i><b>Таблицы</b><i title="Закрыть">×</i></div>' +
+      '<section><h4>Своя таблица</h4><p class="bs-sheet-sub">Продажи с твоей долей уходят туда сами, когда закрываешь смену.</p>' +
+      '<details' + (sheetUrl() ? '' : ' open') + '><summary>Как подключить</summary><ol class="bs-tar-help"><li>В таблице: Расширения → Apps Script.</li>' +
+      '<li>Сотри всё и вставь код <button data-a="code">Скопировать код</button> (или <a href="' + SHEET_CODE + '" target="_blank">открой текстом</a>), сохрани.</li>' +
+      '<li>Развернуть → Новое развёртывание → «Веб-приложение»: от имени «меня», доступ «Все».</li><li>Вставь сюда ссылку, которая кончается на /exec.</li></ol></details>' +
+      '<label><span>Ссылка на скрипт</span><input data-k="url" placeholder="https://script.google.com/macros/s/…/exec" spellcheck="false"></label>' +
+      '<div class="bs-sale-note"></div>' +
+      '<div class="bs-rep-btns">' + (sheetUrl() ? '<button data-a="off" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="check" class="bs-main">Сохранить</button></div></section>' +
+      '<section class="bs-team-set"><h4>Таблица отдела <small>необязательно</small></h4><p class="bs-sheet-sub">Оттуда – лиды, чаты и ссылки для старых смен, туда – продано и сумма.</p>' +
+      '<details><summary>Подробнее</summary><div class="bs-tar-help">По твоему блоку помощник отмечает «моя / не моя» (цифры – моя, «выходной» – нет). В пустые клетки пишет сразу, поверх чужих цифр – только после твоего «ок». ' +
+      'Чужие блоки и формулы не трогает. Работает через тот же скрипт – если он старый, обнови код и сделай новую версию развёртывания.</div></details>' +
+      '<label><span>Ссылка на таблицу</span><input data-k="turl" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label>' +
+      '<div class="bs-sheet-2"><label><span>Имя, как в столбце A</span><input data-k="tname" placeholder="Имя"></label>' +
+      '<label title="Пусто – с месяца первой смены в истории"><span>Брать с</span><input data-k="tfrom" type="date"></label></div>' +
+      '<div class="bs-sale-note bs-team-note"></div>' +
+      '<div class="bs-rep-btns">' + (teamCfg().url ? '<button data-a="teamoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="team" class="bs-main">Сохранить</button></div></section>' +
+      '<section class="bs-team-set"><h4>Таблица ОКК <small>необязательно</small></h4><p class="bs-sheet-sub">Оттуда – KPI за месяц: премия умножается на 0,9 / 1 / 1,1. Хватит доступа на просмотр.</p>' +
+      '<details><summary>Подробнее</summary><div class="bs-tar-help">Помощник ищет лист с твоим именем: месяцы – в шапке, KPI – в строке «KPI за день». Если такого листа нет – берёт KPI за текущий месяц со сводного листа (имя в столбце A). ' +
+      'Ничего туда не пишет. Работает через тот же скрипт – если он старый, обнови код и сделай новую версию развёртывания.</div></details>' +
+      '<label><span>Ссылка на таблицу</span><input data-k="ourl" placeholder="https://docs.google.com/spreadsheets/d/…" spellcheck="false"></label>' +
+      '<label><span>Имя, как в таблице ОКК</span><input data-k="oname" placeholder="Имя"></label>' +
+      '<div class="bs-sale-note bs-okk-note"></div>' +
+      '<div class="bs-rep-btns">' + (okkCfg().url ? '<button data-a="okkoff" class="bs-sale-del">Отключить</button>' : '') + '<span class="bs-sp"></span><button data-a="okk" class="bs-main">Сохранить</button></div></section></div>';
+    document.body.appendChild(wrap);
+    const inp = wrap.querySelector('[data-k=url]'), note = wrap.querySelector('.bs-sale-note');
+    const tUrl = wrap.querySelector('[data-k=turl]'), tName = wrap.querySelector('[data-k=tname]'), tNote = wrap.querySelector('.bs-team-note');
+    inp.value = sheetUrl();
+    const tFrom = wrap.querySelector('[data-k=tfrom]');
+    tUrl.value = teamCfg().url || ''; tName.value = teamCfg().name || ''; tFrom.value = teamCfg().from || '';
+    const oUrl = wrap.querySelector('[data-k=ourl]'), oName = wrap.querySelector('[data-k=oname]'), oNote = wrap.querySelector('.bs-okk-note');
+    oUrl.value = okkCfg().url || ''; oName.value = okkCfg().name || '';
+    wrap.addEventListener('click', async ev => {
+      const t = ev.target, a = t.dataset.a;
+      if (a === 'back') return openSales('hist');
+      if (t.matches('.bs-rep-head i')) return closeSale();
+      if (a === 'code') {
+        t.disabled = true;
+        try {
+          const r = await fetch(SHEET_CODE, { cache: 'no-store' });
+          if (!r.ok) throw 0;
+          await navigator.clipboard.writeText(await r.text());
+          t.textContent = 'Скопировано ✓';
+        } catch (err) { t.textContent = 'Не вышло – открой текстом'; }
+        t.disabled = false;
+        return;
+      }
+      if (a === 'off') {
+        if (!confirm('Отключить таблицу? Ссылка удалится из помощника, сама таблица и скрипт останутся.')) return;
+        localStorage.removeItem(SHEET_KEY);
+        return openSales('hist');
+      }
+      if (a === 'teamoff') {
+        if (!confirm('Отключить таблицу отдела? Ссылка и имя удалятся из помощника, сама таблица останется.')) return;
+        localStorage.removeItem(TEAM_KEY);
+        teamTab = null;
+        return openSales('hist');
+      }
+      if (a === 'okkoff') {
+        if (!confirm('Отключить таблицу ОКК? Ссылка и имя удалятся из помощника, KPI в премии больше не учитывается.')) return;
+        localStorage.removeItem(OKK_KEY);
+        localStorage.removeItem(KPI_KEY);
+        return openSales('hist');
+      }
+      if (a === 'okk') {
+        const surl = SHEET_RX.test(inp.value.trim()) ? inp.value.trim() : sheetUrl(), url = oUrl.value.trim(), name = oName.value.trim();
+        if (!surl) return void (oNote.textContent = 'Сначала подключи свою таблицу выше – ОКК читается через тот же скрипт');
+        if (!/\/spreadsheets\/d\/[\w-]{20,}/.test(url)) return void (oNote.textContent = 'Нужна ссылка вида https://docs.google.com/spreadsheets/d/…');
+        if (!name) return void (oNote.textContent = 'Впиши имя, как оно стоит в таблице ОКК (название листа)');
+        t.disabled = true; oNote.textContent = 'Проверяю…';
+        try {
+          const j = await okkRead({ url, name }, surl);
+          jset(OKK_KEY, { url, name });
+          const ms = Object.keys(j.months).sort();
+          oNote.textContent = '✓ Подключено. Лист «' + j.sheet + '», KPI: ' + (ms.length ? ms.map(k => MONTHS[k % 100 - 1] + ' ' + kq(j.months[k]) + '%').join(', ') : 'пока нет');
+        } catch (err) { oNote.textContent = 'Не вышло: ' + err.message; }
+        t.disabled = false;
+        return;
+      }
+      if (a === 'team') {
+        const surl = SHEET_RX.test(inp.value.trim()) ? inp.value.trim() : sheetUrl(), url = tUrl.value.trim(), name = tName.value.trim();
+        if (!surl) return void (tNote.textContent = 'Сначала подключи свою таблицу выше – отдел работает через тот же скрипт');
+        if (!/\/spreadsheets\/d\/[\w-]{20,}/.test(url)) return void (tNote.textContent = 'Нужна ссылка вида https://docs.google.com/spreadsheets/d/…');
+        if (!name) return void (tNote.textContent = 'Впиши имя, как оно стоит в столбце A таблицы отдела');
+        t.disabled = true; tNote.textContent = 'Проверяю…';
+        try {
+          const now = new Date(), j = await sheetPost({ team: { url, name, from: ddmm(now), to: ddmm(now) } }, surl);
+          if (!j.days) throw new Error('обнови код скрипта (кнопка «Скопировать код» выше) и сделай новую версию развёртывания');
+          jset(TEAM_KEY, Object.assign({ url, name }, /^\d{4}-\d\d-\d\d$/.test(tFrom.value) ? { from: tFrom.value } : {}));
+          teamTab = null;
+          const miss = TEAM_K.filter(([k]) => !(j.rows || []).includes(k)).map(x => x[1]);
+          tNote.textContent = '✓ Подключено. Лист «' + j.sheet + '», нашёл строки: ' + TEAM_K.filter(([k]) => (j.rows || []).includes(k)).map(x => x[1]).join(', ') +
+            (miss.length ? ' (нет: ' + miss.join(', ') + ')' : '') + (j.days[ddmm(now)] ? '' : '. Столбца за сегодня пока нет') +
+            (teamStart() ? '. Беру с ' + ddmm(teamStart()) : '');
+        } catch (err) { tNote.textContent = 'Не вышло: ' + err.message; }
+        t.disabled = false;
+        return;
+      }
+      if (a !== 'check') return;
+      const url = inp.value.trim();
+      if (!SHEET_RX.test(url)) return void (note.textContent = 'Нужна ссылка вида https://script.google.com/macros/s/…/exec');
+      t.disabled = true; note.textContent = 'Проверяю…';
+      try {
+        const j = await sheetPost({ ping: 1 }, url);
+        if (!(j.sheets || []).length) throw new Error('скрипт работает, но не нашёл лист продаж – нужна шапка «Продукт» в A1 и «Дата» в O1');
+        jset(SHEET_KEY, { url });
+        note.textContent = '✓ Подключено. Листы продаж: ' + j.sheets.join(', ');
+      } catch (err) { note.textContent = 'Не вышло: ' + err.message; }
+      t.disabled = false;
+    });
+    wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
+  }
+  // ---------- Таблица ОКК: KPI за месяц для премии. Только читаем, через тот же скрипт ----------
+  // Ссылка и имя – только в этом браузере (bsOkk). Прочитанное – в bsKpi {гггг*100+мм: KPI в %}: KPI меняется по ходу месяца,
+  // перечитываем при открытии «Смены» не чаще раза в 10 минут
+  const OKK_KEY = 'bsOkk';
+  const okkCfg = () => jget(OKK_KEY, {});
+  const okkOn = () => !!(sheetUrl() && okkCfg().url && okkCfg().name);
+  let okkPaint = () => {}, okkLast = 0, okkBusy = false;
+  async function okkRead(c, url) {
+    const j = await sheetPost({ okk: { url: c.url, name: c.name } }, url);
+    if (!j.months) throw new Error('обнови код скрипта в таблице («Таблицы» → «Скопировать код», потом новая версия развёртывания)');
+    jset(KPI_KEY, j.months);
+    return j;
+  }
+  function okkSync() {
+    if (!okkOn() || okkBusy || Date.now() - okkLast < 6e5) return;
+    okkBusy = true; okkLast = Date.now();
+    const was = localStorage.getItem(KPI_KEY);
+    okkRead(okkCfg()).catch(() => {}).then(() => { okkBusy = false; if (localStorage.getItem(KPI_KEY) !== was) okkPaint(); });
+  }
+  // ---------- Таблица отдела (общая): свой блок по дням – лиды, чаты, ссылки, продано, сумма. Через тот же скрипт ----------
+  // Ссылка на таблицу отдела и имя в ней – только в этом браузере (bsTeam). Лиды, чаты и ссылки там – правда (их вписывают руками):
+  // ими дополняем старые смены. Продано и сумма – правда в помощнике: их пишем в отдел (в пустые клетки сразу, поверх цифр – после «ок»)
+  const TEAM_KEY = 'bsTeam', TEAM_K = [['leads', 'лиды'], ['chats', 'чаты'], ['links', 'ссылки'], ['bought', 'продано'], ['sum', 'сумма']];
+  const teamCfg = () => jget(TEAM_KEY, {});
+  // с какого дня брать таблицу отдела: из настроек, иначе – с 1-го числа месяца первой смены в истории (раньше – не нужно)
+  function teamStart() {
+    const f = teamCfg().from;
+    if (f) return new Date(f + 'T00:00');
+    const ds = histGet().map(e => dmyDate(e.d)).filter(d => !isNaN(d));
+    if (!ds.length) return null;
+    const m = new Date(Math.min(...ds));
+    return new Date(m.getFullYear(), m.getMonth(), 1);
+  }
+  const teamOn = () => !!(sheetUrl() && teamCfg().url && teamCfg().name);
+  // teamTab – последнее чтение: { days: {дата: {leads, …}}, sheet, got – скольким сменам дописали } | { err }
+  let teamTab = null, teamBusy = false;
+  const teamOff = v => typeof v === 'string' && /выход/.test(v);
+  const teamV = (k, v) => v == null ? 'пусто' : typeof v === 'string' ? '«' + v + '»' : k === 'sum' ? rub(v) + ' ₽' : k === 'bought' ? r2s(v) : v;
+  const teamLbl = k => TEAM_K.find(x => x[0] === k)[1];
+  async function teamRead(from, to) {
+    const c = teamCfg(), j = await sheetPost({ team: { url: c.url, name: c.name, from: from ? ddmm(from) : '', to: ddmm(to) } });
+    if (!j.days) throw new Error('обнови код скрипта в таблице («Таблицы» → «Скопировать код», потом новая версия развёртывания)');
+    return j;
+  }
+  async function teamWrite(cells) {
+    const c = teamCfg(), j = await sheetPost({ teamPut: { url: c.url, name: c.name, cells } });
+    if (!Array.isArray(j.res) || j.res.length !== cells.length) throw new Error('обнови код скрипта в таблице');
+    const st = { ok: 0, changed: 0, formula: 0, nocol: 0, norow: 0 };
+    j.res.forEach(r => { st[r] = (st[r] || 0) + 1; });
+    return st;
+  }
+  const teamMsg = st => [st.ok && 'записал ' + st.ok + ' ' + plural(st.ok, 'клетку', 'клетки', 'клеток'), st.changed && '⚠ ' + st.changed + ' не тронул – там уже вписали другое, сверь заново',
+    st.formula && st.formula + ' – там формула, не трогал', st.nocol && st.nocol + ' – нет столбца этой даты', st.norow && st.norow + ' – нет такой строки в блоке'].filter(Boolean).join(' · ') || 'записывать нечего';
+  // за период (весь – с teamStart): читаем свой блок и дополняем им историю
+  async function teamFetch(from, to) {
+    const st = teamStart();
+    const j = await teamRead(st && (!from || from < st) ? st : from, to || new Date());
+    teamTab = { days: j.days, sheet: j.sheet, got: teamApply(j.days) };
+  }
+  // смены, которые уже есть: «моя / не моя» (если не отмечена) – по блоку: цифры – моя, «выходной» – не моя;
+  // лиды, чаты и ссылки – если в смене их нет. Возвращает, скольким сменам что-то дописали
+  function teamApply(days) {
+    const h = histGet();
+    let n = 0;
+    Object.keys(days).forEach(d => {
+      const t = days[d], es = h.filter(e => e.d === d), num = typeof t.leads === 'number', off = teamOff(t.leads);
+      if (!es.length || !num && !off) return;
+      let ch = false;
+      es.forEach(e => { e.rep = e.rep || {}; if (e.mine == null) { e.mine = num; ch = true; } });
+      const e = num && es.filter(shiftMine).pop();
+      if (e) ['leads', 'chats', 'links'].forEach(k => { if (typeof t[k] === 'number' && (e.rep[k] == null || e.rep[k] === '')) { e.rep[k] = t[k]; ch = true; } });
+      if (ch) n++;
+    });
+    if (n) histSave(h);
+    return n;
+  }
+  // что записать в столбец дня. put – сразу: пустые клетки (лиды, чаты, ссылки – только в мою смену) и «выходной» в продано/сумме,
+  // если в тот день были оплаты; over – там другие продано/сумма: только после «ок». Лиды, чаты, ссылки поверх цифр не пишем
+  function teamCells(d, t, h) {
+    const es = h.filter(e => e.d === d), res = { put: [], over: [] };
+    if (!es.length || !t) return res;
+    const mine = es.some(shiftMine);
+    // продажи дня помощник знает, если в смене есть продажи или цифры продаж (смена из таблицы отдела – только лиды, чаты, ссылки)
+    const sold = es.some(e => (e.sales || []).length || e.rep && (e.rep.bought != null || e.rep.sum != null));
+    const total = k => Math.round(es.reduce((a, e) => a + (+(e.rep || {})[k] || 0), 0) * 100) / 100;
+    const work = k => { const xs = es.filter(e => shiftMine(e) && e.rep && e.rep[k] != null && e.rep[k] !== ''); return xs.length ? xs.reduce((a, e) => a + (+e.rep[k] || 0), 0) : null; };
+    TEAM_K.forEach(([k]) => {
+      if (!(k in t)) return;   // такой строки в блоке нет
+      const was = t[k], money = k === 'bought' || k === 'sum', v = money ? sold ? total(k) : null : mine ? work(k) : null;
+      // 0 лидов или чатов в рабочий день – скорее не посчиталось, такое не пишем
+      if (v == null || !v && (k === 'leads' || k === 'chats')) return;
+      const c = { d, k, v, was };
+      if (was == null) { if (mine || v > 0) res.put.push(c); }
+      else if (typeof was === 'string') { if (money && v > 0) res.put.push(c); }
+      else if (money && Math.abs(was - v) > 0.005) res.over.push(c);
+    });
+    return res;
+  }
+  // клетки списком по дням: «• 15.09: продано 2 → 3, сумма 10 000 ₽ → 13 000 ₽»
+  const teamList = (cs, arrow) => {
+    const by = {};
+    cs.forEach(c => (by[c.d] = by[c.d] || []).push(c));
+    return Object.keys(by).sort((a, b) => dmyDate(a) - dmyDate(b)).map(d => '• ' + d.slice(0, 5) + ': ' +
+      by[d].map(c => teamLbl(c.k) + ' ' + (arrow || c.was != null ? teamV(c.k, c.was) + ' → ' : '') + teamV(c.k, c.v)).join(', ')).join('\n');
+  };
+  const teamDays = cs => new Set(cs.map(c => c.d)).size;
+  // строка карточки сверки: что в таблице отдела не так, как в помощнике
+  function teamRow(cnt) {
+    if (!teamTab) return syncRow('Отдел', 'wait', 'читаю…');
+    if (teamTab.err) return syncRow('Отдел', 'err', 'не прочиталась: ' + esc(teamTab.err));
+    const put = teamDays(cnt.put), over = teamDays(cnt.over), all = teamDays(cnt.put.concat(cnt.over));
+    const bad = [put && 'дописать ' + put + ' ' + plural(put, 'день', 'дня', 'дней'), over && 'расходится ' + over + ' ' + plural(over, 'день', 'дня', 'дней')].filter(Boolean);
+    return syncRow('Отдел', bad.length ? 'warn' : 'ok', (bad.length ? bad.join(' · ') : 'всё сходится') +
+      (teamTab.got ? ' · дописал ' + teamTab.got + ' ' + plural(teamTab.got, 'смене', 'сменам', 'сменам') : ''),
+      (cnt.fresh.length ? '<button data-a="teamimp" title="Дни, где у тебя в таблице отдела цифры, а в помощнике смены нет, – в историю (лиды, чаты, ссылки)">Забрать смены ' + cnt.fresh.length + '</button>' : '') +
+      (all ? '<button data-a="teamexp" title="Записать в таблицу отдела цифры помощника – перед записью покажу список">В отдел ' + all + '</button>' : ''));
+  }
+  // таблица отдела в раскрытой смене: чип (цифры дня – в подсказке) и кнопка «В отдел», если что-то не так
+  function teamDayHtml(d, c) {
+    const t = teamOn() && teamTab && teamTab.days && teamTab.days[d];
+    if (!t) return ['', ''];
+    const bad = c.put.concat(c.over);
+    const nums = 'В таблице отдела: ' + TEAM_K.filter(([k]) => k in t).map(([k, l]) => l + ' ' + (t[k] == null ? '–' : typeof t[k] === 'string' ? t[k] : k === 'sum' ? rub(t[k]) + ' ₽' : k === 'bought' ? frac(t[k]) : t[k])).join(', ');
+    const txt = c.over.length ? 'в отделе ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.was)).join(', ') : c.put.length ? 'в отделе пусто: ' + c.put.map(x => teamLbl(x.k)).join(', ') : 'отдел';
+    return ['<i class="bs-chip" data-st="' + (bad.length ? 'warn' : 'ok') + '" title="' + esc(nums + (bad.length ? '\n\nНадо записать:\n' + teamList(bad) : '')) + '">' + esc(txt) + '</i>',
+      bad.length ? '<button data-a="teamexp" data-d="' + d + '" title="Записать в таблицу отдела цифры этого дня – перед записью покажу список">В отдел</button>' : ''];
+  }
+  // после «Закрыть смену»: цифры дня – в пустые клетки его столбца (и вместо «выходного», если были оплаты)
+  async function teamCloseDay(d) {
+    const j = await teamRead(dmyDate(d), dmyDate(d)), t = j.days[d];
+    if (!t) throw new Error('нет столбца ' + d.slice(0, 5) + ' – добавь его в таблицу отдела, потом «В отдел» в истории');
+    const c = teamCells(d, t, histGet());
+    const st = c.put.length ? await teamWrite(c.put) : null;
+    return [c.put.length ? 'записал ' + teamList(c.put).replace(/^• /, '') : '', st && st.ok < c.put.length ? teamMsg(st) : '',
+      c.over.length ? '⚠ там уже ' + c.over.map(x => teamLbl(x.k) + ' ' + teamV(x.k, x.was) + ', у тебя ' + teamV(x.k, x.v)).join('; ') + ' – поправь в «Истории» («В отдел»)' : ''].filter(Boolean).join(' · ') || 'всё уже вписано';
   }
   // ---------- Резервная копия: все данные помощника (ключи bs* в localStorage) в файл и обратно ----------
   const bakKeys = () => Object.keys(localStorage).filter(k => /^bs[A-Z]/.test(k));
@@ -2178,6 +3672,9 @@
     }
     return '';
   }
+  // тот же человек: тот же чат или та же почта
+  const mailOf = x => String(x.email || '').trim().toLowerCase();
+  const samePerson = (s, x) => s.dlg === x.dlg || !!mailOf(s) && mailOf(s) === mailOf(x);
   function parseSales(text) {
     const parts = [];
     let cur = null;
@@ -2243,10 +3740,20 @@
       return x;
     });
     // одну продажу часто присылают дважды (исправленную или «докреплю») – берём нижнюю
-    res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.dlg === x.dlg && y.price === x.price)) x.bad = 'повтор ниже'; });
+    res.forEach((x, i) => { if (!x.bad && res.slice(i + 1).some(y => y.price === x.price && samePerson(y, x))) x.bad = 'повтор ниже'; });
     return res;
   }
   // day – 'ГГГГ-ММ-ДД': продажи за прошлый день уходят в «Историю», за сегодня – в текущую смену
+  // та же продажа уже есть в списке: тот же чат и тариф или цена – тогда дописываем пустые поля (почту, имя…) из отчёта
+  // другая сумма в том же чате – это вторая оплата, её добавляем отдельно
+  const impSame = (s, x) => s.dlg === x.dlg && String(s.price) === x.price;
+  const IMP_FILL = { email: 'почту', fio: 'имя', nick: 'ник', src: 'источник', quote: 'откуда узнал' };
+  // today – продажа текущей смены (там хранится всё), иначе из истории (только почта и имя); put – записать
+  function impFill(s, x, today, put) {
+    const ks = (today ? Object.keys(IMP_FILL) : ['email', 'fio']).filter(k => !String(s[k] || '').trim() && String(x[k] || '').trim());
+    if (put) ks.forEach(k => { s[k] = x[k]; if (k === 'fio' && !s.who) s.who = x.fio; });
+    return ks;
+  }
   function openImport(day) {
     closeSale();
     if (!meSet()) return askMe();
@@ -2261,41 +3768,66 @@
     document.body.appendChild(wrap);
     const box = wrap.querySelector('#bsSale'), ta = box.querySelector('.bs-imp-in'), out = box.querySelector('.bs-imp-list'), btn = box.querySelector('[data-a="add"]');
     let found = [];
+    const force = new Set();   // повторы, которые всё-таки добавить (клик по строке)
     const dayInp = box.querySelector('.bs-imp-day input');
     const target = () => { const d = fromIso(dayInp.value); return d && ddmm(d) !== ddmm(new Date()) ? ddmm(d) : ''; };
     const paint = () => {
       const td = target(), me = meName();
       box.querySelector('.bs-imp-day u').textContent = td ? 'прошлый день – продажи уйдут в «Историю»' : 'сегодня – в текущую смену';
       const have = td ? histGet().filter(e => e.d === td).flatMap(e => e.sales) : salesGet();
-      found = parseSales(ta.value).map(x => Object.assign(x, {
-        mine: !x.bad && x.mops.includes(me),
-        dup: have.some(s => s.dlg === x.dlg && (norm(s.name) === norm(x.name) || String(s.price) === x.price)),
-      }));
-      const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine);
+      // остальные продажи (другие дни истории, текущая смена) – там ищем повторы из ТГ и оплаты того же человека
+      const now = ddmm(new Date());
+      const prior = histGet().filter(e => e.d !== td).flatMap(e => e.sales.map(s => ({ s, d: e.d })))
+        .concat(td ? salesGet().map(s => ({ s, d: now })) : [], have.map(s => ({ s, d: td || now })));
+      const paid = o => o.d.slice(0, 5) + ' – ' + rub(saleTotal(o.s)) + ' ₽';
+      found = parseSales(ta.value).map((x, i, all) => {
+        const k = i + ':' + x.dlg + ':' + x.price, forced = force.has(k);
+        // клик по строке («всё-таки добавить») – отдельная продажа, ничего не дописываем
+        const twin = x.bad || forced ? null : have.find(s => impSame(s, x));
+        Object.assign(x, { k, mine: !x.bad && x.mops.includes(me), dup: !!twin, twin: !!twin, fill: twin ? impFill(twin, x, !td) : [], seen: '', warn: '' });
+        if (x.bad || twin) return x;
+        // та же оплата уже внесена – скорее всего, в ТГ продублировали (ежемесячных оплат у нас нет)
+        const same = prior.find(o => samePerson(o.s, x) && String(o.s.price) === x.price);
+        if (same) { x.seen = 'уже есть ' + paid(same); x.dup = !forced; return x; }
+        // тот же человек с другой суммой – добавим, но пусть перепроверят
+        const other = prior.filter(o => samePerson(o.s, x)).map(paid).concat(all.filter(y => y !== x && !y.bad && samePerson(y, x)).map(y => 'в этом тексте – ' + rub(saleTotal(y)) + ' ₽'));
+        if (other.length) x.warn = 'у человека уже есть оплата: ' + other.join(', ') + ' – перепроверь';
+        return x;
+      });
+      const ok = found.filter(x => !x.bad && !x.dup), my = ok.filter(x => x.mine), fills = found.filter(x => x.fill.length);
       out.innerHTML = found.length ? found.map(x =>
-        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
+        '<div class="bs-imp-row' + (!x.bad && !x.dup ? '' : ' bs-off') + '"' + (x.seen || x.twin ? ' data-k="' + esc(x.k) + '" title="' + (x.dup ? 'Если это другая оплата – нажми, добавлю отдельно' : 'Нажми, чтобы не добавлять') + '"' : '') + '><b>' + esc(x.fio || 'чат ' + x.dlg) + x.mops.map(m => '<s class="bs-mop" data-m="' + esc(m) + '">' + esc(m) + '</s>').join('') + '</b>' +
         '<em>' + (x.price ? rub(saleTotal(x)) + ' ₽' : '?') + ' · ' + (x.mine ? String(shareFor(x.mops.length)).replace('.', ',') : '0') + '</em><span>' + esc(x.name) + '</span>' +
-        '<u>' + (x.bad ? x.bad + ' – пропущу' : x.dup ? 'уже в списке' : x.mine ? '' : 'не твоя – без учёта в сумме') + '</u></div>').join('')
+        '<u' + (x.warn || x.seen ? ' class="bs-warn"' : '') + '>' + (x.bad ? x.bad + ' – пропущу' : x.seen ? x.seen + (x.dup ? ' – повтор, пропущу' : ' – добавлю ещё раз') : x.fill.length ? 'уже в списке – допишу ' + x.fill.map(k => IMP_FILL[k]).join(', ') + ' (другая оплата – нажми)' : x.dup ? 'уже в списке (другая оплата – нажми)' : [x.warn, !x.mine && 'не твоя – без учёта в сумме'].filter(Boolean).join(' · ')) + '</u></div>').join('')
         : (ta.value.trim() ? '<div class="bs-tar-help">Продаж не нашёл – в тексте должна быть ссылка на чат BlueSales.</div>' : '');
-      btn.disabled = !ok.length;
-      btn.textContent = ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareFor(x.mops.length), 0)) + ' ₽' : 'Добавить';
+      btn.disabled = !ok.length && !fills.length;
+      btn.textContent = (ok.length ? 'Добавить ' + ok.length + ' · твоих ' + my.length + ' · +' + rub(my.reduce((a, x) => a + saleTotal(x) * shareX(shareFor(x.mops.length)), 0)) + ' ₽' : 'Добавить') +
+        (fills.length ? ' · дописать ' + fills.length : '');
     };
     ta.addEventListener('input', paint);
     dayInp.addEventListener('change', paint);
     paint();
     box.addEventListener('click', ev => {
-      const a = ev.target.dataset.a;
+      const a = ev.target.dataset.a, row = ev.target.closest('.bs-imp-row[data-k]');
+      if (row) { const k = row.dataset.k; force.has(k) ? force.delete(k) : force.add(k); return paint(); }
       if (ev.target.matches('.bs-rep-head i')) return closeSale();
       if (a === 'back') return openSales(target() ? 'hist' : 'shift');
       if (a !== 'add') return;
-      const td = target();
+      const td = target(), fills = found.filter(x => x.fill.length);
+      const done = n => '✓ ' + [n && 'добавлено продаж: ' + n, fills.length && 'дописано: ' + fills.length].filter(Boolean).join(', ');
       if (td) {
-        const xs = found.filter(x => !x.bad && !x.dup).map(f => ({ dlg: f.dlg, name: f.name, price: f.price, disc: f.disc, mops: f.mops, share: shareFor(f.mops.length), fio: f.fio, who: f.fio, cnt: f.mine }));
-        if (!histAddDay(td, xs)) return;
+        if (fills.length) {
+          const h = histGet();
+          h.filter(e => e.d === td).forEach(e => e.sales.forEach(sl => { const f = fills.find(x => impSame(sl, x)); if (f) impFill(sl, f, false, true); }));
+          if (!histSave(h)) return;
+        }
+        const xs = found.filter(x => !x.bad && !x.dup).map(f => ({ dlg: f.dlg, name: f.name, price: f.price, disc: f.disc, mops: f.mops, share: shareFor(f.mops.length), fio: f.fio, who: f.fio, email: f.email, cnt: f.mine }));
+        if (xs.length && !histAddDay(td, xs)) return;
         openSales('hist');
-        return tarHint('✓ В историю за ' + td + ' добавлено продаж: ' + xs.length, true);
+        return tarHint(done(xs.length) + ' (история за ' + td + ')', true);
       }
       const all = salesGet();
+      all.forEach(sl => { const f = fills.find(x => impSame(sl, x)); if (f) impFill(sl, f, true, true); });
       let n = 0;
       found.filter(x => !x.bad && !x.dup).forEach(f => {
         const x = { id: Date.now().toString(36) + (n++), dlg: f.dlg, t: Date.now(), tar: 'own', name: f.name, price: f.price, disc: f.disc,
@@ -2307,7 +3839,7 @@
       });
       salesSet(all);
       openSales();
-      tarHint('✓ Добавлено продаж: ' + n, true);
+      tarHint(done(n), true);
     });
     wrap.addEventListener('mousedown', ev => { if (ev.target === wrap) closeSale(); });
     ta.focus();
@@ -2340,7 +3872,95 @@
       '#bsSaleWrap{position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center}' +
       '#bsSale{width:760px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;box-sizing:border-box;padding:14px 16px;border-radius:14px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 40px rgba(0,0,0,.25)}' +
-      '#bsSale.bs-sales{width:600px}' +
+      '#bsSale.bs-sales{width:800px}#bsSale [hidden]{display:none!important}' +
+      '.bs-sal b[data-a]{cursor:pointer}.bs-sal b[data-a]:hover{text-decoration:underline dotted;text-underline-offset:3px}' +
+      '#bsSale .bs-tab>.bs-st-top{display:flex;align-items:center;justify-content:space-between;margin:0 0 12px}' +
+      '.bs-st-nav{display:flex;align-items:center;gap:6px}.bs-st-nav b{min-width:128px;text-align:center;font-size:16px;font-weight:600}' +
+      '.bs-st-nav button,.bs-st-rate>button{width:28px;height:28px;display:flex;align-items:center;justify-content:center;padding:0;border:0;border-radius:8px;background:none;color:var(--bs-muted,#888);cursor:pointer}' +
+      '.bs-st-nav button:hover:not([disabled]),.bs-st-rate>button:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}.bs-st-nav button[disabled]{opacity:.3;cursor:default}' +
+      '.bs-st-nav button:last-child svg{transform:scaleX(-1)}' +
+      '.bs-st-rate{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-rate b{color:var(--bs-text,#222);font-weight:600}.bs-st-rate small{font-size:12px}' +
+      '.bs-st-rate input{width:64px;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}.bs-st-rate input+input,.bs-st-rate input:nth-of-type(2){width:44px}' +
+      '.bs-st-rate button[data-a=rateok]{width:auto;height:auto;padding:3px 10px;margin-left:4px;background:var(--bs-accent,#3b82f6);color:#fff;border-radius:6px}.bs-st-rate button[data-a=rateok]:hover{background:var(--bs-accent,#3b82f6);color:#fff;filter:brightness(1.1)}' +
+      '.bs-st-c{position:relative;padding:12px 14px 14px;border:1px solid var(--bs-border,#D9E0E7);border-radius:14px;min-width:0}' +
+      '.bs-st-c>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:8px}.bs-st-c h4{margin:0;font-size:12.5px;font-weight:500;color:var(--bs-muted,#888)}' +
+      '.bs-st-row1{display:grid;grid-template-columns:1.25fr 1fr .85fr;gap:12px;margin-bottom:12px}.bs-st-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}' +
+      '.bs-st-row3{display:grid;grid-template-columns:1fr 1.2fr;gap:12px}' +
+      '.bs-st-big{display:flex;align-items:baseline;gap:8px;margin-bottom:12px}.bs-st-big>b{font-size:28px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums;line-height:1}' +
+      '.bs-st-d{font-size:11.5px;font-weight:600;padding:1px 6px;border-radius:7px;background:rgba(127,127,127,.12);color:var(--bs-muted,#888);white-space:nowrap}.bs-st-d.up{background:rgba(22,163,74,.12);color:#16a34a}.bs-st-d.down{background:rgba(217,119,6,.13);color:#d97706}' +
+      '.bs-st-stack{display:flex;gap:3px;height:10px;margin-bottom:10px}.bs-st-stack i{border-radius:5px;min-width:3px}' +
+      '.bs-st-stack .p,.bs-st-leg i.p,.bs-st-lg i.p,.bs-st-mcs i.p{background:linear-gradient(90deg,#22c55e,#16a34a)}.bs-st-stack .s,.bs-st-leg i.s,.bs-st-lg i.s,.bs-st-mcs i.s{background:linear-gradient(90deg,#60a5fa,#3b82f6)}' +
+      '.bs-st-leg{display:flex;align-items:center;gap:7px;margin:0;padding:3px 0;font-size:12.5px}.bs-st-leg i{width:9px;height:9px;border-radius:3px}.bs-st-leg small{color:var(--bs-muted,#888);font-size:11.5px}' +
+      '.bs-st-leg em{margin-left:auto;font-style:normal;font-weight:600;font-variant-numeric:tabular-nums}' +
+      '.bs-st-fc{margin:8px 0 0;padding:7px 10px;border-radius:9px;background:var(--bs-hover,#f5f7fa);font-size:12px;color:var(--bs-muted,#888)}.bs-st-fc b{color:var(--bs-text,#222);white-space:nowrap}' +
+      '.bs-st-hint{margin:8px 0 0;font-size:12px;line-height:1.45;color:var(--bs-muted,#888)}.bs-st-hint b{color:var(--bs-text,#222)}' +
+      '.bs-st-pv{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:14px}.bs-st-pv>b{font-size:28px;font-weight:700;letter-spacing:-.5px;line-height:1}.bs-st-pv>span{font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-pv .bs-kpi{margin:0 0 0 auto}' +
+      '.bs-st-track{position:relative;height:10px;margin-bottom:22px;border-radius:5px;background:linear-gradient(90deg,rgba(245,158,11,.22) var(--z1),rgba(59,130,246,.16) var(--z1) var(--z2),rgba(34,197,94,.22) var(--z2))}' +
+      '.bs-st-track>i{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,#60a5fa,#3b82f6);box-shadow:0 1px 4px rgba(59,130,246,.4)}' +
+      '.bs-st-track>s{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--bs-panel,#fff);text-decoration:none}' +
+      '.bs-st-track>s small{position:absolute;top:18px;left:50%;transform:translateX(-50%);font-size:10.5px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-st-gauge{position:relative;display:flex;flex-direction:column;align-items:center;margin-top:-2px}.bs-st-gauge svg{overflow:visible}' +
+      '.bs-st-gtr,.bs-st-gv{fill:none;stroke-width:9;stroke-linecap:round}.bs-st-gtr{stroke:var(--bs-hover,rgba(127,127,127,.15))}.bs-st-gv{stroke:#3b82f6}.bs-st-gauge.up .bs-st-gv{stroke:#22c55e}.bs-st-gauge.down .bs-st-gv{stroke:#f59e0b}' +
+      '.bs-st-gt line{stroke:var(--bs-panel,#fff);stroke-width:2}' +
+      '.bs-st-gauge>b{margin-top:-30px;font-size:22px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.bs-st-gauge>small{font-size:11px;color:var(--bs-muted,#888)}' +
+      '.bs-st-kz{display:flex;justify-content:center;gap:4px;margin:10px 0 0}.bs-st-kz span{font-size:10.5px;padding:1px 6px;border-radius:7px;color:var(--bs-muted,#888);white-space:nowrap}' +
+      '.bs-st-kz span.on{background:rgba(59,130,246,.13);color:#3b82f6;font-weight:600}.bs-st-kz span.on.up{background:rgba(22,163,74,.13);color:#16a34a}.bs-st-kz span.on.down{background:rgba(217,119,6,.14);color:#d97706}' +
+      '.bs-st-days{margin-bottom:12px}.bs-st-met em{padding:3px 10px;font-size:12px}' +
+      '.bs-st-bars{position:relative;display:flex;gap:3px;height:170px;padding-top:6px}' +
+      '.bs-st-bars>div{position:relative;flex:1 1 0;min-width:0;display:flex;flex-direction:column}.bs-st-bars p{position:relative;flex:1;margin:0;border-radius:5px}' +
+      '.bs-st-bars>div:hover p{background:var(--bs-hover,rgba(127,127,127,.08))}' +
+      '.bs-st-bars p i{position:absolute;left:0;right:0;bottom:0;height:calc(var(--h) * 100%);min-height:3px;border-radius:5px 5px 3px 3px;background:rgba(148,163,184,.55);transition:height .35s}' +
+      '.bs-st-bars .mine p i{background:linear-gradient(180deg,#60a5fa,#3b82f6)}.bs-st-bars .best p i{background:linear-gradient(180deg,#4ade80,#16a34a)}.bs-st-bars p i.z{min-height:0;height:0}' +
+      '.bs-st-bars span{height:18px;line-height:18px;text-align:center;font-size:9.5px;color:var(--bs-muted,#888);font-variant-numeric:tabular-nums}.bs-st-bars .we span{opacity:.55}' +
+      '.bs-st-bars .now span{color:#fff;background:var(--bs-accent,#3b82f6);border-radius:5px;font-weight:600}' +
+      '.bs-st-bars>div>b{display:none;position:absolute;z-index:2;left:50%;bottom:calc(18px + (100% - 18px) * var(--h) + 8px);transform:translateX(-50%);padding:6px 9px;border-radius:9px;white-space:nowrap;font-size:11.5px;font-weight:400;color:var(--bs-muted,#888);background:var(--bs-panel,#fff);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 6px 18px rgba(0,0,0,.16);pointer-events:none}' +
+      '.bs-st-bars>div:hover>b{display:block}.bs-st-bars>div>b em{display:block;font-style:normal;font-size:13px;font-weight:600;color:var(--bs-text,#222)}.bs-st-bars>div>b small{display:block;font-size:10.5px}' +
+      '.bs-st-bars>div:nth-child(-n+3)>b{left:0;transform:none}.bs-st-bars>div:nth-last-child(-n+4)>b{left:auto;right:0;transform:none}' +
+      '.bs-st-bars>s{position:absolute;left:0;right:0;bottom:calc(18px + (100% - 24px) * var(--h));border-top:1.5px dashed rgba(59,130,246,.55);text-decoration:none;pointer-events:none}' +
+      '.bs-st-bars>s small{position:absolute;right:0;bottom:2px;padding:0 5px;border-radius:5px;font-size:10.5px;color:#3b82f6;background:var(--bs-panel,#fff)}' +
+      '.bs-st-lg{display:flex;flex-wrap:wrap;gap:4px 16px;margin:10px 0 0;font-size:11.5px;color:var(--bs-muted,#888)}.bs-st-lg span{display:flex;align-items:center;gap:6px}.bs-st-lg b{color:var(--bs-text,#222);font-weight:600}' +
+      '.bs-st-lg i{width:9px;height:9px;border-radius:3px;background:rgba(148,163,184,.55)}.bs-st-lg i.mine{background:#3b82f6}.bs-st-lg span:nth-child(3){display:block;margin-left:auto}' +
+      '.bs-st-sub{font-size:12px;color:var(--bs-muted,#888)}.bs-st-recs{margin-bottom:12px}.bs-st-rcs{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}' +
+      '.bs-st-rc{position:relative;padding:12px;border-radius:12px;background:var(--bs-hover,rgba(127,127,127,.07));display:flex;flex-direction:column;gap:2px;min-width:0}' +
+      '.bs-st-rc>i{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:6px;color:#fff}' +
+      '.bs-st-rc.fl>i{background:linear-gradient(135deg,#fb923c,#ef4444)}.bs-st-rc.tr>i{background:linear-gradient(135deg,#fcd34d,#f59e0b)}.bs-st-rc.st>i{background:linear-gradient(135deg,#a78bfa,#7c3aed)}' +
+      '.bs-st-rc.ch>i{background:linear-gradient(135deg,#60a5fa,#3b82f6)}.bs-st-rc.mo>i{background:linear-gradient(135deg,#4ade80,#16a34a)}' +
+      '.bs-st-rc>b{font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bs-st-rc>span{font-size:12px;color:var(--bs-text,#222)}.bs-st-rc>small{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-st-rc>em{position:absolute;top:12px;right:10px;padding:2px 7px;border-radius:20px;font-style:normal;font-size:10.5px;font-weight:600;color:#16a34a;background:rgba(22,163,74,.12)}' +
+      '.bs-hero-m .bs-hero-rec{display:inline-flex;align-items:center;gap:5px;align-self:flex-start;margin-top:2px;padding:2px 9px 2px 7px;border-radius:20px;font-size:12px;color:#ea580c;background:rgba(249,115,22,.12)}' +
+      '.bs-hero-m .bs-hero-rec i{font-style:normal;font-weight:700}.bs-hero-m .bs-hero-rec.gold{color:#b45309;background:rgba(245,158,11,.16)}' +
+      '.bs-st-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}' +
+      '.bs-st-tiles div{display:flex;flex-direction:column;gap:3px;padding:11px 14px;border-radius:14px;background:var(--bs-hover,#f5f7fa)}.bs-st-tiles span{font-size:12px;color:var(--bs-muted,#888)}' +
+      '.bs-st-tiles b{font-size:19px;font-weight:700;letter-spacing:-.3px;font-variant-numeric:tabular-nums}.bs-st-tiles .bs-st-d{align-self:flex-start}' +
+      '.bs-st-donut{display:flex;align-items:center;gap:16px}.bs-st-dc{position:relative;flex:none;width:118px;height:118px;display:flex;flex-direction:column;align-items:center;justify-content:center}' +
+      '.bs-st-dc svg{position:absolute;inset:0}.bs-st-dc circle{fill:none;stroke-width:13}.bs-st-dtr{stroke:var(--bs-hover,rgba(127,127,127,.12))}' +
+      '.bs-st-dc b{font-size:22px;font-weight:700;line-height:1.1}.bs-st-dc small{font-size:11px;color:var(--bs-muted,#888)}' +
+      '.bs-st-donut ul{flex:1;min-width:0;margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}' +
+      '.bs-st-donut li{display:grid;grid-template-columns:9px 1fr auto;grid-template-rows:auto auto;column-gap:8px;align-items:center;font-size:12.5px}' +
+      '.bs-st-donut li i{width:9px;height:9px;border-radius:3px}.bs-st-donut li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.bs-st-donut li em{grid-column:2;grid-row:2;font-style:normal;font-size:11px;color:var(--bs-muted,#888);font-variant-numeric:tabular-nums}.bs-st-donut li small{grid-column:3;grid-row:1;font-weight:600;font-variant-numeric:tabular-nums}' +
+      '.bs-st-fun .bs-st-fs{margin:0 auto;padding:9px 10px;border-radius:12px;text-align:center;font-size:12.5px;color:#fff;white-space:nowrap;box-sizing:border-box;background:linear-gradient(90deg,#a78bfa,#7c3aed)}' +
+      '.bs-st-fun .bs-st-fs b{font-size:16px;font-variant-numeric:tabular-nums}.bs-st-fun .bs-st-fs.k{background:linear-gradient(90deg,#60a5fa,#3b82f6)}.bs-st-fun .bs-st-fs.s{background:linear-gradient(90deg,#4ade80,#16a34a)}' +
+      '.bs-st-fx{display:flex;justify-content:center;align-items:center;gap:5px;padding:5px 0;font-size:12px;color:var(--bs-muted,#888)}.bs-st-fx span{font-size:13px}.bs-st-fx b{color:#16a34a;font-size:13px}' +
+      '.bs-st-mcs{display:flex;gap:10px;height:150px}.bs-st-mcs>div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;cursor:pointer;border-radius:9px;padding:4px 0 0}' +
+      '.bs-st-mcs>div:hover{background:var(--bs-hover,rgba(127,127,127,.08))}.bs-st-mcs>div.fut{opacity:.35;cursor:default}' +
+      '.bs-st-mcs>div>b{font-size:11px;font-weight:600;color:var(--bs-muted,#888);white-space:nowrap}.bs-st-mcs>div.on>b{color:var(--bs-text,#222)}' +
+      '.bs-st-mcs p{width:62%;max-width:44px;display:flex;flex-direction:column;gap:2px;margin:0;opacity:.45;transition:height .35s}.bs-st-mcs .on p{opacity:1}' +
+      '.bs-st-mcs p i{min-height:0;border-radius:4px}.bs-st-mcs p i:first-child{border-radius:7px 7px 4px 4px}' +
+      '.bs-st-mcs span{font-size:11px;color:var(--bs-muted,#888)}.bs-st-mcs .on span{color:var(--bs-text,#222);font-weight:600}' +
+      '@media (max-width:760px){.bs-st-row1,.bs-st-row2,.bs-st-row3{grid-template-columns:1fr}.bs-st-tiles{grid-template-columns:1fr 1fr}}' +
+      // форма продажи: блоки с подписями, поля парами, справа – пузырь с текстом для Telegram, кнопки прилипают к низу
+      '#bsSale.bs-sform{width:800px}.bs-sform .bs-sale-cols{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px}.bs-sform .bs-sale-form textarea{font-family:inherit;font-size:13px}.bs-sform .bs-sale-form{gap:0}' +
+      '.bs-sf-sec{display:flex;flex-direction:column;gap:8px;padding:11px 0;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-sf-sec:first-child{padding-top:2px;border-top:0}' +
+      '.bs-sform h4{margin:0;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--bs-muted,#888)}' +
+      '.bs-sf-row{display:flex;gap:8px}.bs-sf-row>label{flex:1 1 0;min-width:0}.bs-sf-row>.bs-sf-w2{flex-grow:2}' +
+      '.bs-sf-team{display:flex;flex-wrap:wrap;gap:8px 18px}.bs-sf-team .bs-chips em{padding:4px 10px}.bs-sform .bs-sale-pay>span{display:none}' +
+      '#bsSale .bs-sale-prem{flex-direction:row;align-items:center;gap:10px}.bs-sale-prem span{flex:1;min-width:0;line-height:1.35}.bs-sale-prem input{flex:none;width:150px}.bs-sale-prem small{display:block;font-size:11px}' +
+      '.bs-sform .bs-sale-prev{position:sticky;top:0;align-self:start;gap:8px}' +
+      '.bs-sform .bs-sale-prev textarea{flex:none;min-height:0;max-height:52vh;padding:11px 13px;border:0;border-radius:14px 14px 14px 4px;background:rgba(59,130,246,.09);font-family:inherit;font-size:12.5px;line-height:1.5;overflow:auto}' +
+      '.bs-sform .bs-sale-note{padding:8px 11px;border-radius:10px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222);font-size:12px;line-height:1.45}' +
+      '.bs-sform .bs-rep-btns{position:sticky;bottom:-14px;z-index:1;margin:6px -16px -14px;padding:10px 16px 14px;border-top:1px solid var(--bs-border,#D9E0E7);background:var(--bs-panel,#fff)}.bs-sform .bs-tar-st{margin-right:auto;align-self:center}' +
+      '.bs-pay{gap:5px}.bs-pay b{flex-basis:100%;height:0}.bs-pay i{display:flex;align-items:center;min-width:64px;font-style:normal;font-size:11.5px;color:var(--bs-muted,#888)}.bs-pay em{padding:3px 10px;font-size:12px}' +
       '.bs-sale-cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media (max-width:700px){.bs-sale-cols{grid-template-columns:1fr}}' +
       '.bs-sale-form{display:flex;flex-direction:column;gap:7px}' +
       '#bsSale label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--bs-muted,#888)}' +
@@ -2356,6 +3976,7 @@
       '.bs-sale-del{color:#e04848!important;border-color:transparent!important}' +
       '.bs-sale-dup{display:flex;align-items:center;gap:10px;margin:0 0 10px;padding:8px 10px;border-radius:9px;background:rgba(245,158,11,.14);color:var(--bs-text,#222);font-size:12.5px;line-height:1.35}' +
       '.bs-sale-dup button{flex:none;padding:5px 12px;border:1px solid #f59e0b;border-radius:7px;background:none;color:inherit;font-size:12.5px;cursor:pointer}.bs-sale-dup button:hover{background:#f59e0b;color:#fff}' +
+      '.bs-sale-dups{flex-direction:column;align-items:stretch;gap:6px}.bs-sale-dups p{display:flex;align-items:center;gap:10px;margin:0}.bs-sale-dups p span{flex:1}' +
       '#bsSale.bs-hist{width:560px}' +
       '.bs-rep-head .bs-seg{margin-right:12px}' +
       '.bs-seg{display:inline-flex;gap:2px;padding:2px;border-radius:9px;background:var(--bs-hover,rgba(0,0,0,.06))}' +
@@ -2364,9 +3985,32 @@
       '.bs-hist-per{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}' +
       '.bs-range{display:inline-flex;align-items:center;gap:5px;color:var(--bs-muted,#888)}#bsSale .bs-range input{padding:3px 6px;font-size:12.5px}#bsSale .bs-range.on input{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-stats{display:flex;border:1px solid var(--bs-border,#D9E0E7);border-radius:10px;margin-bottom:10px}' +
-      '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 12px}' +
+      '.bs-stats div{flex:1 1 0;min-width:0;display:flex;flex-direction:column;gap:2px;padding:7px 10px}' +
       '.bs-stats div+div{border-left:1px solid var(--bs-border,#D9E0E7)}.bs-stats span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}' +
       '.bs-stats b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}' +
+      '.bs-head-d{margin-left:10px;font-size:13px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hero{display:flex;align-items:center;gap:18px;padding:0 2px 14px;margin-bottom:10px;border-bottom:1px solid var(--bs-border,#D9E0E7)}' +
+      '.bs-hero i{font-style:normal;color:var(--bs-text,#222);font-weight:600}' +
+      '.bs-goal{position:relative;flex:none;width:80px;height:80px;padding:0;border:0;background:none;cursor:pointer;color:var(--bs-text,#222);display:flex;flex-direction:column;align-items:center;justify-content:center}' +
+      '.bs-goal svg{position:absolute;inset:0}.bs-goal circle{fill:none;stroke:var(--bs-border,#D9E0E7);stroke-width:7}.bs-goal circle.bs-goal-on{stroke:var(--bs-accent,#3b82f6);stroke-linecap:round;transition:stroke-dasharray .4s}' +
+      '.bs-goal b{font-size:18px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}.bs-goal small{font-size:11px;color:var(--bs-muted,#888);margin-top:2px}.bs-goal:hover circle:first-child{stroke:var(--bs-hover,rgba(0,0,0,.1))}' +
+      '.bs-hero-m{display:flex;flex-direction:column;gap:3px;min-width:0}.bs-hero-m b{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.3px;line-height:1.15}' +
+      '.bs-hero-m span{font-size:13px;color:var(--bs-muted,#888)}.bs-hero-g input{width:54px;margin:0 4px;padding:2px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}' +
+      '.bs-hero-g button{margin-left:4px;padding:2px 10px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:var(--bs-accent,#3b82f6);color:#fff;font:inherit;cursor:pointer}' +
+      '.bs-hero-r{margin-left:auto;display:flex;gap:22px;text-align:right}.bs-hero-r div{display:flex;flex-direction:column;gap:2px}.bs-hero-r span{font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-kpi{display:flex;gap:4px;justify-content:flex-end;margin-top:2px;white-space:nowrap}.bs-kpi em{font-style:normal;font-size:10.5px;line-height:16px;padding:0 6px;border-radius:8px;background:rgba(127,127,127,.13);color:var(--bs-muted,#888)}' +
+      '.bs-kpi em.up{background:rgba(22,163,74,.13);color:#16a34a}.bs-kpi em.down{background:rgba(217,119,6,.14);color:#d97706}.bs-kpi em.no{background:none;box-shadow:inset 0 0 0 1px var(--bs-border,#D9E0E7)}.bs-pm{cursor:default}' +
+      '.bs-ptip{display:block;visibility:hidden;opacity:0;transition:opacity .12s .2s,visibility 0s .32s;position:fixed;z-index:3200;width:270px;padding:10px 12px;border-radius:12px;cursor:text;user-select:text;-webkit-user-select:text;text-align:left;background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 12px 32px rgba(0,0,0,.2)}.bs-pm:hover>.bs-ptip{visibility:visible;opacity:1;transition-delay:.05s,0s}' +
+      '.bs-ptip::before{content:"";position:absolute;left:-12px;right:-12px;top:-12px;height:12px}.bs-ptip.bs-up::before{top:auto;bottom:-12px}' +
+      '.bs-ptip p{display:flex;gap:10px;justify-content:space-between;align-items:baseline;margin:0;padding:3px 0;font-size:12.5px;line-height:1.35}.bs-ptip i{font-style:normal;color:var(--bs-muted,#888)}.bs-ptip em{font-style:normal;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.bs-ptip .bs-pt-k.up em{color:#16a34a}.bs-ptip .bs-pt-k.down em{color:#d97706}.bs-ptip .bs-pt-t{margin-top:4px;padding-top:7px;border-top:1px solid var(--bs-border,#D9E0E7)}.bs-ptip .bs-pt-t i{color:inherit;font-weight:600}.bs-ptip .bs-pt-t em{font-size:14px}' +
+      '.bs-ptip .bs-pt-tab{margin-top:4px}.bs-ptip .bs-pt-n{display:block;padding:0 0 3px;font-size:11.5px;color:var(--bs-muted,#888)}.bs-ptip .bs-pt-n.ok{color:#16a34a}.bs-ptip .bs-pt-n.bad{color:#d97706}' +
+      '.bs-hero-r b{font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}.bs-hero-r b.bs-ok{color:#16a34a}' +
+      '.bs-sw{position:relative;display:inline-block;width:26px;height:15px;border-radius:8px;background:#c9ced6;margin-right:8px;vertical-align:-3px;transition:background .15s}' +
+      '.bs-sw::after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}' +
+      '.bs-mine[data-st=on] .bs-sw{background:#22a55a}.bs-mine[data-st=on] .bs-sw::after{left:13px}.bs-mine[data-st=on]{color:var(--bs-text,#222)}' +
+      '.bs-mine[data-st=wait] .bs-sw{background:none;box-shadow:inset 0 0 0 1.5px #9aa3af}.bs-mine[data-st=wait] .bs-sw::after{background:#9aa3af;left:2px;top:2px}' +
+      '.bs-foot button.bs-icon{padding:6px 9px}.bs-foot button.bs-icon svg{margin:0;vertical-align:-3px}' +
       '.bs-empty{padding:26px 10px;text-align:center;font-size:12.5px;line-height:1.6;color:var(--bs-muted,#888)}' +
       '.bs-foot{display:flex;align-items:center;gap:8px;margin-top:12px}.bs-foot>span{flex:1}' +
       '.bs-foot button{padding:6px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:none;color:var(--bs-text,#222);font-size:12.5px;cursor:pointer;white-space:nowrap}.bs-foot button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
@@ -2375,27 +4019,82 @@
       '.bs-hist-list{display:flex;flex-direction:column;gap:6px}' +
       '.bs-hist-row{display:grid;grid-template-columns:1fr auto 22px;align-items:center;gap:4px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}.bs-hist-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-hist-row>b span{margin-left:6px;font-weight:400;color:var(--bs-muted,#888)}' +
-      '.bs-hist-row em{display:grid;grid-template-columns:72px 104px 64px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
+      '.bs-hist-row>b .bs-hist-mine{margin-left:6px;padding:0 6px;border-radius:6px;font-size:11px;font-weight:400;font-style:normal;color:var(--bs-muted,#888);background:var(--bs-hover,rgba(0,0,0,.06))}.bs-hist-row>b .bs-hist-mine.on{color:#16a34a;background:rgba(22,163,74,.1)}' +
+      '.bs-foot button.bs-mine.on{color:#16a34a}.bs-stats small{font-size:12px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hist-row em{display:grid;grid-template-columns:96px 104px 76px;font-style:normal;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}' +
       '.bs-hist-row em span:first-child,.bs-hist-row em span:last-child{color:var(--bs-muted,#888)}' +
+      '.bs-prem .bs-hist-row em{grid-template-columns:96px 104px 96px 76px}.bs-hist-row em span.bs-hist-prem{color:#16a34a}' +
+      '.bs-stats b i{font-style:normal}.bs-hist-row em span.bs-hist-prem.bs-warn,.bs-sync-p b.bs-warn,.bs-hero-r b.bs-warn{color:#d97706}' +
+      '.bs-prem-v,.bs-prem-q{font-weight:500;font-size:11.5px;color:#16a34a;margin-left:6px;white-space:nowrap}.bs-prem-q,.bs-sale-prem small.bs-prem-q{color:#d97706}' +
+      '.bs-sales-row .bs-prem-v,.bs-sales-row .bs-prem-q{grid-column:2;text-align:right;margin:0}' +
+      '.bs-hero-m .bs-hero-p i{font-style:normal;color:#16a34a}.bs-hero-m .bs-hero-p b{font-size:12px;margin-left:2px}' +
+      '.bs-hist-zero>b,.bs-hist-zero>em{opacity:.45}.bs-hist-zero.open>b,.bs-hist-zero:hover>b{opacity:1}' +
+      '.bs-hist-row>b .bs-hist-tabm{margin-left:6px;font-size:11px;font-weight:400;font-style:normal;color:#16a34a}.bs-hist-row>b .bs-hist-tabm.bs-warn{color:#d97706}' +
+      '.bs-hist-row>b .bs-hist-mine.bs-warn{color:#d97706;background:rgba(245,158,11,.12)}' +
+      '.bs-hist-sales .bs-hist-onlyh{margin-top:4px;color:#d97706}.bs-hist-sales .bs-hist-only{cursor:default}.bs-hist-only small{color:var(--bs-muted,#888)}.bs-hist-sgap{flex:none;width:18px}' +
       '.bs-hist-sales{display:none;grid-column:1/-1;flex-direction:column;gap:3px;margin-top:4px;padding-top:6px;border-top:1px solid var(--bs-border,#D9E0E7);font-size:12px;cursor:default}.bs-hist-row.open .bs-hist-sales{display:flex}' +
       '.bs-hist-sales div{display:flex;align-items:center;gap:10px}.bs-hist-sales div span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bs-hist-sales div span+span{flex:none;font-variant-numeric:tabular-nums}' +
       '.bs-hist-other{color:var(--bs-muted,#888)}' +
+      '#bsSale svg{pointer-events:none}.bs-foot button svg{vertical-align:-2px;margin-right:6px}' +
+      '.bs-dot{display:inline-block;flex:none;width:7px;height:7px;border-radius:50%;background:#9aa3af}.bs-dot[data-st=ok]{background:#22a55a}.bs-dot[data-st=warn]{background:#f59e0b}.bs-dot[data-st=err]{background:#e04848}' +
+      '.bs-dot[data-st=wait]{background:none;box-shadow:inset 0 0 0 1.5px #9aa3af}.bs-foot .bs-dot{margin:0 0 1px 7px}.bs-foot .bs-mine .bs-dot{margin:0 7px 1px 0}' +
+      '.bs-sync{display:flex;align-items:center;gap:12px;margin:0 0 10px;padding:7px 6px 7px 12px;border:1px solid var(--bs-border,#D9E0E7);border-radius:10px}' +
+      '.bs-sync-l{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}' +
+      '.bs-sync-r{display:flex;align-items:center;gap:8px;min-height:24px;font-size:12.5px}.bs-sync-r b{flex:none;width:96px;font-weight:500}' +
+      '.bs-sync-r span{flex:1;min-width:0;color:var(--bs-muted,#888);line-height:1.35}' +
+      '.bs-sync-r button{flex:none;padding:2px 10px;white-space:nowrap;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer}.bs-sync-r button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-sync-p{flex:none;display:flex;gap:16px;padding:0 4px 0 14px;border-left:1px solid var(--bs-border,#D9E0E7)}.bs-sync-p div{display:flex;flex-direction:column;align-items:flex-end;gap:1px}' +
+      '.bs-sync-p span{font-size:11px;color:var(--bs-muted,#888);white-space:nowrap}.bs-sync-p b{font-size:15px;color:#16a34a;font-variant-numeric:tabular-nums;white-space:nowrap}' +
+      '.bs-sync-btn{flex:none;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:none;border-radius:8px;background:none;color:var(--bs-muted,#888);cursor:pointer}.bs-sync-btn:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}' +
+      '.bs-sync.busy .bs-sync-btn svg{animation:bsSpin 1s linear infinite}.bs-sync.busy .bs-sync-btn{color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-row>b .bs-hist-tabm::before{content:"";display:inline-block;width:6px;height:6px;margin-right:4px;border-radius:50%;background:currentColor;vertical-align:1px}' +
+      '.bs-hist-sales p{margin:0}.bs-hist-act{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:8px!important;padding-top:8px;border-top:1px solid var(--bs-border,#D9E0E7)}' +
+      '.bs-hist-act .bs-seg{flex:none}.bs-hist-act .bs-seg em{display:block;padding:2px 10px;font-size:12px;text-align:center}.bs-hist-st{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px}' +
+      '.bs-hist-act button,.bs-hist-mv button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}' +
+      '.bs-hist-act button:hover,.bs-hist-mv button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}.bs-hist-mv button.bs-main{background:var(--bs-accent,#3b82f6);border-color:var(--bs-accent,#3b82f6);color:#fff}' +
+      '.bs-hist-act .bs-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:2px 9px;border:none;border-radius:999px;background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-muted,#888);font-size:11.5px;font-style:normal;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+      '.bs-hist-act button.bs-chip:hover{color:var(--bs-text,#222)}.bs-chip::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:#9aa3af}' +
+      '.bs-chip[data-st=ok]::before{background:#22a55a}.bs-chip[data-st=warn]::before{background:#f59e0b}.bs-chip[data-st=err]::before{background:#e04848}.bs-chip[data-st=warn]{color:#b45309}' +
+      '.bs-hist-mv{display:none;align-items:center;gap:6px;margin-top:6px!important;font-size:12px;color:var(--bs-muted,#888)}.bs-hist-act.mv+.bs-hist-mv{display:flex}.bs-hist-mv span{flex:1}#bsSale .bs-hist-mv input{padding:3px 6px;font-size:12px}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
+      '.bs-hist-sales .bs-hist-sh{flex:none;box-sizing:border-box;width:64px;font-size:11px;font-weight:400;text-align:center;white-space:nowrap}b.bs-hist-sh{color:#16a34a}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}button.bs-hist-sh.bs-warn{border-color:#f59e0b;color:#d97706}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
       '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
       '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
-      '.bs-hist-move{display:flex;align-items:center;gap:8px;margin:6px 0 0;padding-top:6px;border-top:1px dashed var(--bs-border,#D9E0E7);color:var(--bs-muted,#888)}.bs-hist-move span{flex:1}' +
-      '#bsSale .bs-hist-move input{padding:3px 6px;font-size:12px}.bs-hist-move button{padding:3px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:none;color:var(--bs-text,#222);font-size:12px;cursor:pointer;white-space:nowrap}.bs-hist-move button:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}' +
+      '.bs-hist-sales .bs-hist-rep{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin-bottom:6px}' +
+      '.bs-hist-sales .bs-hist-rep span{flex:none!important;display:flex;flex-direction:column;gap:1px;padding:5px 8px;border-radius:8px;background:var(--bs-hover,#f5f7fa);color:var(--bs-muted,#888);font-size:11px;white-space:nowrap;overflow:hidden}' +
+      '.bs-hist-rep b{font-size:13.5px;color:var(--bs-text,#222);font-variant-numeric:tabular-nums}.bs-hist-rep small{font-weight:400;color:var(--bs-muted,#888)}' +
       '#bsSale label.bs-imp-day{flex-direction:row;align-items:center;gap:8px;margin-bottom:8px;font-size:12.5px;color:var(--bs-text,#222)}.bs-imp-day u{text-decoration:none;color:var(--bs-muted,#888)}' +
       '.bs-backup{width:440px}.bs-backup .bs-tar-help{margin-bottom:6px}' +
+      '.bs-sheet h4{margin:0;font-size:13.5px;font-weight:600}.bs-sheet h4 small{margin-left:6px;font-size:11.5px;font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-sheet-sub{margin:2px 0 8px;font-size:12.5px;line-height:1.45;color:var(--bs-muted,#888)}' +
+      '.bs-sheet details{margin:0 0 10px;font-size:12px}.bs-sheet summary{width:max-content;cursor:pointer;color:var(--bs-accent,#3b82f6);user-select:none}.bs-sheet details .bs-tar-help{margin:6px 0 0}' +
+      '.bs-sheet section label{margin-bottom:8px}.bs-sheet-2{display:grid;grid-template-columns:1fr 150px;gap:10px}' +
+      '.bs-rep-head .bs-back{display:flex;margin:0 6px 0 -6px;padding:2px;border-radius:6px}.bs-rep-head .bs-back:hover{background:var(--bs-hover,rgba(0,0,0,.06));color:var(--bs-text,#222)}' +
+      '.bs-sheet ol button{padding:1px 8px;border:1px solid var(--bs-accent,#3b82f6);border-radius:6px;background:none;color:var(--bs-accent,#3b82f6);font-size:11.5px;cursor:pointer}#bsSale.bs-sheet{width:480px}.bs-sheet ol.bs-tar-help{padding-left:18px}.bs-sheet ol a{color:var(--bs-accent,#3b82f6)}.bs-sheet .bs-sale-note{margin-top:6px;word-break:break-word}.bs-sheet .bs-sale-note:empty{display:none}.bs-sheet .bs-rep-btns{align-items:center}.bs-sheet .bs-sp{flex:1}.bs-team-set{margin-top:16px;padding-top:14px;border-top:1px solid var(--bs-border,#D9E0E7)}#bsSale.bs-sheet{max-height:90vh;overflow:auto}' +
+      '.bs-sale-pay small{font-weight:400;color:var(--bs-muted,#888)}' +
+      '.bs-hrep-sheet{margin-bottom:8px;padding:7px 10px;border-radius:8px;font-size:12.5px;background:var(--bs-hover,#f5f7fa);color:var(--bs-text,#222)}.bs-hrep-sheet[data-st=ok]{color:#22a55a}.bs-hrep-sheet[data-st=err]{color:#e04848}' +
       '.bs-sales-list{display:flex;flex-direction:column;gap:6px}' +
-      '.bs-sales-row{display:grid;grid-template-columns:1fr auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
+      '.bs-sales-row{display:grid;grid-template-columns:1fr auto auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
       '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
-      '.bs-sales-row u{grid-column:2;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
-      '.bs-sales-del{grid-column:3;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
+      '.bs-sales-row .bs-sales-sh{grid-column:3;grid-row:1/span 2;align-self:center;justify-self:stretch;min-width:84px;text-align:center;box-sizing:border-box;height:22px!important;min-height:0!important;margin:0!important;padding:0 9px!important;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11px!important;line-height:20px!important;font-weight:500;cursor:pointer;white-space:nowrap}' +
+      '.bs-sales-row button.bs-sales-sh:hover{background:var(--bs-accent,#3b82f6);color:#fff}.bs-sales-row .bs-sales-sh:disabled{opacity:.6;cursor:default}' +
+      '.bs-sales-row small.bs-sales-sh{border-color:transparent;padding-right:0!important;text-align:right;color:#16a34a;cursor:default}.bs-sales-row small.bs-sales-sh.bad{color:#e08a1e}' +
+      '.bs-sh-all{display:inline-flex;align-items:center;gap:6px}' +
+      '.bs-sales-row u{grid-column:3;grid-row:1/span 2;align-self:center;min-width:84px;text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '.bs-sales-del{grid-column:4;grid-row:1/span 2;align-self:center;font-style:normal;height:26px;display:flex;align-items:center;justify-content:center;border-radius:7px;color:var(--bs-muted,#888);font-size:17px}' +
+      '.bs-find-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}.bs-find-top .bs-seg{margin:0}' +
+      '.bs-find-q{flex:1;min-width:0;position:relative;display:flex;align-items:center}.bs-find-q svg{position:absolute;left:10px;color:var(--bs-muted,#888);pointer-events:none}' +
+      '#bsSale .bs-find-q input{flex:1;width:100%;min-width:0;padding:7px 10px 7px 32px;font-size:13px;border-radius:9px}' +
+      '.bs-find-sum{margin:0 2px 8px;font-size:12px;color:var(--bs-muted,#888)}' +
+      '.bs-find-row .bs-find-d{grid-column:2;text-align:right;font-size:11.5px;color:var(--bs-muted,#888)}' +
+      '.bs-find-row .bs-find-mail{color:inherit;text-decoration:none;border-bottom:1px dashed currentColor;cursor:copy}.bs-find-row .bs-find-mail:hover{color:var(--bs-accent,#3b82f6)}' +
+      '.bs-find-row mark{background:rgba(250,204,21,.4);color:inherit;border-radius:2px}' +
+      '.bs-find-other b,.bs-find-other em{opacity:.6}' +
+      '.bs-sales-del.bs-find-chat:hover{background:rgba(59,130,246,.12);color:var(--bs-accent,#3b82f6)}' +
       '.bs-sales-del:hover{background:rgba(224,72,72,.12);color:#e04848}' +
       '.bs-sales-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}' +
       '#bsSale.bs-me{width:360px}#bsSale.bs-me .bs-tar-help{margin:6px 0 12px}#bsSale.bs-me .bs-chips em{padding:6px 14px;font-size:13.5px}' +
@@ -2404,7 +4103,7 @@
       '#bsSale.bs-imp{width:560px}.bs-imp-in{width:100%;box-sizing:border-box;min-height:140px;margin:8px 0;padding:8px;border:1px solid var(--bs-border,#D9E0E7);border-radius:8px;background:transparent;color:var(--bs-text,#222);font:12px/1.4 inherit;resize:vertical;outline:none}' +
       '.bs-imp-in:focus{border-color:var(--bs-accent,#3b82f6)}.bs-imp-list{display:flex;flex-direction:column;gap:5px;max-height:40vh;overflow:auto}' +
       '.bs-imp-row{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:7px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px}.bs-imp-row.bs-off{opacity:.5}' +
-      '.bs-imp-row span{font-size:12px;color:var(--bs-muted,#888)}.bs-imp-row em{font-style:normal;font-weight:600;text-align:right}.bs-imp-row u{text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}' +
+      '.bs-imp-row span{font-size:12px;color:var(--bs-muted,#888)}.bs-imp-row em{font-style:normal;font-weight:600;text-align:right}.bs-imp-row u{text-decoration:none;font-size:11px;color:#e08a1e;text-align:right}.bs-imp-row u.bs-warn{grid-column:1/-1;color:#dc2626}.bs-imp-row[data-k]{cursor:pointer}.bs-imp-row[data-k].bs-off{opacity:.65}' +
       '#bsSale button:disabled{opacity:.5;cursor:default}' +
       '.bs-sales-foot .bs-imp-btn:hover{border-color:var(--bs-accent,#3b82f6)!important;color:var(--bs-accent,#3b82f6)!important}' +
       '.bs-sales-foot .bs-me-btn{margin-right:auto}.bs-sales-foot .bs-me-btn:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}';
@@ -2585,10 +4284,16 @@
     }
     return best;
   }
+  // раз в секунду, но панель обходим, только если она поменялась или открыт другой чат
+  let remBox = null, remKey = '', remDirty = true;
+  const remObs = new MutationObserver(() => { remDirty = true; });
   function remMark() {
     const box = document.getElementById('remindersContentInner');
     if (!box) return;
+    if (box !== remBox) { remBox = box; remObs.disconnect(); remObs.observe(box, { childList: true, subtree: true, characterData: true }); remDirty = true; }
     const id = curDialog(), nm = norm((document.querySelector('.dialog_header .person_name') || {}).textContent || '').trim();
+    if (!remDirty && remKey === id + '|' + nm) return;
+    remDirty = false; remKey = id + '|' + nm;
     let row = null;
     if (id || nm) for (const e of box.querySelectorAll('*')) {
       if (e.closest('#remindersTabs,#reminderFiltersAdditional')) continue;
