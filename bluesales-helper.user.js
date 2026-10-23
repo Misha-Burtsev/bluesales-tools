@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.62.0
+// @version      1.62.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -449,7 +449,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc,#bsBotHint';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -950,7 +950,19 @@
     b.classList.toggle('bs-on', on);
     document.body.classList.toggle('bs-only-bot', on);
     b.title = (on ? 'Показаны только чаты, где ответил бот. Нажми, чтобы показать все' : 'Показать только чаты, где ответил бот') +
-      ' (в загруженном списке: ' + n + ')';
+      ' (в загруженном списке: ' + n + ')';    // фильтр включён – строка над списком, чтобы пустой список не казался поломкой
+    const list = document.querySelector('.dialogs_list');
+    let h = document.getElementById('bsBotHint');
+    if (!on || !list) { if (h) h.remove(); return; }
+    if (!h) {
+      h = document.createElement('div');
+      h.id = 'bsBotHint';
+      h.innerHTML = '<span></span><a>Показать все</a>';
+      h.querySelector('a').addEventListener('click', () => { flip('bsOnlyBot'); paintBotBtn(); });
+    }
+    if (h.parentNode !== list || list.firstChild !== h) list.prepend(h);
+    const txt = n ? 'Только чаты, где ответил бот: ' + n : 'Чатов, где ответил только бот, нет';
+    if (h.firstChild.textContent !== txt) h.firstChild.textContent = txt;
   }
   function botBtnInit() {
     const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
@@ -1007,6 +1019,9 @@
       '#bsBotBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:#d48806;color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
       '#bsBotBtn b:empty{display:none}' +
       'body.bs-only-bot .dialogs_list_item:not(.bs-botchat){display:none!important}' +
+      '#bsBotHint{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 8px;padding:7px 10px;border-radius:8px;font-size:12.5px;line-height:1.3;background:var(--bs-accent-soft,rgba(59,130,246,.12));color:var(--bs-text,#222)}' +
+      '#bsBotHint a{flex:none;color:var(--bs-accent,#3b82f6);font-weight:600;cursor:pointer;white-space:nowrap}' +
+      '#bsBotHint a:hover{text-decoration:underline}' +
       '#bsRemBtn b.bs-due{background:#e04848}' +
       '#bsRemList{position:fixed;right:12px;bottom:54px;z-index:3000;width:260px;max-height:50vh;overflow:auto;box-sizing:border-box;padding:6px;border-radius:12px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
