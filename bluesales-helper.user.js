@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.62.1
+// @version      1.63.0
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2142,7 +2142,13 @@
   // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
   // коэффициенты к премии за месяц (как в таблице, перемножаются): за качество – KPI из таблицы ОКК (bsKpi – последнее, что прочитали),
   // за выполнение плана – продано за месяц / цель месяца в помощнике
-  const KPI_KEY = 'bsKpi';
+  const KPI_KEY = 'bsKpi', COEF_KEY = 'bsPremFactors';
+  const factorValid = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  const factorParse = s => {
+    const t = s.trim().replace(',', '.');
+    if (!t) return null; // пусто – автоматический коэффициент
+    return /^\d+(?:\.\d+)?$/.test(t) && factorValid(+t) ? +t : NaN;
+  };
   const goalFor = ym => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ym]) || +g.n || 0; };
   const kpiGet = ym => { const v = jget(KPI_KEY, {})[ym]; return v == null ? null : +v; };
   const kq = n => String(n).replace('.', ',');
@@ -2151,7 +2157,9 @@
     const sold = Math.round(histAll().filter(e => ymOf(e.d) === ym).reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100;
     const plan = goal ? Math.round(sold / goal * 1000) / 10 : null;
     const q = kpi == null ? 1 : kpi < 70 ? 0.9 : kpi < 97 ? 1 : 1.1, pl = plan == null ? 1 : plan < 80 ? 0.9 : plan < 150 ? 1 : 1.1;
-    return { kpi, plan, sold, goal, q, p: pl, k: Math.round(q * pl * 100) / 100 };
+    const saved = jget(COEF_KEY, {})[ym] || {}, manualQ = factorValid(saved.q), manualP = factorValid(saved.p);
+    const quality = manualQ ? saved.q : q, target = manualP ? saved.p : pl;
+    return { kpi, plan, sold, goal, autoQ: q, autoP: pl, manualQ, manualP, q: quality, p: target, k: Math.round(quality * target * 1e10) / 1e10 };
   }
   // премия за месяц: посчитанная помощником (p = premSum) × коэффициенты и из таблицы (N1) – если обе, сверяем
   // (в таблице коэффициенты появляются в конце месяца – сходится и без них)
@@ -2166,16 +2174,16 @@
     const pl = c.plan == null ? 'цель не задана' : Math.floor(c.plan) + '% (' + frac(c.sold) + ' из ' + c.goal + (ym === ymNow() ? ', месяц идёт' : '') + ')';
     const tip = '<section class="bs-ptip">' + row('По продажам', rubK(p.v) + ' ₽') +
       (p.miss ? '<p class="bs-pt-n">без премии ещё ' + p.miss + ' ' + plural(p.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
-      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q), 'bs-pt-k ' + cls(c.q)) +
+      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q) + (c.manualQ ? ' · вручную' : ''), 'bs-pt-k ' + cls(c.q)) +
       (c.kpi == null ? '<p class="bs-pt-n">' + (okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'подключи таблицу ОКК в «Таблицах»') + '</p>' : '') +
-      row('План · ' + pl, '×' + kq(c.p), 'bs-pt-k ' + cls(c.p)) +
+      row('План · ' + pl, '×' + kq(c.p) + (c.manualP ? ' · вручную' : ''), 'bs-pt-k ' + cls(c.p)) +
       (c.plan == null ? '<p class="bs-pt-n">задай цель – клик по кольцу во вкладке «Сегодня»</p>' : '') +
       row('Итого', rubK(v) + ' ₽', 'bs-pt-t') +
       (tab != null ? row('В таблице (N1)', rubK(tab) + ' ₽', 'bs-pt-tab') +
         '<p class="bs-pt-n ' + (bad ? 'bad' : 'ok') + '">' + (okF ? '✓ сходится' : okB ? '✓ сходится без коэффициентов – их ставят в конце месяца' : '≠ не сходится') + '</p>' : '') + '</section>';
     const chip = (t, x, none) => '<em class="' + (none ? 'no' : cls(x)) + '">' + t + (none ? ' ?' : ' ×' + kq(x)) + '</em>';
     return '<div class="bs-pm"><span>' + lbl + '</span><b class="' + (bad || p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') + '</b>' +
-      '<small class="bs-kpi">' + chip('KPI', c.q, c.kpi == null) + chip('план', c.p, c.plan == null) + '</small>' + tip + '</div>';
+      '<small class="bs-kpi">' + chip('KPI' + (c.manualQ ? ' вручную' : ''), c.q, c.kpi == null && !c.manualQ) + chip('план' + (c.manualP ? ' вручную' : ''), c.p, c.plan == null && !c.manualP) + '</small>' + tip + '</div>';
   }
   const heroHtml = withHist(function (r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
@@ -2276,6 +2284,18 @@
     return a.map(([n, k, s]) => [n, k, frac(k) + ' · ' + rub(s) + ' ₽']);
   }
   const card = (cls, title, body, right) => '<section class="bs-st-c ' + cls + '"><header><h4>' + title + '</h4>' + (right || '') + '</header>' + body + '</section>';
+  function factorHtml(s) {
+    const c = s.c;
+    const field = (key, label, manual, value, auto) => '<label>' + label +
+      '<input data-factor="' + key + '" type="text" inputmode="decimal" value="' + (manual ? kq(value) : '') + '" placeholder="Авто: ' + kq(auto) + '">' +
+      '<small>' + (manual ? 'Вручную ×' + kq(value) + ' · авто ×' + kq(auto) : 'Автоматически ×' + kq(auto)) + '</small></label>';
+    return card('bs-factors', 'Коэффициенты премии · ' + ymName(s.ym) + ' ' + Math.floor(s.ym / 100),
+      '<p class="bs-st-hint">Пустое поле — автоматический расчёт. Введи коэффициент, например 1,15. Настройки действуют только в выбранном месяце.</p>' +
+      '<div class="bs-factor-fields">' + field('q', 'Качество (KPI)', c.manualQ, c.q, c.autoQ) + field('p', 'Выполнение плана', c.manualP, c.p, c.autoP) + '</div>' +
+      '<p class="bs-st-hint">Применяется: ×' + kq(c.q) + ' × ' + kq(c.p) + ' = ×' + kq(c.k) +
+      '. Оплата смен не меняется.' + (!s.ps ? ' Для применения нужна премия по продажам: подключи и сверь свою таблицу. Готовая премия из N1 повторно не умножается.' : '') + '</p>' +
+      '<div class="bs-factor-actions"><button data-a="factors-save">Сохранить</button><button data-a="factors-auto">Вернуть оба в авто</button><span role="status" aria-live="polite"></span></div>');
+  }
   const paintStat = withHist(function (box) {
     const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
     statYm = Math.min(Math.max(statYm || now, first), now);
@@ -2284,7 +2304,7 @@
     const top = '<div class="bs-st-top"><div class="bs-st-nav"><button data-a="prev"' + (ym <= first ? ' disabled' : '') + ' title="Прошлый месяц">' + ico(ICO.back, 16) + '</button>' +
       '<b>' + MON + ' ' + y + '</b><button data-a="next"' + (cur ? ' disabled' : '') + ' title="Следующий месяц">' + ico(ICO.back, 16) + '</button></div>' +
       '<span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span></div>';
-    if (!s.es.length) { box.innerHTML = top + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
+    if (!s.es.length) { box.innerHTML = top + factorHtml(s) + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
     // зарплата
     const sp = s.prem || 0, all = Math.max(1, sp + s.shifts);
     const fc = cur && s.prem != null && s.days && s.days < r.n ? Math.round(s.prem / s.days * r.n + r.sum) : 0;
@@ -2299,10 +2319,10 @@
     const left = Math.max(0, r.n - s.days), next = [[80, '×1'], [100, ''], [150, '×1,1']].find(([t]) => pl < t);
     const need = next && Math.max(0, g * next[0] / 100 - s.sold);
     const plan = card('bs-st-plan', 'План', !g ? '<p class="bs-st-hint">Цель на ' + ymName(ym) + ' не задана – нажми на кольцо во вкладке «Сегодня».</p>' :
-      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + '</em></em></div>' +
+      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + (s.c.manualP ? ' · вручную' : '') + '</em></em></div>' +
       '<div class="bs-st-track" style="--z1:' + at(80) + ';--z2:' + at(150) + '"><i style="width:' + at(Math.min(pl, mx)) + '"></i>' +
         [80, 100, 150].map(t => '<s style="left:' + at(t) + '"><small>' + t + '</small></s>').join('') + '</div>' +
-      '<p class="bs-st-hint">' + (!next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
+      '<p class="bs-st-hint">' + (s.c.manualP ? 'Коэффициент задан вручную. Пороги на шкале — для автоматического расчёта.' : !next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
         plural(Math.ceil(need - 0.001), 'продажа', 'продажи', 'продаж') + (cur && left ? ' – по <b>' + d1(need / left) + '</b> за смену, осталось ' + left + ' ' + plural(left, 'смена', 'смены', 'смен') : '')) + '</p>');
     // KPI: полукруг с зонами коэффициента
     const k = s.c.kpi, L = Math.PI * 40, arc = 'M10 50 A40 40 0 0 1 90 50', zc = k == null ? '' : k < 70 ? 'down' : k < 97 ? '' : 'up';
@@ -2310,6 +2330,7 @@
     const kpi = card('bs-st-kpi', 'Качество', '<div class="bs-st-gauge ' + zc + '"><svg viewBox="0 0 100 56" width="150" height="84"><path d="' + arc + '" class="bs-st-gtr"/>' +
       (k != null ? '<path d="' + arc + '" class="bs-st-gv" stroke-dasharray="' + (L * Math.min(100, k) / 100).toFixed(1) + ' ' + L.toFixed(1) + '"/>' : '') + '<g class="bs-st-gt">' + tick(70) + tick(97) + '</g></svg>' +
       '<b>' + (k != null ? kq(k) + '%' : '–') + '</b><small>KPI из таблицы ОКК</small></div>' +
+      (s.c.manualQ ? '<p class="bs-st-hint">Применяется вручную ×' + kq(s.c.q) + '. Ниже — автоматические пороги.</p>' : '') +
       '<p class="bs-st-kz"><span' + (k != null && k < 70 ? ' class="on down"' : '') + '>&lt;70 ×0,9</span><span' + (k != null && k >= 70 && k < 97 ? ' class="on"' : '') + '>70–96 ×1</span><span' + (k != null && k >= 97 ? ' class="on up"' : '') + '>97+ ×1,1</span></p>' +
       (k == null ? '<p class="bs-st-hint">' + (okkOn() ? 'В таблице ОКК нет KPI за ' + ymName(ym) : 'Подключи таблицу ОКК в «Таблицах»') + '</p>' : ''));
     // график по дням
@@ -2368,7 +2389,7 @@
       (rc.big ? ri('ch', ICO.receipt, rub(rc.big.v) + ' ₽', 'самый крупный чек', dayName(rc.big.d), nw(rc.big.d)) : '') +
       (rc.mon && rc.mon.sal ? ri('mo', ICO.cal, rub(rc.mon.sal / 1000) + ' тыс. ₽', 'лучшая зарплата', ymName(rc.mon.ym) + ' ' + Math.floor(rc.mon.ym / 100), rc.mon.ym === ym ? '<em>этот месяц</em>' : '') : '') +
       '</div>', '<small class="bs-st-sub">за всё время</small>');
-    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
+    box.innerHTML = top + factorHtml(s) + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
     statClick(box);
   });
   function statClick(box) {
@@ -2379,6 +2400,26 @@
       if (b.dataset.ym) { statYm = +b.dataset.ym; return paintStat(box); }
       const a = b.dataset.a;
       if (a === 'prev' || a === 'next') { statYm = ymAdd(statYm, a === 'prev' ? -1 : 1); return paintStat(box); }
+      if (a === 'factors-save' || a === 'factors-auto') {
+        const panel = box.querySelector('.bs-factors'), values = {}, status = panel.querySelector('[role="status"]');
+        if (a === 'factors-save') {
+          for (const input of panel.querySelectorAll('[data-factor]')) {
+            const v = factorParse(input.value);
+            if (Number.isNaN(v)) { status.textContent = 'Введи число от 0, например 1,15, или оставь поле пустым.'; input.focus(); return; }
+            if (v != null) values[input.dataset.factor] = v;
+          }
+          const c = premK(statYm);
+          if (!Number.isFinite((values.q ?? c.autoQ) * (values.p ?? c.autoP) * 1e10)) { status.textContent = 'Слишком большой коэффициент.'; return; }
+        }
+        const saved = jget(COEF_KEY, {});
+        if (Object.keys(values).length) saved[statYm] = values;
+        else delete saved[statYm];
+        try { localStorage.setItem(COEF_KEY, JSON.stringify(saved)); }
+        catch (e) { status.textContent = 'Не удалось сохранить: не хватает места в браузере.'; return; }
+        paintStat(box);
+        box.querySelector('.bs-factors [role="status"]').textContent = 'Сохранено';
+        return;
+      }
       if (a === 'rate') {
         const sp = box.querySelector('.bs-st-rate'), r = payRate();
         sp.innerHTML = '<input type="number" min="1" value="' + r.sum + '"> ₽ за <input type="number" min="1" max="31" value="' + r.n + '"> смен <button data-a="rateok">ок</button>';
@@ -3897,6 +3938,7 @@
       '.bs-st-rate{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-rate b{color:var(--bs-text,#222);font-weight:600}.bs-st-rate small{font-size:12px}' +
       '.bs-st-rate input{width:64px;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}.bs-st-rate input+input,.bs-st-rate input:nth-of-type(2){width:44px}' +
       '.bs-st-rate button[data-a=rateok]{width:auto;height:auto;padding:3px 10px;margin-left:4px;background:var(--bs-accent,#3b82f6);color:#fff;border-radius:6px}.bs-st-rate button[data-a=rateok]:hover{background:var(--bs-accent,#3b82f6);color:#fff;filter:brightness(1.1)}' +
+      '.bs-factors{margin-bottom:12px}.bs-factor-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}.bs-factor-fields label{display:flex;flex:1;min-width:150px;flex-direction:column;gap:5px;font-size:13px}.bs-factor-fields input{box-sizing:border-box;width:100%;padding:7px 9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);font:inherit}.bs-factor-fields small{color:var(--bs-muted,#888)}.bs-factor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}.bs-factor-actions button{padding:6px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);cursor:pointer}.bs-factor-actions button:first-child{background:var(--bs-accent,#3b82f6);color:#fff}.bs-factor-actions [role=status]{font-size:12px;color:var(--bs-muted,#888)}' +
       '.bs-st-c{position:relative;padding:12px 14px 14px;border:1px solid var(--bs-border,#D9E0E7);border-radius:14px;min-width:0}' +
       '.bs-st-c>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:8px}.bs-st-c h4{margin:0;font-size:12.5px;font-weight:500;color:var(--bs-muted,#888)}' +
       '.bs-st-row1{display:grid;grid-template-columns:1.25fr 1fr .85fr;gap:12px;margin-bottom:12px}.bs-st-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}' +
