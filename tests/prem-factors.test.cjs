@@ -67,7 +67,7 @@ test('save and reset keep other months; invalid input leaves storage intact', ()
   data.bsPremFactors[202609] = { p: 1.2 };
   const status = {}, inputs = ['q', 'p'].map(key => ({ dataset: { factor: key }, value: '', focus() {} }));
   const panel = { querySelector: () => status, querySelectorAll: () => inputs };
-  ctx.box = { querySelector: selector => selector === '.bs-factors' ? panel : status };
+  ctx.box = { querySelector: selector => selector === '.bs-factors' ? panel : selector.includes('bs-factor-menu') ? null : status };
   run('statClick(box)');
   const click = a => ctx.box.onclick({ target: { closest: () => ({ dataset: { a } }) } });
   inputs[0].value = '1,15';

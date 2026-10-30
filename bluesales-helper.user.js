@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.63.0
+// @version      1.63.1
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2289,12 +2289,13 @@
     const field = (key, label, manual, value, auto) => '<label>' + label +
       '<input data-factor="' + key + '" type="text" inputmode="decimal" value="' + (manual ? kq(value) : '') + '" placeholder="Авто: ' + kq(auto) + '">' +
       '<small>' + (manual ? 'Вручную ×' + kq(value) + ' · авто ×' + kq(auto) : 'Автоматически ×' + kq(auto)) + '</small></label>';
-    return card('bs-factors', 'Коэффициенты премии · ' + ymName(s.ym) + ' ' + Math.floor(s.ym / 100),
-      '<p class="bs-st-hint">Пустое поле — автоматический расчёт. Введи коэффициент, например 1,15. Настройки действуют только в выбранном месяце.</p>' +
+    return '<details class="bs-factor-menu"><summary title="Настроить коэффициенты премии за выбранный месяц">' + ico(ICO.pen, 13) + ' Коэффициенты' + (c.manualQ || c.manualP ? '<i title="Есть ручные значения"></i>' : '') + '</summary>' +
+      card('bs-factors', 'Коэффициенты · ' + ymName(s.ym) + ' ' + Math.floor(s.ym / 100),
+      '<p class="bs-st-hint">Пусто — авто. Изменения только для этого месяца.</p>' +
       '<div class="bs-factor-fields">' + field('q', 'Качество (KPI)', c.manualQ, c.q, c.autoQ) + field('p', 'Выполнение плана', c.manualP, c.p, c.autoP) + '</div>' +
       '<p class="bs-st-hint">Применяется: ×' + kq(c.q) + ' × ' + kq(c.p) + ' = ×' + kq(c.k) +
-      '. Оплата смен не меняется.' + (!s.ps ? ' Для применения нужна премия по продажам: подключи и сверь свою таблицу. Готовая премия из N1 повторно не умножается.' : '') + '</p>' +
-      '<div class="bs-factor-actions"><button data-a="factors-save">Сохранить</button><button data-a="factors-auto">Вернуть оба в авто</button><span role="status" aria-live="polite"></span></div>');
+      (!s.ps ? ' Для применения нужна премия по продажам: подключи и сверь свою таблицу. Готовая премия из N1 повторно не умножается.' : '') + '</p>' +
+      '<div class="bs-factor-actions"><button data-a="factors-save">Сохранить</button><button data-a="factors-auto">Сбросить в авто</button><span role="status" aria-live="polite"></span></div>', '<button class="bs-factor-close" data-a="factors-close" aria-label="Закрыть настройки">×</button>') + '</details>';
   }
   const paintStat = withHist(function (box) {
     const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
@@ -2303,8 +2304,8 @@
     const MON = ymName(ym)[0].toUpperCase() + ymName(ym).slice(1), r = s.rate, per = r.sum / r.n;
     const top = '<div class="bs-st-top"><div class="bs-st-nav"><button data-a="prev"' + (ym <= first ? ' disabled' : '') + ' title="Прошлый месяц">' + ico(ICO.back, 16) + '</button>' +
       '<b>' + MON + ' ' + y + '</b><button data-a="next"' + (cur ? ' disabled' : '') + ' title="Следующий месяц">' + ico(ICO.back, 16) + '</button></div>' +
-      '<span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span></div>';
-    if (!s.es.length) { box.innerHTML = top + factorHtml(s) + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
+      '<div class="bs-st-settings"><span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span>' + factorHtml(s) + '</div></div>';
+    if (!s.es.length) { box.innerHTML = top + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
     // зарплата
     const sp = s.prem || 0, all = Math.max(1, sp + s.shifts);
     const fc = cur && s.prem != null && s.days && s.days < r.n ? Math.round(s.prem / s.days * r.n + r.sum) : 0;
@@ -2389,17 +2390,25 @@
       (rc.big ? ri('ch', ICO.receipt, rub(rc.big.v) + ' ₽', 'самый крупный чек', dayName(rc.big.d), nw(rc.big.d)) : '') +
       (rc.mon && rc.mon.sal ? ri('mo', ICO.cal, rub(rc.mon.sal / 1000) + ' тыс. ₽', 'лучшая зарплата', ymName(rc.mon.ym) + ' ' + Math.floor(rc.mon.ym / 100), rc.mon.ym === ym ? '<em>этот месяц</em>' : '') : '') +
       '</div>', '<small class="bs-st-sub">за всё время</small>');
-    box.innerHTML = top + factorHtml(s) + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
+    box.innerHTML = top + '<div class="bs-st-row1">' + sal + plan + kpi + '</div>' + bars + avgs + recs + pies + '<div class="bs-st-row3">' + funnel + months + '</div>';
     statClick(box);
   });
   function statClick(box) {
+    const menu = box.querySelector('.bs-factor-menu');
+    const closeFactors = () => { if (menu) { menu.open = false; menu.querySelector('summary').focus(); } };
+    if (menu) menu.onkeydown = ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeFactors(); }
+      if (ev.key === 'Enter' && ev.target.matches('input')) { ev.preventDefault(); menu.querySelector('[data-a="factors-save"]').click(); }
+    };
     box.onclick = ev => {
       const t = ev.target, b = t.closest('[data-a],[data-m],[data-ym]');
+      if (menu && menu.open && !menu.contains(t)) menu.open = false;
       if (!b || b.disabled) return;
       if (b.dataset.m) { statMet = b.dataset.m; return paintStat(box); }
       if (b.dataset.ym) { statYm = +b.dataset.ym; return paintStat(box); }
       const a = b.dataset.a;
       if (a === 'prev' || a === 'next') { statYm = ymAdd(statYm, a === 'prev' ? -1 : 1); return paintStat(box); }
+      if (a === 'factors-close') return closeFactors();
       if (a === 'factors-save' || a === 'factors-auto') {
         const panel = box.querySelector('.bs-factors'), values = {}, status = panel.querySelector('[role="status"]');
         if (a === 'factors-save') {
@@ -2417,7 +2426,8 @@
         try { localStorage.setItem(COEF_KEY, JSON.stringify(saved)); }
         catch (e) { status.textContent = 'Не удалось сохранить: не хватает места в браузере.'; return; }
         paintStat(box);
-        box.querySelector('.bs-factors [role="status"]').textContent = 'Сохранено';
+        const trigger = box.querySelector('.bs-factor-menu summary');
+        if (trigger) trigger.focus();
         return;
       }
       if (a === 'rate') {
@@ -3938,7 +3948,7 @@
       '.bs-st-rate{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-rate b{color:var(--bs-text,#222);font-weight:600}.bs-st-rate small{font-size:12px}' +
       '.bs-st-rate input{width:64px;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}.bs-st-rate input+input,.bs-st-rate input:nth-of-type(2){width:44px}' +
       '.bs-st-rate button[data-a=rateok]{width:auto;height:auto;padding:3px 10px;margin-left:4px;background:var(--bs-accent,#3b82f6);color:#fff;border-radius:6px}.bs-st-rate button[data-a=rateok]:hover{background:var(--bs-accent,#3b82f6);color:#fff;filter:brightness(1.1)}' +
-      '.bs-factors{margin-bottom:12px}.bs-factor-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}.bs-factor-fields label{display:flex;flex:1;min-width:150px;flex-direction:column;gap:5px;font-size:13px}.bs-factor-fields input{box-sizing:border-box;width:100%;padding:7px 9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);font:inherit}.bs-factor-fields small{color:var(--bs-muted,#888)}.bs-factor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}.bs-factor-actions button{padding:6px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);cursor:pointer}.bs-factor-actions button:first-child{background:var(--bs-accent,#3b82f6);color:#fff}.bs-factor-actions [role=status]{font-size:12px;color:var(--bs-muted,#888)}' +
+      '.bs-st-settings{display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap}.bs-factor-menu{position:relative;flex:none}.bs-factor-menu>summary{display:flex;align-items:center;gap:5px;list-style:none;padding:5px 8px;border-radius:7px;color:var(--bs-muted,#888);font-size:12px;cursor:pointer;user-select:none}.bs-factor-menu>summary::-webkit-details-marker{display:none}.bs-factor-menu>summary:hover,.bs-factor-menu[open]>summary{color:var(--bs-accent,#3b82f6);background:var(--bs-accent-soft,#e8f0fe)}.bs-factor-menu>summary>i{width:5px;height:5px;border-radius:50%;background:var(--bs-accent,#3b82f6)}.bs-factor-menu>.bs-factors{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:320px;max-width:calc(100vw - 64px);box-sizing:border-box;margin:0;background:var(--bs-panel,#fff);box-shadow:0 12px 36px rgba(16,24,40,.16)}.bs-factor-close{border:0;background:none;color:var(--bs-muted,#888);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}.bs-factor-menu .bs-factor-fields label{min-width:110px}.bs-factor-menu .bs-factor-fields small{font-size:11px}.bs-factor-menu .bs-factor-actions button{font-size:12px}.bs-factor-menu [role=status]:empty{display:none}.bs-factor-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}.bs-factor-fields label{display:flex;flex:1;min-width:150px;flex-direction:column;gap:5px;font-size:13px}.bs-factor-fields input{box-sizing:border-box;width:100%;padding:7px 9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);font:inherit}.bs-factor-fields small{color:var(--bs-muted,#888)}.bs-factor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}.bs-factor-actions button{padding:6px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);cursor:pointer}.bs-factor-actions button:first-child{background:var(--bs-accent,#3b82f6);color:#fff}.bs-factor-actions [role=status]{font-size:12px;color:var(--bs-muted,#888)}' +
       '.bs-st-c{position:relative;padding:12px 14px 14px;border:1px solid var(--bs-border,#D9E0E7);border-radius:14px;min-width:0}' +
       '.bs-st-c>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:8px}.bs-st-c h4{margin:0;font-size:12.5px;font-weight:500;color:var(--bs-muted,#888)}' +
       '.bs-st-row1{display:grid;grid-template-columns:1.25fr 1fr .85fr;gap:12px;margin-bottom:12px}.bs-st-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}' +
