@@ -33,7 +33,7 @@ function doPost(e) {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     if (body.ping) return out({ ok: true, sheets: salesSheets(ss).map(sh => sh.getName()) });
     if (body.team) return out(Object.assign({ ok: true }, teamRead(body.team)));
-    if (body.teamPut) return out({ ok: true, res: teamPut(body.teamPut) });
+    if (body.teamPut) return out({ ok: false, msg: 'Таблица отдела доступна только для чтения' });
     if (body.okk) return out(Object.assign({ ok: true }, okkRead(body.okk)));
     // сверка: какие продажи уже есть в таблице (ничего не пишет)
     // лист месяца читаем один раз на весь запрос; used – строки, уже узнанные как продажа из этого запроса
@@ -349,22 +349,6 @@ function teamRead(q) {
   });
   return { sheet: t.sh.getName(), rows: ks, days };
 }
-// q: {url, name, cells: [{d, k, v, was}]} – пишем, только если в ячейке всё ещё то, что помощник видел (was), и там не формула
-function teamPut(q) {
-  const t = teamOpen(q);
-  return (q.cells || []).map(c => {
-    const row = t.rows[c.k], col = t.cols[c.d];
-    if (!row) return 'norow';
-    if (!col) return 'nocol';
-    const cell = t.sh.getRange(row, col);
-    if (cell.getFormula()) return 'formula';
-    const cur = teamVal(cell.getValue()), was = c.was == null ? null : c.was;
-    if (typeof cur === 'number' && typeof was === 'number' ? Math.abs(cur - was) > 0.005 : cur !== was) return 'changed';
-    cell.setValue(+c.v || 0);
-    return 'ok';
-  });
-}
-
 // ---------- Таблица ОКК: KPI по месяцам (только читаем) ----------
 const okkPct = v => { const t = String(v || '').trim(), x = num(t); return x == null ? null : Math.round((/%/.test(t) || x > 1.5 ? x : x * 100) * 10) / 10; };
 // q: {url, name} → { sheet, months: {гггг*100+мм: KPI в %} }
