@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.63.1
+// @version      1.63.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1069,7 +1069,7 @@
   // Цифры берём со страницы «Клиенты» теми же фильтрами, что и вручную: только чтение, ничего не меняем.
   const CL_URL = '/app/Customers/CustomersList.aspx', CF = 'ctl00$ContentPlaceHolder1$tabs$ucCustomersFilter$';
   // третье поле – женский род: «Работу завершила»
-  const MANAGERS = [['62503', 'Миша'], ['62451', 'Ксюша', 1], ['62434', 'Даша', 1], ['62713', 'Бес']];
+  const MANAGERS = [['62503', 'Миша'], ['62451', 'Ксюша', 1], ['62434', 'Даша', 1], ['63748', 'Лиза', 1]];
   // «кто я»: раньше брался из отчёта (bsRepManager) – переносим один раз
   const ME_KEY = 'bsMe';
   try { if (!localStorage.getItem(ME_KEY) && localStorage.getItem('bsRepManager')) localStorage.setItem(ME_KEY, localStorage.getItem('bsRepManager')); localStorage.removeItem('bsRepManager'); } catch (e) {}
@@ -1192,7 +1192,7 @@
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        setStatus('err', 'не посчиталось – впиши сам');
+        setStatus('err', 'не посчиталось – введи вручную');
       }
       box.classList.remove('bs-loading');
       update();
@@ -1758,6 +1758,10 @@
   // «я» – выбирается один раз при первом заходе (bsMe); продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
   const meName = () => (MANAGERS.find(m => m[0] === meId()) || [])[1];
   const meSet = () => MANAGERS.some(m => m[0] === localStorage.getItem(ME_KEY));
+  // Сохранённая продажа может включать менеджеров, которые уже ушли.
+  const saleMopChoices = mops => [...new Set([...MANAGERS.map(m => m[1]), ...mops])];
+  const saleMopChips = names => '<div class="bs-chips" data-g="mops">' +
+    names.map(n => '<em data-v="' + esc(n) + '">' + esc(n) + '</em>').join('') + '</div>';
   const saleMine = x => !meSet() || !x.mops.length || x.mops.includes(meName());
   // доля, которая идёт в отчёт: продажа не на меня (cnt === false) хранится в списке, но не считается
   const saleShare = s => s && s.cnt !== false ? s.share : 0;
@@ -1797,14 +1801,15 @@
     if (!dlg) return tarHint('Сначала открой чат клиента');
     const tars = jget(TAR_KEY, []);
     const tags = clientTags();
-    const x = old ? Object.assign({}, old) : {
+    const x = old ? Object.assign({}, old, { mops: (old.mops || []).slice() }) : {
       id: Date.now().toString(36), dlg, t: Date.now(), tar: '', name: '', price: '',
-      mops: MANAGERS.map(m => m[1]).filter(n => tags.some(t => norm(t) === norm(n))),
+      mops: MANAGERS.map(m => m[1]).filter(n => tags.some(t => mopTagRe(n).test(norm(t)))),
       email: '', fio: '', nick: '',
       src: tags.filter(t => /^источник\s*:/i.test(t)).map(t => t.replace(/^источник\s*:\s*/i, '')).join(', '),
       quote: '',
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
+    const mopChoices = saleMopChoices(x.mops);
     if (!old) x.share = shareFor(x.mops.length);
     // новую продажу можно отнести к прошлому дню – тогда она уйдёт в смену этого дня в истории, а не в текущую
     const curD = repSaved().d || ddmm(new Date());
@@ -1827,10 +1832,10 @@
         twins.slice(0, 3).map(o => '<p><span><b>' + (o.d === curD ? 'сегодня' : o.d.slice(0, 5)) + '</b> – ' + esc(o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽</span>' + twinBtn(o) + '</p>').join('') +
         (twins.length > 3 ? '<p><span>и ещё ' + (twins.length - 3) + ' – в «Истории»</span></p>' : '') + '</div>' : '') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
-      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>',
+      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (ввести вручную)</option></select></label>',
         old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
         field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + row(field('price', 'Цена, ₽', '0'), field('disc', 'Скидка', '₽ или 10%'))) +
-      sec('Кто продал', '<div class="bs-sf-team"><label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      sec('Участники продажи', '<div class="bs-sf-team"><label><span>МОП</span>' + saleMopChips(mopChoices) + '</label>' +
         '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label></div>') +
       sec('Оплата и премия', payChips(), 'bs-sf-pay') +
       sec('Клиент', row(field('fio', 'Имя и фамилия', 'когда пришлёт'), field('email', 'Почта', 'когда пришлёт')) + row(field('nick', 'Ник', '@…'), field('src', 'Источник', 'из тегов или вручную')) +
@@ -1904,7 +1909,7 @@
       if (em) {
         const g = em.parentNode.dataset.g, v = em.dataset.v;
         if (g === 'mops') {
-          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : mopChoices.filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);   // доля – от числа МОП, потом можно поправить вручную
         } else if (g === 'pay') x.pay = v;
         else x.share = +v;
@@ -2926,13 +2931,14 @@
     closeSale();
     histKeep = hi + ':' + end;
     const old = e.sales[si], x = Object.assign({}, old, { mops: (old.mops || []).slice() });
+    const mopChoices = saleMopChoices(x.mops);
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, t, ph) => '<label><span>' + t + '</span><input data-k="' + k + '" placeholder="' + (ph || '') + '"></label>';
     wrap.innerHTML = '<div id="bsSale" class="bs-hedit"><div class="bs-rep-head"><b>Продажа за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
       '<div class="bs-sale-form">' + field('fio', 'Имя и фамилия') + field('name', 'Тариф') +
       '<div class="bs-hedit-2">' + field('price', 'Цена, ₽') + field('disc', 'Скидка', '₽ или 10%') + '</div>' +
-      '<label><span>Менеджеры</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      '<label><span>Менеджеры</span>' + saleMopChips(mopChoices) + '</label>' +
       '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
       payChips() + field('email', 'Почта') + '<div class="bs-sale-note"></div>' +
       (x.dlg ? '<a class="bs-hedit-chat" href="/app/messenger/?dialogId=' + encodeURIComponent(x.dlg) + '" target="_blank">Открыть чат ↗</a>' : '') + '</div>' +
@@ -2963,7 +2969,7 @@
       if (em) {
         const v = em.dataset.v;
         if (em.parentNode.dataset.g === 'mops') {
-          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : mopChoices.filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);
         } else if (em.parentNode.dataset.g === 'pay') x.pay = v;
         else x.share = +v;
@@ -3698,11 +3704,16 @@
   //    («матем мес – 4990», «= 6490», «7 990 (промо)») или после «сумма/итог/оплата»; может стоять в строке тарифа;
   //  МОП – строка «МОП/Менеджер …», иначе строка только из имён менеджеров («Даша и Миша», «Даша, Бес»);
   //  тариф – текст перед суммой в той же строке, иначе первая строка, которая не сумма, не МОП и не данные клиента.
-  const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес' };
-  const mopRe = n => new RegExp('(^|[^а-яё])(' + (MOP_FORMS[n] || norm(n)) + ')(?![а-яё])', 'i');
-  const mopsIn = line => MANAGERS.map(m => m[1]).filter(n => mopRe(n).test(norm(line)));
+  const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес',
+    'Лиза': 'елизавета|лиза' };
+  // В старых сообщениях Telegram встречаются имена бывших менеджеров.
+  const IMPORT_MOPS = [...new Set([...MANAGERS.map(m => m[1]), ...Object.keys(MOP_FORMS)])];
+  const mopForms = n => norm(MOP_FORMS[n] || n);
+  const mopTagRe = n => new RegExp('^(?:' + mopForms(n) + ')$');
+  const mopRe = n => new RegExp('(^|[^а-яё])(' + mopForms(n) + ')(?![а-яё])', 'i');
+  const mopsIn = line => IMPORT_MOPS.filter(n => mopRe(n).test(norm(line)));
   // строка только из имён менеджеров и связок – пустая строка после вычёркивания
-  const onlyMops = line => mopsIn(line).length ? MANAGERS.map(m => m[1]).reduce((t, n) => t.replace(new RegExp(MOP_FORMS[n] || norm(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
+  const onlyMops = line => mopsIn(line).length ? IMPORT_MOPS.reduce((t, n) => t.replace(new RegExp(mopForms(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
   const NUM = '(\\d{1,3}(?:[  ]\\d{3})+|\\d+)(?:[.,](\\d+))?';
   const CUR = '\\s*(к(?![а-яa-z])|тыс\\S*)?\\s*(р(?![а-яa-z])|р\\.|руб\\S*|₽)?';
   const numVal = m => { const d = m[1].replace(/\D/g, ''); return d.length > 7 ? 0 : parseFloat(d + (m[2] ? '.' + m[2] : '')) * (m[3] ? 1000 : 1); };
@@ -4145,7 +4156,7 @@
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
-      '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
+      '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Лиза"]{background:#7950c5}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
       '.bs-sales-row .bs-sales-sh{grid-column:3;grid-row:1/span 2;align-self:center;justify-self:stretch;min-width:84px;text-align:center;box-sizing:border-box;height:22px!important;min-height:0!important;margin:0!important;padding:0 9px!important;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11px!important;line-height:20px!important;font-weight:500;cursor:pointer;white-space:nowrap}' +
       '.bs-sales-row button.bs-sales-sh:hover{background:var(--bs-accent,#3b82f6);color:#fff}.bs-sales-row .bs-sales-sh:disabled{opacity:.6;cursor:default}' +
