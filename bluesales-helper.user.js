@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.63.3
+// @version      1.63.4
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2116,6 +2116,13 @@
     // KPI из таблицы ОКК пришёл новый – перерисовать премию
     okkPaint = () => { if (!box.isConnected) return; if (tab === 'shift') paintShift(box); if (tab === 'hist') histPaint(); if (tab === 'stat') paintStat(box); if (tab === 'find') paintFind(box); };
     okkSync();
+    if (tab === 'shift' && sheetUrl() && salesGet().some(x => x.sh && toSheet(x))) {
+      const d = ddmm(new Date()), url = sheetUrl(), snapshot = JSON.stringify(salesGet());
+      sheetPost({ rows: { from: d, to: d } }, url).then(j => {
+        if (!box.isConnected || !Array.isArray(j.rows) || url !== sheetUrl() || d !== ddmm(new Date()) || snapshot !== JSON.stringify(salesGet())) return;
+        if (tabMatch(true, j).currentChanged) paintShift(box);
+      }).catch(() => {});   // при недоступной таблице сохраняем последнюю отметку
+    }
     wrap.addEventListener('mouseover', ev => {
       const pm = ev.target.closest && ev.target.closest('.bs-pm'), tip = pm && pm.querySelector('.bs-ptip');
       if (!tip) return;
@@ -2692,13 +2699,13 @@
     histPaint = () => { if (body.isConnected) paintBody(); };
     // сама сверяет с таблицей смены за период: строки оплат листов этих месяцев против продаж в истории
     // (строки могли удалить или дописать руками). Старый скрипт строк не отдаёт – тогда как раньше, только текущий месяц
-    // lazy – при открытии истории и смене периода: тот же период сверяли меньше минуты назад – не дёргаем таблицу снова
+    // При открытии истории и смене периода не повторяем уже идущую сверку того же периода.
     const autoCheck = lazy => {
       if (!sheetUrl()) return;
       const [from, to] = histRange(), now = new Date();
       const key = [from && isoOf(from), to && isoOf(to), sheetUrl(), teamOn() && JSON.stringify(teamCfg())].join('|');
-      if (lazy && sheetLast && sheetLast.key === key && Date.now() - sheetLast.t < 60000) return;
-      sheetLast = { key, t: Date.now() };
+      if (lazy && sheetBusy && sheetKey === key) return;
+      sheetKey = key;
       if (!lazy) { okkLast = 0; okkSync(); }
       const tok = ++sheetTok;
       // таблица отдела – после своей таблицы (скрипт один, запросы всё равно идут по очереди)
@@ -2720,8 +2727,8 @@
         return list.length ? sheetCheck(list).then(st => { if (st.err.length) sheetAutoErr = { keys, msg: st.err.join('; ') }; }) : null;
       };
       sheetAutoErr = null;
-      tabFetch(from, to).then(ok => { if (!ok) { sheetTab = { old: 1 }; return old(); } })
-        .catch(err => { sheetTab = { err: err.message }; sheetAutoErr = { keys, msg: err.message }; })
+      tabFetch(from, to, tok).then(ok => { if (tok === sheetTok && !ok) { sheetTab = { old: 1 }; return old(); } })
+        .catch(err => { if (tok === sheetTok) { sheetTab = { err: err.message }; sheetAutoErr = { keys, msg: err.message }; } })
         .then(() => { if (tok !== sheetTok) return; sheetBusy = null; histPaint(); return team(); });
     };
     repaint();
@@ -2733,7 +2740,7 @@
       if (a === 'sheetset') return openSheet();
       if (a === 'add') return openImport(isoOf(new Date(Date.now() - 864e5)));
       if (t.dataset.p) { histPer.p = t.dataset.p; repaint(); return autoCheck(1); }
-      if (a === 'tabsync') return autoCheck();
+      if (t.closest('[data-a="tabsync"]')) return autoCheck();
       // за весь период: оплаты «только в таблице» – в историю по своим дням
       if (a === 'tabimp') {
         const [from, to] = histRange(), nowD = histAll().some(e => e.now) ? ddmm(new Date()) : null;
@@ -3217,7 +3224,7 @@
   let sheetTab = null;
   const ymOf = d => { const x = dmyDate(d); return x.getFullYear() * 100 + x.getMonth() + 1; };
   // строки за месяцы периода и прошлый месяц (там ищем «этот человек уже платил»), не больше года; false – скрипт старый
-  async function tabFetch(from, to) {
+  async function tabFetch(from, to, tok) {
     const h = histGet(), now = new Date();
     to = to || now;
     from = from || (h.length ? new Date(Math.min(...h.map(e => +dmyDate(e.d)))) : now);
@@ -3225,7 +3232,7 @@
     let a = new Date(from.getFullYear(), from.getMonth() - 1, 1);
     if (a < cap) a = cap;
     const j = await sheetPost({ rows: { from: ddmm(a), to: ddmm(to) } });
-    if (!Array.isArray(j.rows)) return false;
+    if (tok !== sheetTok || !Array.isArray(j.rows)) return false;
     sheetTab = { months: j.months || [], rows: j.rows, days: j.days || {} };
     const pc = premCfgs();
     let pch = false;
@@ -3236,15 +3243,15 @@
   }
   // каждой продаже – её строка, как в скрипте: тот же чат на листе месяца продажи, сначала сумма из таблицы (продажу могли
   // поправить), потом своя; отправленные (✓) – вперёд. Строки без пары – «только в таблице».
-  // persist – по строкам обновить отметки у продаж в истории (✓, что записано в таблице, «у человека уже есть оплата»)
-  function tabMatch(persist) {
-    const t = sheetTab, res = { pair: new Map(), only: [] };
+  // persist – обновить отметки в истории и проверить ранее отправленные продажи текущей смены.
+  function tabMatch(persist, t = sheetTab) {
+    const res = { pair: new Map(), only: [] };
     if (!t || !t.rows) return res;
-    const ms = new Set(t.months.filter(m => m.sheet).map(m => m.y * 100 + m.m)), h = histGet(), items = [], today = ddmm(new Date());
+    const ms = new Set((t.months || []).filter(m => m.sheet).map(m => m.y * 100 + m.m)), h = histGet(), current = salesGet(), items = [], today = ddmm(new Date());
     // pair – по ключу «номер смены:номер продажи» (у сегодняшних – «now:номер»)
     h.forEach((e, hi) => { const ym = ymOf(e.d); if (ms.has(ym)) e.sales.forEach((x, si) => { if (toSheet(x)) items.push({ x, ym, k: hi + ':' + si }); }); });
     // сегодняшние ещё не отправлены, но если строку уже вписали руками – она не «только в таблице»
-    if (ms.has(ymOf(today))) salesGet().forEach((x, si) => { if (toSheet(x)) items.push({ x, ym: ymOf(today), now: 1, k: 'now:' + si }); });
+    if (ms.has(ymOf(today))) current.forEach((x, si) => { if (toSheet(x)) items.push({ x, ym: ymOf(today), now: 1, k: 'now:' + si }); });
     const used = new Set();
     shOrder(items, o => o.x).forEach(o => {
       const c = t.rows.filter(r => !used.has(r) && r.ym === o.ym && r.dlg === String(o.x.dlg || ''));
@@ -3256,7 +3263,7 @@
     if (!persist) return res;
     let ch = false;
     items.forEach(o => {
-      if (o.now) return;
+      if (o.now && !o.x.sh) return;
       const x = o.x, r = res.pair.get(o.k), was = JSON.stringify([x.sh, x.shAlso, x.shT]);
       if (r) shHere(x, r);
       else {
@@ -3266,9 +3273,12 @@
           .map(r => ({ row: r.row, sum: r.sum, d: r.d.slice(0, 5), sheet: r.ym === o.ym ? '' : r.sheet }));
         if (also.length) x.shAlso = alsoTxt(also); else delete x.shAlso;
       }
-      if (JSON.stringify([x.sh, x.shAlso, x.shT]) !== was) ch = true;
+      if (JSON.stringify([x.sh, x.shAlso, x.shT]) !== was) {
+        if (o.now) res.currentChanged = true; else ch = true;
+      }
     });
     if (ch) histSave(h);
+    if (res.currentChanged) salesSet(current);
     return res;
   }
   // маленькие иконки линией – вместо смайликов
@@ -3342,7 +3352,7 @@
   const fixMsg = st => [st.fix && 'исправил в таблице: ' + st.fix, st.gone && 'не нашёл в таблице ' + st.gone + ' – отправь заново',
     st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; ')].filter(Boolean).join(' · ') || 'исправлять нечего';
   // сверка при открытии истории: какие смены сейчас сверяются и чем кончилась прошлая
-  let sheetBusy = null, sheetAutoErr = null, sheetTok = 0, sheetLast = null, histPaint = () => {};
+  let sheetBusy = null, sheetAutoErr = null, sheetTok = 0, sheetKey = null, histPaint = () => {};
   const checkMsg = st => [!st.nosheet && st.here + ' из ' + st.n + ' в таблице', st.gone && 'пропали из таблицы ' + st.gone,
     st.nosheet && st.nosheet + ' – отметки оставил как были',
     st.err.length && 'не вышло ' + st.err.length + ': ' + st.err.join('; '), st.gone + st.miss > 0 && 'чего нет – отправь кнопкой «+ в табл.» или «Отправить»',
