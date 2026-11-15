@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.62.0
+// @version      1.63.2
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -449,7 +449,7 @@
     document.head.appendChild(st);
     // список перерисовывается сайтом – возвращаем плашки; раз в 30 секунд обновляем минуты
     let t = 0;
-    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc';
+    const OWN = '#bsDock,#bsEmoBar,#bsRemList,#bsLinks,#bsToasts,#bsMenu,#bsRepWrap,#bsHome,#bsSndMenu,#bsEmoToggle,#bsPeek,#bsSold,#bsShift,#bsTarWrap,#bsTarHint,#bsSaleWrap,#bsTip,#bsSelPop,#bsAc,#bsBotHint';
     const own = r => r.target.nodeType === 1 && r.target.closest(OWN);
     new MutationObserver(recs => {
       if (recs.every(own)) return;
@@ -950,7 +950,19 @@
     b.classList.toggle('bs-on', on);
     document.body.classList.toggle('bs-only-bot', on);
     b.title = (on ? 'Показаны только чаты, где ответил бот. Нажми, чтобы показать все' : 'Показать только чаты, где ответил бот') +
-      ' (в загруженном списке: ' + n + ')';
+      ' (в загруженном списке: ' + n + ')';    // фильтр включён – строка над списком, чтобы пустой список не казался поломкой
+    const list = document.querySelector('.dialogs_list');
+    let h = document.getElementById('bsBotHint');
+    if (!on || !list) { if (h) h.remove(); return; }
+    if (!h) {
+      h = document.createElement('div');
+      h.id = 'bsBotHint';
+      h.innerHTML = '<span></span><a>Показать все</a>';
+      h.querySelector('a').addEventListener('click', () => { flip('bsOnlyBot'); paintBotBtn(); });
+    }
+    if (h.parentNode !== list || list.firstChild !== h) list.prepend(h);
+    const txt = n ? 'Только чаты, где ответил бот: ' + n : 'Чатов, где ответил только бот, нет';
+    if (h.firstChild.textContent !== txt) h.firstChild.textContent = txt;
   }
   function botBtnInit() {
     const dock = document.getElementById('bsDock'), before = document.getElementById('bsThemeBtn');
@@ -1007,6 +1019,9 @@
       '#bsBotBtn b{position:absolute;top:0;right:0;min-width:13px;height:13px;padding:0 3px;box-sizing:border-box;border-radius:7px;background:#d48806;color:#fff;font-size:9px;line-height:13px;font-weight:700}' +
       '#bsBotBtn b:empty{display:none}' +
       'body.bs-only-bot .dialogs_list_item:not(.bs-botchat){display:none!important}' +
+      '#bsBotHint{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 8px;padding:7px 10px;border-radius:8px;font-size:12.5px;line-height:1.3;background:var(--bs-accent-soft,rgba(59,130,246,.12));color:var(--bs-text,#222)}' +
+      '#bsBotHint a{flex:none;color:var(--bs-accent,#3b82f6);font-weight:600;cursor:pointer;white-space:nowrap}' +
+      '#bsBotHint a:hover{text-decoration:underline}' +
       '#bsRemBtn b.bs-due{background:#e04848}' +
       '#bsRemList{position:fixed;right:12px;bottom:54px;z-index:3000;width:260px;max-height:50vh;overflow:auto;box-sizing:border-box;padding:6px;border-radius:12px;font-size:13px;' +
       'background:var(--bs-panel,#fff);color:var(--bs-text,#222);border:1px solid var(--bs-border,#D9E0E7);box-shadow:0 8px 24px rgba(0,0,0,.18)}' +
@@ -1054,7 +1069,7 @@
   // Цифры берём со страницы «Клиенты» теми же фильтрами, что и вручную: только чтение, ничего не меняем.
   const CL_URL = '/app/Customers/CustomersList.aspx', CF = 'ctl00$ContentPlaceHolder1$tabs$ucCustomersFilter$';
   // третье поле – женский род: «Работу завершила»
-  const MANAGERS = [['62503', 'Миша'], ['62451', 'Ксюша', 1], ['62434', 'Даша', 1], ['62713', 'Бес']];
+  const MANAGERS = [['62503', 'Миша'], ['62451', 'Ксюша', 1], ['62434', 'Даша', 1], ['63748', 'Лиза', 1]];
   // «кто я»: раньше брался из отчёта (bsRepManager) – переносим один раз
   const ME_KEY = 'bsMe';
   try { if (!localStorage.getItem(ME_KEY) && localStorage.getItem('bsRepManager')) localStorage.setItem(ME_KEY, localStorage.getItem('bsRepManager')); localStorage.removeItem('bsRepManager'); } catch (e) {}
@@ -1177,7 +1192,7 @@
         box.classList.remove('bs-done'); void box.offsetWidth; box.classList.add('bs-done');
       } catch (e) {
         if (my !== run) return;
-        setStatus('err', 'не посчиталось – впиши сам');
+        setStatus('err', 'не посчиталось – введи вручную');
       }
       box.classList.remove('bs-loading');
       update();
@@ -1743,6 +1758,10 @@
   // «я» – выбирается один раз при первом заходе (bsMe); продажа без меня в МОП идёт только текстом в ТГ, в смену не считается
   const meName = () => (MANAGERS.find(m => m[0] === meId()) || [])[1];
   const meSet = () => MANAGERS.some(m => m[0] === localStorage.getItem(ME_KEY));
+  // Сохранённая продажа может включать менеджеров, которые уже ушли.
+  const saleMopChoices = mops => [...new Set([...MANAGERS.map(m => m[1]), ...mops])];
+  const saleMopChips = names => '<div class="bs-chips" data-g="mops">' +
+    names.map(n => '<em data-v="' + esc(n) + '">' + esc(n) + '</em>').join('') + '</div>';
   const saleMine = x => !meSet() || !x.mops.length || x.mops.includes(meName());
   // доля, которая идёт в отчёт: продажа не на меня (cnt === false) хранится в списке, но не считается
   const saleShare = s => s && s.cnt !== false ? s.share : 0;
@@ -1782,14 +1801,15 @@
     if (!dlg) return tarHint('Сначала открой чат клиента');
     const tars = jget(TAR_KEY, []);
     const tags = clientTags();
-    const x = old ? Object.assign({}, old) : {
+    const x = old ? Object.assign({}, old, { mops: (old.mops || []).slice() }) : {
       id: Date.now().toString(36), dlg, t: Date.now(), tar: '', name: '', price: '',
-      mops: MANAGERS.map(m => m[1]).filter(n => tags.some(t => norm(t) === norm(n))),
+      mops: MANAGERS.map(m => m[1]).filter(n => tags.some(t => mopTagRe(n).test(norm(t)))),
       email: '', fio: '', nick: '',
       src: tags.filter(t => /^источник\s*:/i.test(t)).map(t => t.replace(/^источник\s*:\s*/i, '')).join(', '),
       quote: '',
       who: ((document.querySelector('.dialogs_list_item.active .dialogs_list_person_name') || {}).textContent || '').trim(),
     };
+    const mopChoices = saleMopChoices(x.mops);
     if (!old) x.share = shareFor(x.mops.length);
     // новую продажу можно отнести к прошлому дню – тогда она уйдёт в смену этого дня в истории, а не в текущую
     const curD = repSaved().d || ddmm(new Date());
@@ -1812,10 +1832,10 @@
         twins.slice(0, 3).map(o => '<p><span><b>' + (o.d === curD ? 'сегодня' : o.d.slice(0, 5)) + '</b> – ' + esc(o.s.name || 'без тарифа') + ' · ' + rub(saleTotal(o.s)) + ' ₽</span>' + twinBtn(o) + '</p>').join('') +
         (twins.length > 3 ? '<p><span>и ещё ' + (twins.length - 3) + ' – в «Истории»</span></p>' : '') + '</div>' : '') +
       '<div class="bs-sale-cols"><div class="bs-sale-form">' +
-      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (впишу сам)</option></select></label>',
+      sec('Покупка', row('<label class="bs-sf-w2"><span>Тариф</span><select data-k="tar"><option value="">– выбери –</option>' + tars.map((t, i) => '<option value="' + i + '">' + esc(t.k) + (t.p ? ' · ' + rub(t.p) : '') + '</option>').join('') + '<option value="own">другой (ввести вручную)</option></select></label>',
         old ? '' : '<label><span>Дата продажи</span><input data-k="day" type="date" value="' + isoOf(dmyDate(curD)) + '" max="' + isoOf(new Date()) + '"></label>') +
         field('name', 'Название в отчёте', 'Годовой курс ЕГЭ | …') + row(field('price', 'Цена, ₽', '0'), field('disc', 'Скидка', '₽ или 10%'))) +
-      sec('Кто продал', '<div class="bs-sf-team"><label><span>МОП</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      sec('Участники продажи', '<div class="bs-sf-team"><label><span>МОП</span>' + saleMopChips(mopChoices) + '</label>' +
         '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label></div>') +
       sec('Оплата и премия', payChips(), 'bs-sf-pay') +
       sec('Клиент', row(field('fio', 'Имя и фамилия', 'когда пришлёт'), field('email', 'Почта', 'когда пришлёт')) + row(field('nick', 'Ник', '@…'), field('src', 'Источник', 'из тегов или вручную')) +
@@ -1889,7 +1909,7 @@
       if (em) {
         const g = em.parentNode.dataset.g, v = em.dataset.v;
         if (g === 'mops') {
-          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : mopChoices.filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);   // доля – от числа МОП, потом можно поправить вручную
         } else if (g === 'pay') x.pay = v;
         else x.share = +v;
@@ -2127,7 +2147,13 @@
   // верх вкладки «Сегодня»: кольцо цели месяца, твоя доля за сегодня, справа – месяц
   // коэффициенты к премии за месяц (как в таблице, перемножаются): за качество – KPI из таблицы ОКК (bsKpi – последнее, что прочитали),
   // за выполнение плана – продано за месяц / цель месяца в помощнике
-  const KPI_KEY = 'bsKpi';
+  const KPI_KEY = 'bsKpi', COEF_KEY = 'bsPremFactors';
+  const factorValid = v => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+  const factorParse = s => {
+    const t = s.trim().replace(',', '.');
+    if (!t) return null; // пусто – автоматический коэффициент
+    return /^\d+(?:\.\d+)?$/.test(t) && factorValid(+t) ? +t : NaN;
+  };
   const goalFor = ym => { const g = jget(GOAL_KEY, {}); return +(g.m && g.m[ym]) || +g.n || 0; };
   const kpiGet = ym => { const v = jget(KPI_KEY, {})[ym]; return v == null ? null : +v; };
   const kq = n => String(n).replace('.', ',');
@@ -2136,7 +2162,9 @@
     const sold = Math.round(histAll().filter(e => ymOf(e.d) === ym).reduce((a, e) => a + (+e.rep.bought || 0), 0) * 100) / 100;
     const plan = goal ? Math.round(sold / goal * 1000) / 10 : null;
     const q = kpi == null ? 1 : kpi < 70 ? 0.9 : kpi < 97 ? 1 : 1.1, pl = plan == null ? 1 : plan < 80 ? 0.9 : plan < 150 ? 1 : 1.1;
-    return { kpi, plan, sold, goal, q, p: pl, k: Math.round(q * pl * 100) / 100 };
+    const saved = jget(COEF_KEY, {})[ym] || {}, manualQ = factorValid(saved.q), manualP = factorValid(saved.p);
+    const quality = manualQ ? saved.q : q, target = manualP ? saved.p : pl;
+    return { kpi, plan, sold, goal, autoQ: q, autoP: pl, manualQ, manualP, q: quality, p: target, k: Math.round(quality * target * 1e10) / 1e10 };
   }
   // премия за месяц: посчитанная помощником (p = premSum) × коэффициенты и из таблицы (N1) – если обе, сверяем
   // (в таблице коэффициенты появляются в конце месяца – сходится и без них)
@@ -2151,16 +2179,16 @@
     const pl = c.plan == null ? 'цель не задана' : Math.floor(c.plan) + '% (' + frac(c.sold) + ' из ' + c.goal + (ym === ymNow() ? ', месяц идёт' : '') + ')';
     const tip = '<section class="bs-ptip">' + row('По продажам', rubK(p.v) + ' ₽') +
       (p.miss ? '<p class="bs-pt-n">без премии ещё ' + p.miss + ' ' + plural(p.miss, 'продажа', 'продажи', 'продаж') + '</p>' : '') +
-      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q), 'bs-pt-k ' + cls(c.q)) +
+      row('Качество · ' + (c.kpi != null ? 'KPI ' + kq(c.kpi) + '%' : 'KPI нет'), '×' + kq(c.q) + (c.manualQ ? ' · вручную' : ''), 'bs-pt-k ' + cls(c.q)) +
       (c.kpi == null ? '<p class="bs-pt-n">' + (okkOn() ? 'в таблице ОКК нет KPI за этот месяц' : 'подключи таблицу ОКК в «Таблицах»') + '</p>' : '') +
-      row('План · ' + pl, '×' + kq(c.p), 'bs-pt-k ' + cls(c.p)) +
+      row('План · ' + pl, '×' + kq(c.p) + (c.manualP ? ' · вручную' : ''), 'bs-pt-k ' + cls(c.p)) +
       (c.plan == null ? '<p class="bs-pt-n">задай цель – клик по кольцу во вкладке «Сегодня»</p>' : '') +
       row('Итого', rubK(v) + ' ₽', 'bs-pt-t') +
       (tab != null ? row('В таблице (N1)', rubK(tab) + ' ₽', 'bs-pt-tab') +
         '<p class="bs-pt-n ' + (bad ? 'bad' : 'ok') + '">' + (okF ? '✓ сходится' : okB ? '✓ сходится без коэффициентов – их ставят в конце месяца' : '≠ не сходится') + '</p>' : '') + '</section>';
     const chip = (t, x, none) => '<em class="' + (none ? 'no' : cls(x)) + '">' + t + (none ? ' ?' : ' ×' + kq(x)) + '</em>';
     return '<div class="bs-pm"><span>' + lbl + '</span><b class="' + (bad || p.miss ? 'bs-warn' : 'bs-ok') + '">' + rubK(v) + ' ₽' + (bad ? ' ≠' : p.miss ? ' ?' : '') + '</b>' +
-      '<small class="bs-kpi">' + chip('KPI', c.q, c.kpi == null) + chip('план', c.p, c.plan == null) + '</small>' + tip + '</div>';
+      '<small class="bs-kpi">' + chip('KPI' + (c.manualQ ? ' вручную' : ''), c.q, c.kpi == null && !c.manualQ) + chip('план' + (c.manualP ? ' вручную' : ''), c.p, c.plan == null && !c.manualP) + '</small>' + tip + '</div>';
   }
   const heroHtml = withHist(function (r) {
     const now = new Date(), mon = MONTHS[now.getMonth()];
@@ -2261,6 +2289,19 @@
     return a.map(([n, k, s]) => [n, k, frac(k) + ' · ' + rub(s) + ' ₽']);
   }
   const card = (cls, title, body, right) => '<section class="bs-st-c ' + cls + '"><header><h4>' + title + '</h4>' + (right || '') + '</header>' + body + '</section>';
+  function factorHtml(s) {
+    const c = s.c;
+    const field = (key, label, manual, value, auto) => '<label>' + label +
+      '<input data-factor="' + key + '" type="text" inputmode="decimal" value="' + (manual ? kq(value) : '') + '" placeholder="Авто: ' + kq(auto) + '">' +
+      '<small>' + (manual ? 'Вручную ×' + kq(value) + ' · авто ×' + kq(auto) : 'Автоматически ×' + kq(auto)) + '</small></label>';
+    return '<details class="bs-factor-menu"><summary title="Настроить коэффициенты премии за выбранный месяц">' + ico(ICO.pen, 13) + ' Коэффициенты' + (c.manualQ || c.manualP ? '<i title="Есть ручные значения"></i>' : '') + '</summary>' +
+      card('bs-factors', 'Коэффициенты · ' + ymName(s.ym) + ' ' + Math.floor(s.ym / 100),
+      '<p class="bs-st-hint">Пусто — авто. Изменения только для этого месяца.</p>' +
+      '<div class="bs-factor-fields">' + field('q', 'Качество (KPI)', c.manualQ, c.q, c.autoQ) + field('p', 'Выполнение плана', c.manualP, c.p, c.autoP) + '</div>' +
+      '<p class="bs-st-hint">Применяется: ×' + kq(c.q) + ' × ' + kq(c.p) + ' = ×' + kq(c.k) +
+      (!s.ps ? ' Для применения нужна премия по продажам: подключи и сверь свою таблицу. Готовая премия из N1 повторно не умножается.' : '') + '</p>' +
+      '<div class="bs-factor-actions"><button data-a="factors-save">Сохранить</button><button data-a="factors-auto">Сбросить в авто</button><span role="status" aria-live="polite"></span></div>', '<button class="bs-factor-close" data-a="factors-close" aria-label="Закрыть настройки">×</button>') + '</details>';
+  }
   const paintStat = withHist(function (box) {
     const now = ymNow(), first = histAll().reduce((a, e) => Math.min(a, ymOf(e.d)), now);
     statYm = Math.min(Math.max(statYm || now, first), now);
@@ -2268,7 +2309,7 @@
     const MON = ymName(ym)[0].toUpperCase() + ymName(ym).slice(1), r = s.rate, per = r.sum / r.n;
     const top = '<div class="bs-st-top"><div class="bs-st-nav"><button data-a="prev"' + (ym <= first ? ' disabled' : '') + ' title="Прошлый месяц">' + ico(ICO.back, 16) + '</button>' +
       '<b>' + MON + ' ' + y + '</b><button data-a="next"' + (cur ? ' disabled' : '') + ' title="Следующий месяц">' + ico(ICO.back, 16) + '</button></div>' +
-      '<span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span></div>';
+      '<div class="bs-st-settings"><span class="bs-st-rate">смена – <b>' + rub(per) + ' ₽</b> <small>(' + rub(r.sum) + ' за ' + r.n + ')</small><button data-a="rate" title="Поменять ставку за смены">' + ico(ICO.pen, 13) + '</button></span>' + factorHtml(s) + '</div></div>';
     if (!s.es.length) { box.innerHTML = top + '<div class="bs-empty">За ' + ymName(ym) + ' смен в истории нет.</div>'; return statClick(box); }
     // зарплата
     const sp = s.prem || 0, all = Math.max(1, sp + s.shifts);
@@ -2284,10 +2325,10 @@
     const left = Math.max(0, r.n - s.days), next = [[80, '×1'], [100, ''], [150, '×1,1']].find(([t]) => pl < t);
     const need = next && Math.max(0, g * next[0] / 100 - s.sold);
     const plan = card('bs-st-plan', 'План', !g ? '<p class="bs-st-hint">Цель на ' + ymName(ym) + ' не задана – нажми на кольцо во вкладке «Сегодня».</p>' :
-      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + '</em></em></div>' +
+      '<div class="bs-st-pv"><b>' + pct(Math.floor(pl)) + '</b><span>' + frac(s.sold) + ' из ' + g + ' продаж</span><em class="bs-kpi"><em class="' + (s.c.p > 1 ? 'up' : s.c.p < 1 ? 'down' : '') + '">план ×' + kq(s.c.p) + (s.c.manualP ? ' · вручную' : '') + '</em></em></div>' +
       '<div class="bs-st-track" style="--z1:' + at(80) + ';--z2:' + at(150) + '"><i style="width:' + at(Math.min(pl, mx)) + '"></i>' +
         [80, 100, 150].map(t => '<s style="left:' + at(t) + '"><small>' + t + '</small></s>').join('') + '</div>' +
-      '<p class="bs-st-hint">' + (!next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
+      '<p class="bs-st-hint">' + (s.c.manualP ? 'Коэффициент задан вручную. Пороги на шкале — для автоматического расчёта.' : !next ? 'Больше 150% – коэффициент уже максимальный' : 'До ' + next[0] + '%' + (next[1] ? ' (' + next[1] + ')' : '') + ' ещё <b>' + Math.ceil(need - 0.001) + '</b> ' +
         plural(Math.ceil(need - 0.001), 'продажа', 'продажи', 'продаж') + (cur && left ? ' – по <b>' + d1(need / left) + '</b> за смену, осталось ' + left + ' ' + plural(left, 'смена', 'смены', 'смен') : '')) + '</p>');
     // KPI: полукруг с зонами коэффициента
     const k = s.c.kpi, L = Math.PI * 40, arc = 'M10 50 A40 40 0 0 1 90 50', zc = k == null ? '' : k < 70 ? 'down' : k < 97 ? '' : 'up';
@@ -2295,6 +2336,7 @@
     const kpi = card('bs-st-kpi', 'Качество', '<div class="bs-st-gauge ' + zc + '"><svg viewBox="0 0 100 56" width="150" height="84"><path d="' + arc + '" class="bs-st-gtr"/>' +
       (k != null ? '<path d="' + arc + '" class="bs-st-gv" stroke-dasharray="' + (L * Math.min(100, k) / 100).toFixed(1) + ' ' + L.toFixed(1) + '"/>' : '') + '<g class="bs-st-gt">' + tick(70) + tick(97) + '</g></svg>' +
       '<b>' + (k != null ? kq(k) + '%' : '–') + '</b><small>KPI из таблицы ОКК</small></div>' +
+      (s.c.manualQ ? '<p class="bs-st-hint">Применяется вручную ×' + kq(s.c.q) + '. Ниже — автоматические пороги.</p>' : '') +
       '<p class="bs-st-kz"><span' + (k != null && k < 70 ? ' class="on down"' : '') + '>&lt;70 ×0,9</span><span' + (k != null && k >= 70 && k < 97 ? ' class="on"' : '') + '>70–96 ×1</span><span' + (k != null && k >= 97 ? ' class="on up"' : '') + '>97+ ×1,1</span></p>' +
       (k == null ? '<p class="bs-st-hint">' + (okkOn() ? 'В таблице ОКК нет KPI за ' + ymName(ym) : 'Подключи таблицу ОКК в «Таблицах»') + '</p>' : ''));
     // график по дням
@@ -2357,13 +2399,42 @@
     statClick(box);
   });
   function statClick(box) {
+    const menu = box.querySelector('.bs-factor-menu');
+    const closeFactors = () => { if (menu) { menu.open = false; menu.querySelector('summary').focus(); } };
+    if (menu) menu.onkeydown = ev => {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeFactors(); }
+      if (ev.key === 'Enter' && ev.target.matches('input')) { ev.preventDefault(); menu.querySelector('[data-a="factors-save"]').click(); }
+    };
     box.onclick = ev => {
       const t = ev.target, b = t.closest('[data-a],[data-m],[data-ym]');
+      if (menu && menu.open && !menu.contains(t)) menu.open = false;
       if (!b || b.disabled) return;
       if (b.dataset.m) { statMet = b.dataset.m; return paintStat(box); }
       if (b.dataset.ym) { statYm = +b.dataset.ym; return paintStat(box); }
       const a = b.dataset.a;
       if (a === 'prev' || a === 'next') { statYm = ymAdd(statYm, a === 'prev' ? -1 : 1); return paintStat(box); }
+      if (a === 'factors-close') return closeFactors();
+      if (a === 'factors-save' || a === 'factors-auto') {
+        const panel = box.querySelector('.bs-factors'), values = {}, status = panel.querySelector('[role="status"]');
+        if (a === 'factors-save') {
+          for (const input of panel.querySelectorAll('[data-factor]')) {
+            const v = factorParse(input.value);
+            if (Number.isNaN(v)) { status.textContent = 'Введи число от 0, например 1,15, или оставь поле пустым.'; input.focus(); return; }
+            if (v != null) values[input.dataset.factor] = v;
+          }
+          const c = premK(statYm);
+          if (!Number.isFinite((values.q ?? c.autoQ) * (values.p ?? c.autoP) * 1e10)) { status.textContent = 'Слишком большой коэффициент.'; return; }
+        }
+        const saved = jget(COEF_KEY, {});
+        if (Object.keys(values).length) saved[statYm] = values;
+        else delete saved[statYm];
+        try { localStorage.setItem(COEF_KEY, JSON.stringify(saved)); }
+        catch (e) { status.textContent = 'Не удалось сохранить: не хватает места в браузере.'; return; }
+        paintStat(box);
+        const trigger = box.querySelector('.bs-factor-menu summary');
+        if (trigger) trigger.focus();
+        return;
+      }
       if (a === 'rate') {
         const sp = box.querySelector('.bs-st-rate'), r = payRate();
         sp.innerHTML = '<input type="number" min="1" value="' + r.sum + '"> ₽ за <input type="number" min="1" max="31" value="' + r.n + '"> смен <button data-a="rateok">ок</button>';
@@ -2860,13 +2931,14 @@
     closeSale();
     histKeep = hi + ':' + end;
     const old = e.sales[si], x = Object.assign({}, old, { mops: (old.mops || []).slice() });
+    const mopChoices = saleMopChoices(x.mops);
     const wrap = document.createElement('div');
     wrap.id = 'bsSaleWrap';
     const field = (k, t, ph) => '<label><span>' + t + '</span><input data-k="' + k + '" placeholder="' + (ph || '') + '"></label>';
     wrap.innerHTML = '<div id="bsSale" class="bs-hedit"><div class="bs-rep-head"><b>Продажа за ' + e.d + '</b><i title="Закрыть">×</i></div>' +
       '<div class="bs-sale-form">' + field('fio', 'Имя и фамилия') + field('name', 'Тариф') +
       '<div class="bs-hedit-2">' + field('price', 'Цена, ₽') + field('disc', 'Скидка', '₽ или 10%') + '</div>' +
-      '<label><span>Менеджеры</span><div class="bs-chips" data-g="mops">' + MANAGERS.map(m => '<em data-v="' + m[1] + '">' + m[1] + '</em>').join('') + '</div></label>' +
+      '<label><span>Менеджеры</span>' + saleMopChips(mopChoices) + '</label>' +
       '<label class="bs-sale-share"><span>Доля продажи</span><div class="bs-chips" data-g="share">' + SHARES.map(([v, t]) => '<em data-v="' + v + '">' + t + '</em>').join('') + '</div></label>' +
       payChips() + field('email', 'Почта') + '<div class="bs-sale-note"></div>' +
       (x.dlg ? '<a class="bs-hedit-chat" href="/app/messenger/?dialogId=' + encodeURIComponent(x.dlg) + '" target="_blank">Открыть чат ↗</a>' : '') + '</div>' +
@@ -2897,7 +2969,7 @@
       if (em) {
         const v = em.dataset.v;
         if (em.parentNode.dataset.g === 'mops') {
-          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : MANAGERS.map(m => m[1]).filter(n => n === v || x.mops.includes(n));
+          x.mops = x.mops.includes(v) ? x.mops.filter(m => m !== v) : mopChoices.filter(n => n === v || x.mops.includes(n));
           x.share = shareFor(x.mops.length);
         } else if (em.parentNode.dataset.g === 'pay') x.pay = v;
         else x.share = +v;
@@ -3632,11 +3704,16 @@
   //    («матем мес – 4990», «= 6490», «7 990 (промо)») или после «сумма/итог/оплата»; может стоять в строке тарифа;
   //  МОП – строка «МОП/Менеджер …», иначе строка только из имён менеджеров («Даша и Миша», «Даша, Бес»);
   //  тариф – текст перед суммой в той же строке, иначе первая строка, которая не сумма, не МОП и не данные клиента.
-  const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес' };
-  const mopRe = n => new RegExp('(^|[^а-яё])(' + (MOP_FORMS[n] || norm(n)) + ')(?![а-яё])', 'i');
-  const mopsIn = line => MANAGERS.map(m => m[1]).filter(n => mopRe(n).test(norm(line)));
+  const MOP_FORMS = { 'Миша': 'миша|михаил', 'Ксюша': 'ксюша|ксения', 'Даша': 'даша|дарья', 'Бес': 'бес',
+    'Лиза': 'елизавета|лиза' };
+  // В старых сообщениях Telegram встречаются имена бывших менеджеров.
+  const IMPORT_MOPS = [...new Set([...MANAGERS.map(m => m[1]), ...Object.keys(MOP_FORMS)])];
+  const mopForms = n => norm(MOP_FORMS[n] || n);
+  const mopTagRe = n => new RegExp('^(?:' + mopForms(n) + ')$');
+  const mopRe = n => new RegExp('(^|[^а-яё])(' + mopForms(n) + ')(?![а-яё])', 'i');
+  const mopsIn = line => IMPORT_MOPS.filter(n => mopRe(n).test(norm(line)));
   // строка только из имён менеджеров и связок – пустая строка после вычёркивания
-  const onlyMops = line => mopsIn(line).length ? MANAGERS.map(m => m[1]).reduce((t, n) => t.replace(new RegExp(MOP_FORMS[n] || norm(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
+  const onlyMops = line => mopsIn(line).length ? IMPORT_MOPS.reduce((t, n) => t.replace(new RegExp(mopForms(n), 'gi'), ''), norm(line)).replace(/моп\S*|менеджер\S*|\sи\s|[\s,.;:+/&-]/gi, '') : 'x';
   const NUM = '(\\d{1,3}(?:[  ]\\d{3})+|\\d+)(?:[.,](\\d+))?';
   const CUR = '\\s*(к(?![а-яa-z])|тыс\\S*)?\\s*(р(?![а-яa-z])|р\\.|руб\\S*|₽)?';
   const numVal = m => { const d = m[1].replace(/\D/g, ''); return d.length > 7 ? 0 : parseFloat(d + (m[2] ? '.' + m[2] : '')) * (m[3] ? 1000 : 1); };
@@ -3882,6 +3959,7 @@
       '.bs-st-rate{display:flex;align-items:center;gap:4px;font-size:12.5px;color:var(--bs-muted,#888)}.bs-st-rate b{color:var(--bs-text,#222);font-weight:600}.bs-st-rate small{font-size:12px}' +
       '.bs-st-rate input{width:64px;padding:3px 6px;border:1px solid var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-text,#222);font:inherit}.bs-st-rate input+input,.bs-st-rate input:nth-of-type(2){width:44px}' +
       '.bs-st-rate button[data-a=rateok]{width:auto;height:auto;padding:3px 10px;margin-left:4px;background:var(--bs-accent,#3b82f6);color:#fff;border-radius:6px}.bs-st-rate button[data-a=rateok]:hover{background:var(--bs-accent,#3b82f6);color:#fff;filter:brightness(1.1)}' +
+      '.bs-st-settings{display:flex;align-items:center;justify-content:flex-end;gap:14px;flex-wrap:wrap}.bs-factor-menu{position:relative;flex:none}.bs-factor-menu>summary{display:flex;align-items:center;gap:5px;list-style:none;padding:5px 8px;border-radius:7px;color:var(--bs-muted,#888);font-size:12px;cursor:pointer;user-select:none}.bs-factor-menu>summary::-webkit-details-marker{display:none}.bs-factor-menu>summary:hover,.bs-factor-menu[open]>summary{color:var(--bs-accent,#3b82f6);background:var(--bs-accent-soft,#e8f0fe)}.bs-factor-menu>summary>i{width:5px;height:5px;border-radius:50%;background:var(--bs-accent,#3b82f6)}.bs-factor-menu>.bs-factors{position:absolute;right:0;top:calc(100% + 8px);z-index:20;width:320px;max-width:calc(100vw - 64px);box-sizing:border-box;margin:0;background:var(--bs-panel,#fff);box-shadow:0 12px 36px rgba(16,24,40,.16)}.bs-factor-close{border:0;background:none;color:var(--bs-muted,#888);font-size:20px;line-height:1;cursor:pointer;padding:0 2px}.bs-factor-menu .bs-factor-fields label{min-width:110px}.bs-factor-menu .bs-factor-fields small{font-size:11px}.bs-factor-menu .bs-factor-actions button{font-size:12px}.bs-factor-menu [role=status]:empty{display:none}.bs-factor-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px}.bs-factor-fields label{display:flex;flex:1;min-width:150px;flex-direction:column;gap:5px;font-size:13px}.bs-factor-fields input{box-sizing:border-box;width:100%;padding:7px 9px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);font:inherit}.bs-factor-fields small{color:var(--bs-muted,#888)}.bs-factor-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px}.bs-factor-actions button{padding:6px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:7px;background:var(--bs-panel,#fff);color:var(--bs-text,#222);cursor:pointer}.bs-factor-actions button:first-child{background:var(--bs-accent,#3b82f6);color:#fff}.bs-factor-actions [role=status]{font-size:12px;color:var(--bs-muted,#888)}' +
       '.bs-st-c{position:relative;padding:12px 14px 14px;border:1px solid var(--bs-border,#D9E0E7);border-radius:14px;min-width:0}' +
       '.bs-st-c>header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:22px;margin-bottom:8px}.bs-st-c h4{margin:0;font-size:12.5px;font-weight:500;color:var(--bs-muted,#888)}' +
       '.bs-st-row1{display:grid;grid-template-columns:1.25fr 1fr .85fr;gap:12px;margin-bottom:12px}.bs-st-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}' +
@@ -4078,7 +4156,7 @@
       '.bs-sales-row{display:grid;grid-template-columns:1fr auto auto 24px;gap:2px 10px;padding:8px 10px;border:1px solid var(--bs-border,#D9E0E7);border-radius:9px;cursor:pointer}' +
       '.bs-sales-row:hover{border-color:var(--bs-accent,#3b82f6)}' +
       '.bs-mop{display:inline-block;margin-left:6px;padding:0 7px;border-radius:6px;font-size:10.5px;line-height:16px;font-weight:600;text-decoration:none;vertical-align:2px;color:#fff;background:#8a94a6}' +
-      '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
+      '.bs-mop[data-m="Бес"]{background:#e04848}.bs-mop[data-m="Лиза"]{background:#7950c5}.bs-mop[data-m="Даша"]{background:#f2b705;color:#3a2a00}.bs-mop[data-m="Миша"]{background:#2f9e44}.bs-mop[data-m="Ксюша"]{background:#e64990}' +
       '.bs-sales-row span{grid-column:1;font-size:12px;color:var(--bs-muted,#888)}.bs-sales-row em{grid-row:1;grid-column:2;font-style:normal;font-weight:600}' +
       '.bs-sales-row .bs-sales-sh{grid-column:3;grid-row:1/span 2;align-self:center;justify-self:stretch;min-width:84px;text-align:center;box-sizing:border-box;height:22px!important;min-height:0!important;margin:0!important;padding:0 9px!important;border:1px solid var(--bs-accent,#3b82f6);border-radius:20px;background:none;color:var(--bs-accent,#3b82f6);font:inherit;font-size:11px!important;line-height:20px!important;font-weight:500;cursor:pointer;white-space:nowrap}' +
       '.bs-sales-row button.bs-sales-sh:hover{background:var(--bs-accent,#3b82f6);color:#fff}.bs-sales-row .bs-sales-sh:disabled{opacity:.6;cursor:default}' +
