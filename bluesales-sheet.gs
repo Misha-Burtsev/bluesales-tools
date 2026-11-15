@@ -5,7 +5,8 @@
 //
 // Что делает: дописывает продажи в лист продаж – только столбцы, которые заполняются руками
 // (A продукт, B 1 предмет/комбо, E ссылка на чат, F месяц/год, G сумма оплаты, I почта, K число менеджеров, O дата).
-// Формулы (C, D, H, J, L, N) не трогает. День в таблице – это строки от даты в O до следующей даты,
+// Формулы продажи (C, D, H, J, L) берёт из шаблона строки. Формулы дневного итога в N поддерживает, если на листе есть такой шаблон.
+// День в таблице – это строки от даты в O до следующей даты,
 // поэтому продажа за день, который уже есть, встаёт в конец этого дня, а новый день – по порядку дат.
 // Одну и ту же продажу (тот же чат и сумма на этом листе, в том числе внесённую руками) второй раз не добавляет.
 // Для «Истории» отдаёт строки оплат за месяцы периода и премию: N у первой строки дня (где дата в O) – за день, N1 – за месяц,
@@ -21,7 +22,7 @@
 
 const COL = { name: 1, kind: 2, link: 5, pay: 6, sum: 7, email: 9, mops: 11, date: 15 };
 const WIDTH = 15;   // A…O – строки продаж; правее (справочник продуктов) не трогаем
-const PREM = 14;    // N – премия: N1 за месяц, в строке с датой – за день (формулы, только читаем)
+const PREM = 14;    // N – премия: N1 за месяц, в строке с датой – за день
 const MONTH_NAMES = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
 const MONTHS = ['январ', 'феврал', 'март', 'апрел', 'ма', 'июн', 'июл', 'август', 'сентябр', 'октябр', 'ноябр', 'декабр'];
 
@@ -240,6 +241,47 @@ function dmOf(v) {
   return v instanceof Date ? z(v.getDate()) + '.' + z(v.getMonth() + 1) : String(v || '').slice(0, 5);
 }
 
+// Копируем формулы и оформление продажи отдельно от дневного итога.
+function copySaleRow(sh, from, to) {
+  sh.getRange(from, 1, 1, PREM - 1).copyTo(sh.getRange(to, 1, 1, PREM - 1));
+  sh.getRange(from, COL.date).copyTo(sh.getRange(to, COL.date));
+  Object.keys(COL).forEach(k => sh.getRange(to, COL[k]).clearContent());
+}
+
+// Только шаблон дневной суммы по L между отметками в O. Сохраняем язык и разделители исходной формулы.
+function dayTotalFormula(formula, row) {
+  const head = /^(=(?:IF|ЕСЛИ)\()O\d+(=""([;,])""\3(?:SUM|СУММ)\()L\d+(:(INDEX|ИНДЕКС)\(L:L\3)/i.exec(formula);
+  const rowFn = /\bROW\(\)|СТРОКА\(\)/i.exec(formula);
+  const rowsFn = /(?:ROWS|ЧСТРОК)\(L:L\)/i.exec(formula);
+  if (!head || !rowFn || !rowsFn) return null;
+  const [, begin, guard, sep, sumRange, index] = head, tail = formula.slice(head[0].length);
+  const legacy = new RegExp('(' + index + '\\()O\\d+:O(?=<>""' + sep + '0\\))', 'i');
+  // Номер начала диапазона вычисляется от своей строки: при вставке Sheets не сможет его сдвинуть.
+  const scan = index + '(O:O' + sep + rowFn[0] + '+1):' + index + '(O:O' + sep + rowsFn[0].replace(/L:L/i, 'O:O') + ')';
+  if (!legacy.test(tail) && !tail.includes(index + '(' + scan + '<>""' + sep + '0)')) return null;
+  return begin + 'O' + row + guard + 'L' + row + sumRange + tail.replace(legacy, (_, prefix) => prefix + scan);
+}
+
+function updateDayTotals(sh, dates, newDayRow) {
+  const formulas = sh.getRange(2, PREM, dates.length - 1, 1).getFormulas();
+  let nearest = Infinity, template = null;
+  formulas.forEach(([original], i) => {
+    const row = i + 2;
+    if (!original) return;
+    const updated = dayTotalFormula(original, row);
+    if (!updated) return;
+    if (dates[row - 1] && updated !== original) sh.getRange(row, PREM).setFormula(updated);
+    if (newDayRow && Math.abs(row - newDayRow) < nearest) {
+      nearest = Math.abs(row - newDayRow);
+      template = original;
+    }
+  });
+  if (template) {
+    const cell = sh.getRange(newDayRow, PREM);
+    if (cell.isBlank()) cell.setFormula(dayTotalFormula(template, newDayRow));
+  }
+}
+
 function addSale(ss, s) {
   const got = {}, dup = findSale(ss, s, got);
   if (dup && dup.st === 'dup') return dup;
@@ -253,13 +295,14 @@ function addSale(ss, s) {
     else sh.getRange(row, 1, 1, WIDTH).insertCells(SpreadsheetApp.Dimension.ROWS);
     // формулы, выпадашки и оформление – из соседней строки с продажей
     const tpl = row > 2 ? row - 1 : row + 1;
-    sh.getRange(tpl, 1, 1, WIDTH).copyTo(sh.getRange(row, 1, 1, WIDTH));
-    Object.keys(COL).forEach(k => sh.getRange(row, COL[k]).clearContent());
+    copySaleRow(sh, tpl, row);
   } else if (row > 2 && !sh.getRange(row, 12).getFormula() && sh.getRange(row - 1, 12).getFormula()) {
     // заготовленные строки с формулами кончились – берём формулы из строки выше
-    sh.getRange(row - 1, 1, 1, WIDTH).copyTo(sh.getRange(row, 1, 1, WIDTH));
-    Object.keys(COL).forEach(k => sh.getRange(row, COL[k]).clearContent());
+    copySaleRow(sh, row - 1, row);
   }
+  if (pl.insert) O.splice(row - 1, 0, null);
+  if (pl.date) O[row - 1] = key;
+  updateDayTotals(sh, O, pl.date ? row : 0);
   const set = (k, v) => sh.getRange(row, COL[k]).setValue(v);
   set('name', s.name);
   set('kind', s.kind);
