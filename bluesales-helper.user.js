@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.63.4
+// @version      1.63.5
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -2633,7 +2633,7 @@
       list.sort((a, b) => dmyDate(b.d) - dmyDate(a.d) || b.end - a.end);
       // у дня: чего нет в таблице, что там записано по-другому, что есть только там; премия за день – у первой смены даты
       // imp – сколько оплат «только в таблице» можно забрать (в идущую смену не добавляем)
-      const cnt = { miss: 0, bad: 0, only: 0, imp: 0 }, given = new Set(), givenT = new Set();
+      const cnt = { miss: 0, bad: 0, only: 0, imp: 0, exp: 0 }, given = new Set(), givenT = new Set();
       // Дни из таблицы отдела, которых ещё нет в истории.
       const team = teamOn() && teamTab && teamTab.days ? teamTab.days : null;
       const fresh = team ? teamMissingDays(team, histGet(), inR) : [];
@@ -2642,11 +2642,11 @@
         given.add(e.d);
         if (firstT) givenT.add(e.d);
         const on = tab && ms.has(ymOf(e.d)), only = first && onlyBy[e.d] || [];
-        const xs = on && !e.now ? e.sales.map((x, si) => ({ x, k: e.hi + ':' + si })).filter(o => toSheet(o.x)) : [];
-        const o = { only, on, team: firstT && team ? team[e.d] : null, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
-          miss: xs.filter(o => !tm.pair.has(o.k)).length, bad: xs.filter(o => tm.pair.has(o.k) && shBad(o.x)).length, any: xs.length + only.length };
+        const statuses = on ? histSheetSales(e, tm.pair) : [];
+        const o = { only, on, statuses, team: firstT && team ? team[e.d] : null, prem: first && tab && tab.days[e.d] != null ? tab.days[e.d] : null,
+          miss: statuses.filter(st => st === 'miss').length, bad: statuses.filter(st => st === 'bad').length, any: statuses.filter(Boolean).length + only.length };
         cnt.miss += o.miss; cnt.bad += o.bad; cnt.only += only.length;
-        if (!e.now) cnt.imp += only.length;
+        if (!e.now) { cnt.imp += only.length; cnt.exp += o.miss; }
         return o;
       });
       const prem = tab ? Object.keys(tab.days).filter(inR).reduce((a, d) => a + tab.days[d], 0) : null;
@@ -2685,7 +2685,7 @@
             (e.now || e.tab ? '<s></s>' : '<i class="bs-hist-del" title="Удалить смену из истории">×</i>') +
             '<div class="bs-hist-sales">' + (e.tab ? '' : histRepHtml(e.rep) + (e.sales.length ? e.sales.map((x, si) =>
               '<div class="bs-hist-s' + (x.cnt === false ? ' bs-hist-other' : '') + '" ' + (e.now ? 'data-id="' + x.id + '"' : 'data-si="' + si + '"') + ' title="Открыть и поправить"><span>' + esc(x.who || x.fio || 'чат ' + x.dlg) + ' – ' + esc(x.name) + '</span><span>' + rub(saleTotal(x)) + ' ₽ · ' + (x.cnt === false ? 'не моя' : frac(x.share)) + premTag(x) + '</span>' +
-              (e.now || !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице записано по-другому: ' + esc(shDiff(x).join('; ')) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
+              (e.now ? histCurrentSheetLabel(f.statuses[si]) : !sheetOn ? '' : !toSheet(x) ? '<b class="bs-hist-sh"></b>' : shBad(x) ? '<button data-a="sheetfix" data-si="' + si + '" class="bs-hist-sh bs-warn" title="В таблице записано по-другому: ' + esc(shDiff(x).join('; ')) + '. Нажми, чтобы исправить в таблице">↻ табл.</button>' :
                 x.sh ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' :
                 x.shAlso ? '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh bs-warn" title="Этой продажи нет в таблице, но у этого человека там уже есть оплата (' + esc(x.shAlso) + ') – проверь, не ошибка ли. Нажми, чтобы отправить">⚠ в табл.</button>' :
                 '<button data-a="sheet1" data-si="' + si + '" class="bs-hist-sh" title="Этой продажи нет в Google Таблице – отправить только её">+ в табл.</button>') +
@@ -3281,6 +3281,20 @@
     if (res.currentChanged) salesSet(current);
     return res;
   }
+  function histSheetSales(e, pair) {
+    const shift = e.now ? 'now' : e.hi;
+    return e.sales.map((x, si) => {
+      if (!toSheet(x)) return null;
+      const row = pair.get(shift + ':' + si);
+      if (!row) return 'miss';
+      return shBad({ ...x, sh: 1, shT: shTab(row) }) ? 'bad' : 'ok';
+    });
+  }
+  function histCurrentSheetLabel(status) {
+    if (status === 'miss') return '<b class="bs-hist-sh bs-warn" title="Этой продажи нет в Google Таблице. Отправить её можно на вкладке «Сегодня»">нет в табл.</b>';
+    if (status === 'bad') return '<b class="bs-hist-sh bs-warn" title="В таблице записана другая сумма, почта или доля менеджеров">≠ табл.</b>';
+    return status === 'ok' ? '<b class="bs-hist-sh" title="Эта продажа есть в Google Таблице">✓ табл.</b>' : '';
+  }
   // маленькие иконки линией – вместо смайликов
   const ico = (d, n) => '<svg viewBox="0 0 24 24" width="' + (n || 14) + '" height="' + (n || 14) + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + d + '</svg>';
   const ICO = { box: '<path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/>', grid: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>',
@@ -3306,7 +3320,7 @@
       const bad = [cnt.miss && 'не отправлено ' + cnt.miss, cnt.bad && 'расходится ' + cnt.bad, cnt.only && 'только в таблице ' + cnt.only].filter(Boolean);
       mine = syncRow('Своя таблица', bad.length || nos.length ? 'warn' : 'ok', (bad.length ? bad.join(' · ') : 'всё сходится') + (nos.length ? ' · нет листа за ' + nos.join(', ') : ''),
         (cnt.imp ? '<button data-a="tabimp" title="Все оплаты за период, которых нет в помощнике, – в историю, каждую в смену своего дня">Забрать ' + cnt.imp + '</button>' : '') +
-        (cnt.miss ? '<button data-a="tabexp" title="Все продажи за период, которых нет в таблице, – в таблицу">Отправить ' + cnt.miss + '</button>' : ''));
+        (cnt.exp ? '<button data-a="tabexp" title="Отправить продажи закрытых смен за период, которых нет в таблице">Отправить ' + cnt.exp + '</button>' : ''));
     }
     return '<div class="bs-sync' + (sheetBusy || teamBusy ? ' busy' : '') + '"><div class="bs-sync-l">' + mine + (teamOn() ? teamRow(fresh) : '') + '</div>' +
       (prem ? '<div class="bs-sync-p">' + prem + '</div>' : '') +
@@ -4057,7 +4071,7 @@
       '.bs-chip[data-st=ok]::before{background:#22a55a}.bs-chip[data-st=warn]::before{background:#f59e0b}.bs-chip[data-st=err]::before{background:#e04848}.bs-chip[data-st=warn]{color:#b45309}' +
       '.bs-hist-mv{display:none;align-items:center;gap:6px;margin-top:6px!important;font-size:12px;color:var(--bs-muted,#888)}.bs-hist-act.mv+.bs-hist-mv{display:flex}.bs-hist-mv span{flex:1}#bsSale .bs-hist-mv input{padding:3px 6px;font-size:12px}' +
       '.bs-hist-del,.bs-hist-sdel{font-style:normal;text-align:center;color:var(--bs-muted,#888);border-radius:6px;cursor:pointer;opacity:0}.bs-hist-sdel{width:18px}' +
-      '.bs-hist-sales .bs-hist-sh{flex:none;box-sizing:border-box;width:64px;font-size:11px;font-weight:400;text-align:center;white-space:nowrap}b.bs-hist-sh{color:#16a34a}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}button.bs-hist-sh.bs-warn{border-color:#f59e0b;color:#d97706}' +
+      '.bs-hist-sales .bs-hist-sh{flex:none;box-sizing:border-box;width:64px;font-size:11px;font-weight:400;text-align:center;white-space:nowrap}b.bs-hist-sh{color:#16a34a}b.bs-hist-sh.bs-warn{color:#d97706}button.bs-hist-sh{padding:1px 7px;border:1px dashed var(--bs-border,#D9E0E7);border-radius:6px;background:none;color:var(--bs-muted,#888);cursor:pointer}button.bs-hist-sh:hover{border-color:var(--bs-accent,#3b82f6);color:var(--bs-accent,#3b82f6)}button.bs-hist-sh.bs-warn{border-color:#f59e0b;color:#d97706}' +
       '.bs-hist-row:hover>.bs-hist-del,.bs-hist-sales div:hover .bs-hist-sdel{opacity:1}.bs-hist-del:hover,.bs-hist-sdel:hover{color:#e04848;background:rgba(224,72,72,.12)}' +
       '#bsSale.bs-hedit{width:440px}.bs-hedit-2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bs-hedit-chat{align-self:flex-start;font-size:12px;color:var(--bs-accent,#3b82f6);text-decoration:none}' +
       '.bs-hist-s{cursor:pointer;margin:0 -6px;padding:2px 6px;border-radius:6px}.bs-hist-s:hover{background:var(--bs-hover,rgba(0,0,0,.06))}' +
