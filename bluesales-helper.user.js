@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         BlueSales – помощник
 // @namespace    bluesales-sounds
-// @version      1.63.5
+// @version      1.63.6
 // @description  Звуки, избранные смайлики и поиск по ним, переключатель темы, таймер «клиент ждёт», черновики по чатам, поиск по быстрым фразам, предпросмотр чата без прочтения в мессенджере BlueSales.
 // @match        https://bluesales.ru/*
 // @run-at       document-start
@@ -1727,13 +1727,15 @@
     const i = document.querySelector('#bsRep input[data-k="sum"]');
     if (i) { i.value = +repSaved().sum || 0; i.dispatchEvent(new Event('input', { bubbles: true })); }
   }
-  // название тарифа для отчёта: своё из 4-го столбца или собранное из слов; у брони – месяц покупки
+  // Для брони подставляем текущий месяц, если в названии не указан месяц тарифа.
   function tarName(t) {
     const tags = tarTags(t.k).tags;
     const subj = tags.has('комбо') ? 'Математика + Русский язык' : tags.has('баз') ? 'Базовая математика' : tags.has('рус') ? 'Русский язык' : tags.has('мат') ? 'Математика' : '';
     const cur = tags.has('сам') ? ' (самоподготовка)' : tags.has('кур') ? ' (с куратором)' : '';
     const name = t.n || ('Годовой курс ЕГЭ' + (subj ? ' | ' + subj + cur : ''));
-    return name + (tags.has('бронь') ? ' | ' + MONTHS[new Date().getMonth()] : '');
+    const namedMonth = name.slice(name.lastIndexOf('|') + 1).trim().toLowerCase();
+    if (tags.has('бронь') && !MONTHS.includes(namedMonth)) return name + ' | ' + MONTHS[new Date().getMonth()];
+    return name;
   }
   // теги клиента из карточки справа (запасной вариант – теги активного чата в списке)
   function clientTags() {
